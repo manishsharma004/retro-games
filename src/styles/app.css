@@ -474,15 +474,17 @@ button {
 }
 
 .play-canvas {
-  /* CSS fills the stage for display. lockEmulatorCanvas reports a fixed
-     clientWidth/Height to RetroArch so it does not mirror the stage size into
-     the backing store (which caused the resize ↔ OOB loop). */
+  /* Fixed layout size matching the emulator buffer. Visual fill is done with
+     CSS transform in lockEmulatorCanvas — NOT width/height 100%, which made
+     ResizeObserver report the stage size (1026×769) and crash WASM. */
   position: absolute;
-  inset: 0;
-  width: 100% !important;
-  height: 100% !important;
+  left: 50%;
+  top: 50%;
+  width: 800px;
+  height: 600px;
   display: block;
-  object-fit: contain;
+  transform: translate(-50%, -50%);
+  transform-origin: center center;
   image-rendering: pixelated;
   background: #000;
 }

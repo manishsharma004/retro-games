@@ -1,29 +1,49 @@
 import type { Nostalgist } from 'nostalgist'
 
-/** Fixed backing-store resolution reported to RetroArch / Emscripten. */
+/** Fixed backing-store + CSS layout size for the emulator canvas. */
 export const CANVAS_BUFFER_WIDTH = 800
 export const CANVAS_BUFFER_HEIGHT = 600
 
+type ModuleCanvas = {
+  setCanvasSize?: (width: number, height: number) => void
+  canvas?: HTMLCanvasElement
+  _emscripten_set_canvas_element_size?: (target: unknown, w: number, h: number) => number
+  _emscripten_set_canvas_size?: (w: number, h: number) => void
+}
+
 /**
- * Stop RetroArch's canvas ResizeObserver loop.
- *
- * RA does the equivalent of `canvas.width = canvas.clientWidth` whenever the
- * canvas layout size changes. With CSS `width/height: 100%` that equals the
- * stage size (e.g. 1026×769), so every setCanvasSize mutates state, re-fires
- * the observer, logs "Setting real canvas size", and eventually OOBs WASM.
- *
- * Keep CSS 100% for visuals, but report a fixed client/offset size to RA and
- * ignore further buffer resize requests.
+ * Install BEFORE Nostalgist.launch so RetroArch cannot observe real stage size.
+ * Filters ResizeObserver notifications for the emulator canvas.
+ */
+export function installCanvasResizeObserverGuard(canvas: HTMLCanvasElement): () => void {
+  const OriginalRO = window.ResizeObserver
+  window.ResizeObserver = class GuardedResizeObserver extends OriginalRO {
+    constructor(callback: ResizeObserverCallback) {
+      super((entries, observer) => {
+        const filtered = entries.filter((entry) => entry.target !== canvas)
+        if (filtered.length === 0) return
+        callback(filtered, observer)
+      })
+    }
+  } as typeof ResizeObserver
+
+  return () => {
+    window.ResizeObserver = OriginalRO
+  }
+}
+
+/**
+ * After launch: freeze buffer size, use fixed CSS px (not 100%), scale with
+ * transform so visuals fill the stage without changing layout metrics RA reads.
  */
 export function lockEmulatorCanvas(
   nostalgist: Nostalgist,
   canvas: HTMLCanvasElement,
-  _stage: HTMLElement,
+  stage: HTMLElement,
   bufferWidth = CANVAS_BUFFER_WIDTH,
   bufferHeight = CANVAS_BUFFER_HEIGHT,
 ): () => void {
   const cleanups: Array<() => void> = []
-
   const nativeWidth = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'width')
   const nativeHeight = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'height')
 
@@ -36,12 +56,17 @@ export function lockEmulatorCanvas(
     }
   }
 
-  // 1) Set the real backing store BEFORE freezing accessors.
-  try {
-    const Module = nostalgist.getEmscriptenModule() as {
-      setCanvasSize?: (width: number, height: number) => void
+  const Module = (() => {
+    try {
+      return nostalgist.getEmscriptenModule() as ModuleCanvas
+    } catch {
+      return null
     }
-    if (typeof Module.setCanvasSize === 'function') {
+  })()
+
+  // Initial buffer via Emscripten if available.
+  try {
+    if (typeof Module?.setCanvasSize === 'function') {
       Module.setCanvasSize(bufferWidth, bufferHeight)
     } else {
       writeBufferNative()
@@ -50,42 +75,40 @@ export function lockEmulatorCanvas(
     writeBufferNative()
   }
 
-  // 2) Lie about layout metrics so RA always targets the same size.
-  for (const [prop, value] of [
-    ['clientWidth', bufferWidth],
-    ['clientHeight', bufferHeight],
-    ['offsetWidth', bufferWidth],
-    ['offsetHeight', bufferHeight],
-  ] as const) {
-    try {
-      Object.defineProperty(canvas, prop, {
-        configurable: true,
-        enumerable: true,
-        get: () => value,
-      })
-      cleanups.push(() => {
-        try {
-          delete (canvas as unknown as Record<string, unknown>)[prop]
-        } catch {
-          // ignore
-        }
-      })
-    } catch {
-      // ignore
-    }
-  }
+  // CRITICAL: real CSS layout size must be the buffer size — NOT 100% of stage.
+  // ResizeObserver contentRect follows layout, not our clientWidth overrides.
+  canvas.style.setProperty('width', `${bufferWidth}px`, 'important')
+  canvas.style.setProperty('height', `${bufferHeight}px`, 'important')
+  canvas.style.setProperty('max-width', 'none', 'important')
+  canvas.style.setProperty('max-height', 'none', 'important')
+  canvas.style.setProperty('position', 'absolute', 'important')
+  canvas.style.setProperty('inset', 'auto', 'important')
+  canvas.style.setProperty('left', '50%', 'important')
+  canvas.style.setProperty('top', '50%', 'important')
+  canvas.style.setProperty('right', 'auto', 'important')
+  canvas.style.setProperty('bottom', 'auto', 'important')
+  canvas.style.setProperty('object-fit', 'fill', 'important')
+  canvas.style.setProperty('transform-origin', 'center center', 'important')
 
-  // 3) Stable getBoundingClientRect size (some shells use this instead of clientWidth).
-  const protoGBCR = Element.prototype.getBoundingClientRect
-  canvas.getBoundingClientRect = () => {
-    const r = protoGBCR.call(canvas)
-    return new DOMRect(r.x, r.y, bufferWidth, bufferHeight)
+  // Scale visually; transform does not change clientWidth / RO contentRect.
+  const fit = () => {
+    const rect = stage.getBoundingClientRect()
+    if (rect.width < 1 || rect.height < 1) return
+    const scale = Math.min(rect.width / bufferWidth, rect.height / bufferHeight)
+    canvas.style.setProperty(
+      'transform',
+      `translate(-50%, -50%) scale(${scale})`,
+      'important',
+    )
   }
-  cleanups.push(() => {
-    delete (canvas as unknown as { getBoundingClientRect?: unknown }).getBoundingClientRect
+  fit()
+  const stageRo = new ResizeObserver(() => {
+    requestAnimationFrame(fit)
   })
+  stageRo.observe(stage)
+  cleanups.push(() => stageRo.disconnect())
 
-  // 4) Freeze width/height on this canvas instance (RA direct writes become no-ops).
+  // Freeze attribute accessors.
   if (nativeWidth?.set && nativeHeight?.set) {
     try {
       Object.defineProperty(canvas, 'width', {
@@ -93,7 +116,7 @@ export function lockEmulatorCanvas(
         enumerable: true,
         get: () => bufferWidth,
         set: () => {
-          /* ignore */
+          /* ignore RA writes */
         },
       })
       Object.defineProperty(canvas, 'height', {
@@ -123,53 +146,60 @@ export function lockEmulatorCanvas(
     }
   }
 
-  // 5) Make Module.setCanvasSize ignore stage-sized requests.
-  try {
-    const Module = nostalgist.getEmscriptenModule() as {
-      setCanvasSize?: (width: number, height: number) => void
-    }
-    if (typeof Module.setCanvasSize === 'function') {
-      const original = Module.setCanvasSize.bind(Module)
-      Module.setCanvasSize = (width: number, height: number) => {
-        if (width === bufferWidth && height === bufferHeight) {
-          try {
-            // Prefer native setters so instance width traps do not block us.
-            writeBufferNative()
-            original(bufferWidth, bufferHeight)
-          } catch {
-            writeBufferNative()
-          }
+  // Clamp Module.setCanvasSize.
+  if (Module && typeof Module.setCanvasSize === 'function') {
+    const original = Module.setCanvasSize.bind(Module)
+    Module.setCanvasSize = (width: number, height: number) => {
+      if (width === bufferWidth && height === bufferHeight) {
+        try {
+          writeBufferNative()
+          original(bufferWidth, bufferHeight)
+        } catch {
+          writeBufferNative()
         }
       }
-      cleanups.push(() => {
-        Module.setCanvasSize = original
-      })
+      // Drop stage-sized requests (1026×769 etc.).
     }
-  } catch {
-    // ignore
+    cleanups.push(() => {
+      Module.setCanvasSize = original
+    })
   }
 
-  // 6) Block new ResizeObserver.observe(canvas).
-  const ROProto = ResizeObserver.prototype
-  const originalObserve = ROProto.observe
-  ROProto.observe = function patchedObserve(
-    this: ResizeObserver,
-    target: Element,
-    options?: ResizeObserverOptions,
-  ) {
-    if (target === canvas) return
-    return originalObserve.call(this, target, options)
+  // Clamp low-level Emscripten canvas size helpers if present.
+  if (Module && typeof Module._emscripten_set_canvas_element_size === 'function') {
+    const original = Module._emscripten_set_canvas_element_size.bind(Module)
+    Module._emscripten_set_canvas_element_size = (_target, w, h) => {
+      if (w === bufferWidth && h === bufferHeight) {
+        try {
+          return original(_target, bufferWidth, bufferHeight)
+        } catch {
+          return 0
+        }
+      }
+      return 0
+    }
+    cleanups.push(() => {
+      Module._emscripten_set_canvas_element_size = original
+    })
   }
-  cleanups.push(() => {
-    ROProto.observe = originalObserve
-  })
+  if (Module && typeof Module._emscripten_set_canvas_size === 'function') {
+    const original = Module._emscripten_set_canvas_size.bind(Module)
+    Module._emscripten_set_canvas_size = (w, h) => {
+      if (w === bufferWidth && h === bufferHeight) {
+        try {
+          original(bufferWidth, bufferHeight)
+        } catch {
+          // ignore
+        }
+      }
+    }
+    cleanups.push(() => {
+      Module._emscripten_set_canvas_size = original
+    })
+  }
 
-  // Visual fill from CSS.
-  canvas.style.setProperty('width', '100%', 'important')
-  canvas.style.setProperty('height', '100%', 'important')
-  canvas.style.setProperty('position', 'absolute', 'important')
-  canvas.style.setProperty('inset', '0', 'important')
-  canvas.style.setProperty('object-fit', 'contain', 'important')
+  // Re-assert native buffer after traps are installed.
+  writeBufferNative()
 
   return () => {
     for (const fn of cleanups.reverse()) {

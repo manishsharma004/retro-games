@@ -316,6 +316,7 @@ export function PeerLobby({
         )}
 
         {(phase === 'connecting' ||
+          phase === 'linked' ||
           phase === 'transferring' ||
           phase === 'ready-wait' ||
           phase === 'playing') && (
@@ -323,13 +324,20 @@ export function PeerLobby({
             <p>
               Role: <strong>{role ?? '—'}</strong> · Seat P{seat ?? '—'} · Link:{' '}
               <strong>{connectionState}</strong>
+              {phase === 'connecting' && connectionState !== 'connected' ? ' (establishing…)…' : ''}
             </p>
+            {phase === 'connecting' && connectionState !== 'connected' && (
+              <p className="peer-lobby__hint">
+                Establishing WebRTC… keep both devices on the same Wi‑Fi/hotspot. If this hangs,
+                disconnect and exchange a fresh offer/answer.
+              </p>
+            )}
             {phase === 'transferring' && (
               <p>
                 Transferring {transfer.kind ?? 'data'}… {transferPct}%
               </p>
             )}
-            {phase === 'connecting' && role === 'host' && connectionState === 'connected' && (
+            {phase === 'linked' && role === 'host' && (
               <>
                 {canHostShareGame ? (
                   <button
@@ -342,13 +350,13 @@ export function PeerLobby({
                   </button>
                 ) : (
                   <p className="peer-lobby__hint">
-                    Connected. Load a ROM on this device, then open 2P again to share it.
+                    Linked. Load a ROM on this device, then share it with the guest.
                   </p>
                 )}
               </>
             )}
-            {phase === 'connecting' && role === 'guest' && connectionState === 'connected' && (
-              <p className="peer-lobby__hint">Connected — waiting for host to share the ROM…</p>
+            {phase === 'linked' && role === 'guest' && (
+              <p className="peer-lobby__hint">Linked — waiting for host to share the ROM…</p>
             )}
             {(phase === 'ready-wait' || phase === 'playing') &&
               role === 'host' &&

@@ -15,6 +15,7 @@ export type PeerPhase =
   | 'host-offer'
   | 'guest-answer'
   | 'connecting'
+  | 'linked'
   | 'transferring'
   | 'ready-wait'
   | 'playing'
@@ -44,6 +45,8 @@ interface UsePeerSessionOptions {
   onResyncState?: (state: Uint8Array) => void | Promise<void>
   onResyncRequest?: () => void
   onPeerError?: (message: string) => void
+  /** Fired once the DataChannel is open (WebRTC link ready). */
+  onLinked?: () => void
 }
 
 export interface UsePeerSessionResult {
@@ -127,12 +130,13 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       onState: (state) => {
         setConnectionState(state)
         if (state === 'connected') {
+          setError(null)
           if (
             phaseRef.current !== 'playing' &&
             phaseRef.current !== 'ready-wait' &&
             phaseRef.current !== 'transferring'
           ) {
-            updatePhase('connecting')
+            updatePhase('linked')
           }
           window.setTimeout(() => {
             const r = roleRef.current
@@ -144,16 +148,28 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
                 // ignore
               }
             }
+            optionsRef.current.onLinked?.()
           }, 0)
         } else if (state === 'failed') {
           updatePhase('error')
           setError((prev) => prev ?? 'Peer connection failed')
         } else if (state === 'awaiting-answer') {
-          // Keep host-offer / guest-answer UI — do not treat ICE noise as failure.
           if (roleRef.current === 'host' && phaseRef.current === 'connecting') {
             updatePhase('host-offer')
           }
+        } else if (state === 'connecting') {
+          if (
+            phaseRef.current === 'host-offer' ||
+            phaseRef.current === 'guest-answer' ||
+            phaseRef.current === 'idle'
+          ) {
+            updatePhase('connecting')
+          }
         }
+      },
+      onSignalRefresh: (signal) => {
+        setLocalSignal(signal)
+        if (roleRef.current === 'guest') updatePhase('guest-answer')
       },
       onError: (err) => {
         setError(err.message)

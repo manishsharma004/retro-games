@@ -122,10 +122,22 @@ export default function App() {
     onGo: handleGo,
     onResyncState: handleResyncState,
     onResyncRequest: () => resyncRequestHandlerRef.current(),
+    onLinked: () => {
+      // Host: auto-share the loaded ROM so the session doesn't sit in "linked".
+      window.setTimeout(() => {
+        if (peerRef.current.role !== 'host') return
+        if (peerRef.current.phase !== 'linked') return
+        void shareGameWithPeerRef.current().catch(() => {
+          // Manual share CTA remains in the lobby if auto-share cannot run yet.
+        })
+      }, 50)
+    },
   })
 
   const peerRef = useRef(peer)
   peerRef.current = peer
+
+  const shareGameWithPeerRef = useRef<() => Promise<void>>(async () => {})
 
   resyncRequestHandlerRef.current = () => {
     void (async () => {
@@ -139,7 +151,7 @@ export default function App() {
 
   const localSeat = peer.seat ?? 1
   const peerPlaying = peer.phase === 'playing'
-  const peerLinked = peer.role !== null && peer.phase !== 'idle' && peer.phase !== 'error'
+  const peerActive = peer.role !== null && peer.phase !== 'idle' && peer.phase !== 'error'
 
   const onLocalPress = useCallback(
     (button: string) => {
@@ -188,7 +200,7 @@ export default function App() {
   useGamepadControls({
     enabled: inputEnabled,
     bindings: controllerBindings,
-    peerSeat: peerLinked ? localSeat : null,
+    peerSeat: peerActive ? localSeat : null,
     onPress: onPadPress,
     onRelease: onPadRelease,
   })
@@ -279,6 +291,8 @@ export default function App() {
       libraryFile: emu.game.libraryFile,
     })
   }, [emu, peer])
+
+  shareGameWithPeerRef.current = shareGameWithPeer
 
   return (
     <div className={`app ${isPlaying ? 'app--playing' : 'app--landing'}`}>
@@ -469,7 +483,7 @@ export default function App() {
         pads={pads}
         bindings={controllerBindings}
         onChange={setControllerBindings}
-        peerSeat={peerLinked ? localSeat : null}
+        peerSeat={peerActive ? localSeat : null}
       />
 
       <PeerLobby

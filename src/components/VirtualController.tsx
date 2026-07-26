@@ -1,0 +1,133 @@
+import { useCallback, useRef, type PointerEvent } from 'react'
+import type { SystemId } from '../lib/cores'
+
+type ButtonName =
+  | 'up'
+  | 'down'
+  | 'left'
+  | 'right'
+  | 'a'
+  | 'b'
+  | 'x'
+  | 'y'
+  | 'l'
+  | 'r'
+  | 'start'
+  | 'select'
+
+interface VirtualControllerProps {
+  system: SystemId
+  onPress: (button: string) => void
+  onRelease: (button: string) => void
+  visible: boolean
+}
+
+export function VirtualController({
+  system,
+  onPress,
+  onRelease,
+  visible,
+}: VirtualControllerProps) {
+  const active = useRef(new Set<string>())
+
+  const bind = useCallback(
+    (button: ButtonName) => ({
+      onPointerDown: (e: PointerEvent) => {
+        e.preventDefault()
+        ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+        if (!active.current.has(button)) {
+          active.current.add(button)
+          onPress(button)
+        }
+      },
+      onPointerUp: (e: PointerEvent) => {
+        e.preventDefault()
+        if (active.current.has(button)) {
+          active.current.delete(button)
+          onRelease(button)
+        }
+      },
+      onPointerCancel: () => {
+        if (active.current.has(button)) {
+          active.current.delete(button)
+          onRelease(button)
+        }
+      },
+    }),
+    [onPress, onRelease],
+  )
+
+  if (!visible) return null
+
+  const isSnes = system === 'snes'
+
+  return (
+    <div className="virtual-pad" aria-label="On-screen controller">
+      <div className="virtual-pad__shoulders">
+        {isSnes && (
+          <>
+            <button type="button" className="vp-btn vp-btn--shoulder" {...bind('l')}>
+              L
+            </button>
+            <button type="button" className="vp-btn vp-btn--shoulder" {...bind('r')}>
+              R
+            </button>
+          </>
+        )}
+      </div>
+
+      <div className="virtual-pad__main">
+        <div className="vp-dpad" role="group" aria-label="D-pad">
+          <button type="button" className="vp-btn vp-dpad__up" {...bind('up')} aria-label="Up" />
+          <button
+            type="button"
+            className="vp-btn vp-dpad__left"
+            {...bind('left')}
+            aria-label="Left"
+          />
+          <div className="vp-dpad__center" />
+          <button
+            type="button"
+            className="vp-btn vp-dpad__right"
+            {...bind('right')}
+            aria-label="Right"
+          />
+          <button
+            type="button"
+            className="vp-btn vp-dpad__down"
+            {...bind('down')}
+            aria-label="Down"
+          />
+        </div>
+
+        <div className="vp-meta">
+          <button type="button" className="vp-btn vp-btn--meta" {...bind('select')}>
+            Select
+          </button>
+          <button type="button" className="vp-btn vp-btn--meta" {...bind('start')}>
+            Start
+          </button>
+        </div>
+
+        <div className={`vp-actions ${isSnes ? 'vp-actions--snes' : 'vp-actions--nes'}`}>
+          {isSnes && (
+            <>
+              <button type="button" className="vp-btn vp-btn--face vp-btn--y" {...bind('y')}>
+                Y
+              </button>
+              <button type="button" className="vp-btn vp-btn--face vp-btn--x" {...bind('x')}>
+                X
+              </button>
+            </>
+          )}
+          <button type="button" className="vp-btn vp-btn--face vp-btn--b" {...bind('b')}>
+            B
+          </button>
+          <button type="button" className="vp-btn vp-btn--face vp-btn--a" {...bind('a')}>
+            A
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}

@@ -89,10 +89,10 @@ export function VirtualController({
       <div className="virtual-pad__shoulders">
         {isSnes && (
           <>
-            <button type="button" className="vp-btn vp-btn--shoulder" {...bind('l')}>
+            <button type="button" className="vp-btn vp-btn--shoulder" tabIndex={-1} {...bind('l')}>
               L
             </button>
-            <button type="button" className="vp-btn vp-btn--shoulder" {...bind('r')}>
+            <button type="button" className="vp-btn vp-btn--shoulder" tabIndex={-1} {...bind('r')}>
               R
             </button>
           </>
@@ -131,10 +131,10 @@ export function VirtualController({
         )}
 
         <div className="vp-meta">
-          <button type="button" className="vp-btn vp-btn--meta" {...bind('select')}>
+          <button type="button" className="vp-btn vp-btn--meta" tabIndex={-1} {...bind('select')}>
             Select
           </button>
-          <button type="button" className="vp-btn vp-btn--meta" {...bind('start')}>
+          <button type="button" className="vp-btn vp-btn--meta" tabIndex={-1} {...bind('start')}>
             Start
           </button>
         </div>
@@ -142,10 +142,10 @@ export function VirtualController({
         <div className={`vp-actions ${isSnes ? 'vp-actions--snes' : 'vp-actions--nes'}`}>
           {isSnes && (
             <>
-              <button type="button" className="vp-btn vp-btn--face vp-btn--y" {...bind('y')}>
+              <button type="button" className="vp-btn vp-btn--face vp-btn--y" tabIndex={-1} {...bind('y')}>
                 Y
               </button>
-              <button type="button" className="vp-btn vp-btn--face vp-btn--x" {...bind('x')}>
+              <button type="button" className="vp-btn vp-btn--face vp-btn--x" tabIndex={-1} {...bind('x')}>
                 X
               </button>
             </>

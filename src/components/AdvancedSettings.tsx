@@ -176,8 +176,8 @@ export function AdvancedSettings({
               />
             </label>
             <p className="settings-hint">
-              Overlay floats semi-transparent controls over the game so the full screen is used for
-              display.
+              Overlay floats semi-transparent controls over the game. Enabled automatically in
+              landscape orientation; you can also turn it on for portrait.
             </p>
             <label className="field">
               <span>Control size</span>

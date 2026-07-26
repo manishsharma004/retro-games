@@ -8,6 +8,8 @@ interface EmulatorScreenProps {
   status: string
   shellRef: RefObject<HTMLDivElement | null>
   isFullscreen?: boolean
+  /** When true, on-screen controls float over the stage (landscape / setting). */
+  padOverlay?: boolean
   children?: React.ReactNode
 }
 
@@ -17,15 +19,21 @@ export function EmulatorScreen({
   status,
   shellRef,
   isFullscreen,
+  padOverlay = false,
   children,
 }: EmulatorScreenProps) {
   const aspect = system ? SYSTEMS[system].aspectRatio : '4 / 3'
   const showPlaceholder = status === 'idle' || status === 'error'
 
   return (
-    <div className="play-shell" ref={shellRef}>
-      {/* Fullscreen: stage grows with the shell. Windowed: aspect-ratio box scales to fit. */}
-      <div className="play-stage" style={isFullscreen ? undefined : { aspectRatio: aspect }}>
+    <div
+      className={`play-shell${padOverlay ? ' play-shell--pad-overlay' : ''}`}
+      ref={shellRef}
+    >
+      <div
+        className={`play-stage${padOverlay ? ' play-stage--pad-overlay' : ''}`}
+        style={isFullscreen || padOverlay ? undefined : { aspectRatio: aspect }}
+      >
         <canvas
           id="canvas"
           ref={canvasRef}
@@ -44,8 +52,8 @@ export function EmulatorScreen({
             <p className="play-overlay__title">Paused</p>
           </div>
         )}
+        {children}
       </div>
-      {children}
     </div>
   )
 }

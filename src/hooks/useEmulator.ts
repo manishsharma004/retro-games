@@ -5,8 +5,6 @@ import {
   CANVAS_LAYOUT_HEIGHT,
   CANVAS_LAYOUT_WIDTH,
   canvasBackingStoreSize,
-  createCanvasSizeEmscriptenHooks,
-  installEmulatorPixelRatioGuard,
   lockEmulatorCanvas,
   prepareCanvasLayout,
 } from '../lib/canvasLock'
@@ -141,19 +139,12 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
         const current = settingsRef.current
         const system = SYSTEMS[pending.game.system]
         const stage = canvas.parentElement
+        const host = stage?.parentElement
 
-        // Fixed CSS layout + RO rewrite + clamp RA's canvas-dimension callback
-        // so C-side fb size stays 800×600 even when browser DPR is wild.
+        // Same recipe as the working smoke test: fixed 800×600 CSS + size.
+        // Scale the stage (not the canvas buffer) to fill the host.
         prepareCanvasLayout(canvas)
-        const removePixelGuard = installEmulatorPixelRatioGuard(
-          canvas,
-          CANVAS_LAYOUT_WIDTH,
-          CANVAS_LAYOUT_HEIGHT,
-        )
-        const backing = canvasBackingStoreSize(
-          CANVAS_LAYOUT_WIDTH,
-          CANVAS_LAYOUT_HEIGHT,
-        )
+        const backing = canvasBackingStoreSize()
 
         const nostalgist = await Nostalgist.launch({
           core: system.core,
@@ -165,42 +156,24 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
             width: `${CANVAS_LAYOUT_WIDTH}px`,
             height: `${CANVAS_LAYOUT_HEIGHT}px`,
             backgroundColor: '#000',
-            position: 'absolute',
-            left: '50%',
-            top: '50%',
             display: 'block',
+            position: 'static',
             imageRendering: current.videoSmooth ? 'auto' : 'pixelated',
           },
           shader: current.shader || undefined,
           cache: { core: true, shader: true },
           retroarchConfig: buildRetroarchConfig(current),
           retroarchCoreConfig: buildCoreConfig(pending.game.system, current),
-          emscriptenModule: createCanvasSizeEmscriptenHooks(
-            CANVAS_LAYOUT_WIDTH,
-            CANVAS_LAYOUT_HEIGHT,
-          ),
         })
 
         if (cancelled) {
-          removePixelGuard()
           nostalgist.exit({ removeCanvas: false })
           return
         }
 
         canvasStabilizeCleanupRef.current?.()
-        const unlock = stage
-          ? lockEmulatorCanvas(
-              nostalgist,
-              canvas,
-              stage,
-              CANVAS_LAYOUT_WIDTH,
-              CANVAS_LAYOUT_HEIGHT,
-            )
-          : () => {}
-        canvasStabilizeCleanupRef.current = () => {
-          unlock()
-          removePixelGuard()
-        }
+        canvasStabilizeCleanupRef.current =
+          stage && host ? lockEmulatorCanvas(nostalgist, canvas, stage, host) : null
 
         nostalgistRef.current = nostalgist
         if (pending.startPaused) {

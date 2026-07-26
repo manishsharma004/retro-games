@@ -449,18 +449,20 @@ button {
   justify-content: center;
 }
 
-.play-stage {
+/* Flexible viewport that the fixed 800×600 stage is scaled into. */
+.play-stage-host {
   position: relative;
+  flex: 1 1 auto;
   width: min(100%, calc((100dvh - 11rem) * 4 / 3));
   max-height: min(100%, calc(100dvh - 11rem));
+  min-height: 12rem;
+  display: grid;
+  place-items: center;
   background: #000;
-  flex-shrink: 0;
-  /* Explicit box so absolutely-positioned canvas cannot feed back into layout
-     when Emscripten/RetroArch mutates canvas width/height attributes. */
   overflow: hidden;
 }
 
-.play-shell:fullscreen .play-stage {
+.play-shell:fullscreen .play-stage-host {
   flex: 1 1 0;
   width: 100%;
   min-height: 0;
@@ -473,19 +475,21 @@ button {
   flex-shrink: 0;
 }
 
+/* Fixed emulator box — same metrics as the working smoke test. */
+.play-stage {
+  position: relative;
+  width: 800px;
+  height: 600px;
+  flex-shrink: 0;
+  background: #000;
+  overflow: hidden;
+  transform-origin: center center;
+}
+
 .play-canvas {
-  /* Fixed CSS *layout* size. RetroArch sets the WebGL backing store to
-     layout × devicePixelRatio (e.g. 800×600 @ 1.28dpr → 1026×769). Visual
-     fill is CSS transform in lockEmulatorCanvas — NOT width/height 100%,
-     which made ResizeObserver chase the stage and crash WASM. */
-  position: absolute;
-  left: 50%;
-  top: 50%;
   width: 800px;
   height: 600px;
   display: block;
-  transform: translate(-50%, -50%);
-  transform-origin: center center;
   image-rendering: pixelated;
   background: #000;
 }
@@ -885,7 +889,7 @@ button {
     margin-left: 0;
   }
 
-  .play-stage {
+  .play-stage-host {
     width: 100%;
     max-height: min(52dvh, calc(100vw * 3 / 4));
   }

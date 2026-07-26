@@ -14,13 +14,16 @@ export interface ActiveGame {
   name: string
   system: SystemId
   core: string
-  source: 'file' | 'demo' | 'library'
+  source: 'file' | 'demo' | 'library' | 'peer'
   file?: File
+  libraryFile?: string
 }
 
 interface PendingLaunch {
   game: ActiveGame
   rom: File | string
+  state?: Blob
+  startPaused?: boolean
 }
 
 export interface UseEmulatorResult {
@@ -31,6 +34,14 @@ export interface UseEmulatorResult {
   launchFile: (file: File) => void
   launchDemo: () => void
   launchLibrary: (entry: LibraryRom) => void
+  launchPeer: (opts: {
+    name: string
+    system: SystemId
+    rom: Blob
+    fileName: string
+    state: Blob
+    startPaused?: boolean
+  }) => void
   exit: () => void
   pause: () => void
   resume: () => void
@@ -38,9 +49,22 @@ export interface UseEmulatorResult {
   toggleFastForward: () => void
   saveState: () => Promise<void>
   loadState: () => Promise<void>
-  pressDown: (button: string) => void
-  pressUp: (button: string) => void
+  /** Capture current save-state Blob for peer wire (does not update local slot). */
+  exportStateBlob: () => Promise<Blob | null>
+  /** Apply a remote save-state Blob (peer resync). */
+  importStateBlob: (state: Blob) => Promise<void>
+  /** Read ROM bytes for the active game (file-backed launches only). */
+  getRomBytes: () => Promise<Uint8Array | null>
+  pressDown: (button: string, player?: number) => void
+  pressUp: (button: string, player?: number) => void
+  /** Inject remote seat presses without touching local ref-counts. */
+  remotePressDown: (button: string, player: number) => void
+  remotePressUp: (button: string, player: number) => void
   relaunchWithSettings: () => void
+}
+
+function pressKey(player: number, button: string): string {
+  return `${player}:${button}`
 }
 
 export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
@@ -50,6 +74,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
   const gameRef = useRef<ActiveGame | null>(null)
   const settingsRef = useRef(settings)
   // Ref-count presses so keyboard + on-screen pad can share a button.
+  // Keys are `${player}:${button}` so local seats stay independent.
   const pressCountsRef = useRef(new Map<string, number>())
   const stateIoBusyRef = useRef(false)
   const [status, setStatus] = useState<EmulatorStatus>('idle')
@@ -81,7 +106,6 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     let cancelled = false
 
     const run = async () => {
-      // Wait for React to paint the play shell at full size
       await new Promise<void>((resolve) => {
         requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
       })
@@ -108,6 +132,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
         const nostalgist = await Nostalgist.launch({
           core: system.core,
           rom: pending.rom,
+          state: pending.state,
           element: canvas,
           size: 'auto',
           style: {
@@ -130,7 +155,12 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
         }
 
         nostalgistRef.current = nostalgist
-        setStatus('running')
+        if (pending.startPaused) {
+          nostalgist.pause()
+          setStatus('paused')
+        } else {
+          setStatus('running')
+        }
       } catch (err) {
         console.error(err)
         if (!cancelled) {
@@ -199,6 +229,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
         system: entry.system,
         core: SYSTEMS[entry.system].core,
         source: 'library',
+        libraryFile: entry.file,
       }
       setError(null)
       setStatus('loading')
@@ -219,6 +250,32 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
           setStatus('error')
         }
       })()
+    },
+    [queueLaunch],
+  )
+
+  const launchPeer = useCallback(
+    (opts: {
+      name: string
+      system: SystemId
+      rom: Blob
+      fileName: string
+      state: Blob
+      startPaused?: boolean
+    }) => {
+      const file = new File([opts.rom], opts.fileName, { type: 'application/octet-stream' })
+      queueLaunch({
+        game: {
+          name: opts.name,
+          system: opts.system,
+          core: SYSTEMS[opts.system].core,
+          source: 'peer',
+          file,
+        },
+        rom: file,
+        state: opts.state,
+        startPaused: opts.startPaused ?? true,
+      })
     },
     [queueLaunch],
   )
@@ -255,8 +312,6 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     const emu = nostalgistRef.current
     if (!emu || stateIoBusyRef.current) return
     stateIoBusyRef.current = true
-    // Pause so RetroArch is not also simulating while the main thread blocks
-    // on SAVE_STATE (Emscripten has no real worker threads for this).
     const wasRunning = statusRef.current === 'running'
     try {
       if (wasRunning) emu.pause()
@@ -288,6 +343,48 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     }
   }, [])
 
+  const exportStateBlob = useCallback(async () => {
+    const emu = nostalgistRef.current
+    if (!emu || stateIoBusyRef.current) return null
+    stateIoBusyRef.current = true
+    const wasRunning = statusRef.current === 'running'
+    try {
+      if (wasRunning) emu.pause()
+      const { state } = await emu.saveState()
+      return state
+    } finally {
+      if (wasRunning && nostalgistRef.current === emu) {
+        emu.resume()
+        setStatus('running')
+      }
+      stateIoBusyRef.current = false
+    }
+  }, [])
+
+  const importStateBlob = useCallback(async (state: Blob) => {
+    const emu = nostalgistRef.current
+    if (!emu || stateIoBusyRef.current) return
+    stateIoBusyRef.current = true
+    const wasRunning = statusRef.current === 'running'
+    try {
+      if (wasRunning) emu.pause()
+      await emu.loadState(state)
+    } finally {
+      if (wasRunning && nostalgistRef.current === emu) {
+        emu.resume()
+        setStatus('running')
+      }
+      stateIoBusyRef.current = false
+    }
+  }, [])
+
+  const getRomBytes = useCallback(async () => {
+    const active = gameRef.current
+    if (!active?.file) return null
+    const buf = await active.file.arrayBuffer()
+    return new Uint8Array(buf)
+  }, [])
+
   const mapButton = useCallback((button: string) => {
     if (!settingsRef.current.swapAB) return button
     if (button === 'a') return 'b'
@@ -297,24 +394,49 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     return button
   }, [])
 
-  // Ref-count presses so keyboard + on-screen pad can hold the same button
-  // without one side's release canceling the other.
   const pressDown = useCallback(
-    (button: string) => {
+    (button: string, player = 1) => {
       const mapped = mapButton(button)
-      const next = (pressCountsRef.current.get(mapped) ?? 0) + 1
-      pressCountsRef.current.set(mapped, next)
-      if (next === 1) nostalgistRef.current?.pressDown(mapped)
+      const key = pressKey(player, mapped)
+      const next = (pressCountsRef.current.get(key) ?? 0) + 1
+      pressCountsRef.current.set(key, next)
+      if (next === 1) {
+        if (player === 1) nostalgistRef.current?.pressDown(mapped)
+        else nostalgistRef.current?.pressDown({ button: mapped, player })
+      }
     },
     [mapButton],
   )
 
   const pressUp = useCallback(
-    (button: string) => {
+    (button: string, player = 1) => {
       const mapped = mapButton(button)
-      const next = Math.max(0, (pressCountsRef.current.get(mapped) ?? 0) - 1)
-      pressCountsRef.current.set(mapped, next)
-      if (next === 0) nostalgistRef.current?.pressUp(mapped)
+      const key = pressKey(player, mapped)
+      const next = Math.max(0, (pressCountsRef.current.get(key) ?? 0) - 1)
+      pressCountsRef.current.set(key, next)
+      if (next === 0) {
+        if (player === 1) nostalgistRef.current?.pressUp(mapped)
+        else nostalgistRef.current?.pressUp({ button: mapped, player })
+      }
+    },
+    [mapButton],
+  )
+
+  // Remote presses bypass local ref-count so a remote release cannot cancel a local hold.
+  const remotePressDown = useCallback(
+    (button: string, player: number) => {
+      const mapped = mapButton(button)
+      if (player === 1) nostalgistRef.current?.pressDown(mapped)
+      else nostalgistRef.current?.pressDown({ button: mapped, player })
+    },
+    [mapButton],
+  )
+
+  const remotePressUp = useCallback(
+    (button: string, player: number) => {
+      const mapped = mapButton(button)
+      if (player === 1) nostalgistRef.current?.pressUp(mapped)
+      else nostalgistRef.current?.pressUp({ button: mapped, player })
     },
     [mapButton],
   )
@@ -337,6 +459,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     launchFile,
     launchDemo,
     launchLibrary,
+    launchPeer,
     exit,
     pause,
     resume,
@@ -344,8 +467,13 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     toggleFastForward,
     saveState,
     loadState,
+    exportStateBlob,
+    importStateBlob,
+    getRomBytes,
     pressDown,
     pressUp,
+    remotePressDown,
+    remotePressUp,
     relaunchWithSettings,
   }
 }

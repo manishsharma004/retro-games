@@ -1,16 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AdvancedSettings } from './components/AdvancedSettings'
 import { EmulatorScreen } from './components/EmulatorScreen'
 import { GamepadStatus } from './components/GamepadStatus'
+import { PeerLobby } from './components/PeerLobby'
 import { RomLoader } from './components/RomLoader'
 import { VirtualController } from './components/VirtualController'
 import { useEmulator } from './hooks/useEmulator'
 import { useFullscreen } from './hooks/useFullscreen'
 import { useGamepads } from './hooks/useGamepads'
 import { useKeyboardControls } from './hooks/useKeyboardControls'
-import { fetchLibrary, type LibraryRom } from './lib/library'
+import { usePeerSession } from './hooks/usePeerSession'
+import { fetchLibrary, romUrl, type LibraryRom } from './lib/library'
 import { loadSettings, saveSettings, type EmulatorSettings } from './lib/settings'
 import './styles/app.css'
+
+const RESYNC_INTERVAL_MS = 3500
 
 function prefersTouch(): boolean {
   return window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0
@@ -19,6 +23,7 @@ function prefersTouch(): boolean {
 export default function App() {
   const [settings, setSettings] = useState<EmulatorSettings>(() => loadSettings())
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [peerOpen, setPeerOpen] = useState(false)
   const [touchDevice] = useState(() => prefersTouch())
   const [library, setLibrary] = useState<LibraryRom[]>([])
   const autoLoadedRef = useRef(false)
@@ -29,23 +34,138 @@ export default function App() {
   const emu = useEmulator(settings)
   const { launchLibrary } = emu
 
+  const resyncRequestHandlerRef = useRef<() => void>(() => {})
+
+  const handleRemoteInput = useCallback(
+    (seat: 1 | 2, button: string, down: boolean) => {
+      if (down) emu.remotePressDown(button, seat)
+      else emu.remotePressUp(button, seat)
+    },
+    [emu],
+  )
+
+  const handleBootstrap = useCallback(
+    async (payload: {
+      name: string
+      system: 'nes' | 'snes'
+      rom: Uint8Array
+      state: Uint8Array
+      settings: Partial<EmulatorSettings>
+    }) => {
+      setSettings((prev) => ({
+        ...prev,
+        swapAB: payload.settings.swapAB ?? prev.swapAB,
+        allowOpposingDirections:
+          payload.settings.allowOpposingDirections ?? prev.allowOpposingDirections,
+        nesRegion: payload.settings.nesRegion ?? prev.nesRegion,
+        nesTurbo: payload.settings.nesTurbo ?? prev.nesTurbo,
+        snesRegion: payload.settings.snesRegion ?? prev.snesRegion,
+        frameSkip: payload.settings.frameSkip ?? prev.frameSkip,
+        rewindEnable: payload.settings.rewindEnable ?? prev.rewindEnable,
+      }))
+      const ext = payload.system === 'nes' ? 'nes' : 'sfc'
+      emu.launchPeer({
+        name: payload.name,
+        system: payload.system,
+        rom: new Blob([payload.rom.buffer.slice(
+          payload.rom.byteOffset,
+          payload.rom.byteOffset + payload.rom.byteLength,
+        ) as ArrayBuffer]),
+        fileName: `${payload.name}.${ext}`,
+        state: new Blob([payload.state.buffer.slice(
+          payload.state.byteOffset,
+          payload.state.byteOffset + payload.state.byteLength,
+        ) as ArrayBuffer]),
+        startPaused: true,
+      })
+    },
+    [emu],
+  )
+
+  const handleGo = useCallback(() => {
+    emu.resume()
+  }, [emu])
+
+  const handleResyncState = useCallback(
+    async (state: Uint8Array) => {
+      await emu.importStateBlob(
+        new Blob([
+          state.buffer.slice(state.byteOffset, state.byteOffset + state.byteLength) as ArrayBuffer,
+        ]),
+      )
+    },
+    [emu],
+  )
+
+  const peer = usePeerSession({
+    settings,
+    onRemoteInput: handleRemoteInput,
+    onBootstrap: handleBootstrap,
+    onGo: handleGo,
+    onResyncState: handleResyncState,
+    onResyncRequest: () => resyncRequestHandlerRef.current(),
+  })
+
+  const peerRef = useRef(peer)
+  peerRef.current = peer
+
+  resyncRequestHandlerRef.current = () => {
+    void (async () => {
+      if (peerRef.current.role !== 'host') return
+      const blob = await emu.exportStateBlob()
+      if (!blob) return
+      const bytes = new Uint8Array(await blob.arrayBuffer())
+      await peerRef.current.sendResyncState(bytes)
+    })()
+  }
+
+  const localSeat = peer.seat ?? 1
+  const peerPlaying = peer.phase === 'playing'
+
+  const onLocalPress = useCallback(
+    (button: string) => {
+      emu.pressDown(button, localSeat)
+      if (peerPlaying) peer.sendInput(button, true)
+    },
+    [emu, localSeat, peer, peerPlaying],
+  )
+
+  const onLocalRelease = useCallback(
+    (button: string) => {
+      emu.pressUp(button, localSeat)
+      if (peerPlaying) peer.sendInput(button, false)
+    },
+    [emu, localSeat, peer, peerPlaying],
+  )
+
   const keyboardEnabled =
-    (emu.status === 'running' || emu.status === 'paused') && !settingsOpen
+    (emu.status === 'running' || emu.status === 'paused') && !settingsOpen && !peerOpen
 
   useKeyboardControls({
     enabled: keyboardEnabled,
-    onPress: emu.pressDown,
-    onRelease: emu.pressUp,
+    onPress: onLocalPress,
+    onRelease: onLocalRelease,
   })
 
-  // Debounce persistence so slider drags do not sync localStorage every frame
-  // (storage I/O on the main thread stalls the emulator).
+  // Host periodic save-state push while linked.
+  useEffect(() => {
+    if (peer.phase !== 'playing' || peer.role !== 'host') return
+    const id = window.setInterval(() => {
+      void (async () => {
+        const blob = await emu.exportStateBlob()
+        if (!blob) return
+        const bytes = new Uint8Array(await blob.arrayBuffer())
+        await peerRef.current.sendResyncState(bytes)
+      })()
+    }, RESYNC_INTERVAL_MS)
+    return () => window.clearInterval(id)
+  }, [peer.phase, peer.role, emu])
+
   useEffect(() => {
     const timer = window.setTimeout(() => saveSettings(settings), 300)
     return () => window.clearTimeout(timer)
   }, [settings])
 
-  // Load bundled ROMs and auto-launch the default one on first visit.
   useEffect(() => {
     let cancelled = false
     void fetchLibrary().then((roms) => {
@@ -70,6 +190,36 @@ export default function App() {
   const isPlaying = emu.status === 'running' || emu.status === 'paused' || emu.status === 'loading'
   const showLanding = !isPlaying
 
+  const canHostShareGame = Boolean(
+    peer.role === 'host' &&
+      emu.game &&
+      (emu.status === 'running' || emu.status === 'paused') &&
+      (emu.game.file || emu.game.source === 'demo' || emu.game.source === 'library'),
+  )
+
+  const shareGameWithPeer = useCallback(async () => {
+    if (peer.role !== 'host' || !emu.game) throw new Error('Host must have a game loaded')
+    emu.pause()
+    let rom = await emu.getRomBytes()
+    if (!rom && emu.game.source === 'demo') {
+      const res = await fetch(romUrl('flappybird.nes'))
+      if (!res.ok) throw new Error('Could not fetch demo ROM for peer share')
+      rom = new Uint8Array(await res.arrayBuffer())
+    }
+    if (!rom) throw new Error('ROM bytes unavailable — load a local or library ROM')
+    const stateBlob = await emu.exportStateBlob()
+    if (!stateBlob) throw new Error('Could not capture save state')
+    const state = new Uint8Array(await stateBlob.arrayBuffer())
+    await peer.sendBootstrap({
+      name: emu.game.name,
+      system: emu.game.system,
+      core: emu.game.core,
+      rom,
+      state,
+      libraryFile: emu.game.libraryFile,
+    })
+  }, [emu, peer])
+
   return (
     <div className={`app ${isPlaying ? 'app--playing' : 'app--landing'}`}>
       <div className="atmosphere" aria-hidden="true" />
@@ -79,13 +229,19 @@ export default function App() {
           <p className="hero__brand">Retro Games</p>
           <h1 className="hero__tagline">Play NES &amp; SNES ROMs in your browser</h1>
           <p className="hero__sub">
-            Local files only. Controllers welcome — desktop, mobile, or on-screen.
+            Local files only. Controllers welcome — desktop, mobile, or on-screen. Link two devices
+            for 2-player over WebRTC.
           </p>
           <RomLoader
             disabled={emu.status === 'loading'}
             onFile={emu.launchFile}
             onDemo={emu.launchDemo}
           />
+          <div className="hero__peer">
+            <button type="button" className="btn btn--primary" onClick={() => setPeerOpen(true)}>
+              2 Player
+            </button>
+          </div>
           {library.length > 0 && (
             <div className="library">
               <p className="library__title">Built-in games</p>
@@ -109,7 +265,6 @@ export default function App() {
         </header>
       )}
 
-      {/* Canvas must stay mounted so Nostalgist can attach on launch */}
       <div className={isPlaying ? 'player' : 'player player--parked'} aria-hidden={!isPlaying}>
         {isPlaying && (
           <div className={`toolbar ${isFullscreen ? 'toolbar--overlay' : ''}`}>
@@ -120,6 +275,11 @@ export default function App() {
                   {emu.game.system.toUpperCase()} · {emu.game.name}
                 </span>
               )}
+              {peer.role && (
+                <span className="toolbar__peer" title="2-player session">
+                  2P · P{peer.seat} · {peer.phase}
+                </span>
+              )}
             </div>
             <div className="toolbar__actions">
               <RomLoader
@@ -128,6 +288,9 @@ export default function App() {
                 onFile={emu.launchFile}
                 onDemo={emu.launchDemo}
               />
+              <button type="button" className="btn btn--ghost" onClick={() => setPeerOpen(true)}>
+                2P
+              </button>
               {emu.status === 'paused' ? (
                 <button type="button" className="btn btn--ghost" onClick={emu.resume}>
                   Resume
@@ -198,8 +361,8 @@ export default function App() {
           {emu.game && isPlaying && (
             <VirtualController
               system={emu.game.system}
-              onPress={emu.pressDown}
-              onRelease={emu.pressUp}
+              onPress={onLocalPress}
+              onRelease={onLocalRelease}
               visible={showVirtual && emu.status !== 'loading'}
               dpadMode={settings.virtualDpadMode}
               overlay={settings.virtualControlsOverlay}
@@ -228,10 +391,40 @@ export default function App() {
         gamepadCount={pads.length}
       />
 
+      <PeerLobby
+        open={peerOpen}
+        onClose={() => setPeerOpen(false)}
+        phase={peer.phase}
+        role={peer.role}
+        seat={peer.seat}
+        connectionState={peer.connectionState}
+        localSignal={peer.localSignal}
+        transfer={peer.transfer}
+        error={peer.error}
+        remoteReady={peer.remoteReady}
+        canHostShareGame={canHostShareGame}
+        onCreateHost={() => peer.createHostOffer()}
+        onAcceptAnswer={(answer) => peer.acceptGuestAnswer(answer)}
+        onJoinOffer={(offer) => peer.joinWithOffer(offer)}
+        onShareGame={() => shareGameWithPeer()}
+        onReady={() => peer.sendReady()}
+        onGo={() => peer.sendGo()}
+        onResync={async () => {
+          const blob = await emu.exportStateBlob()
+          if (!blob) throw new Error('No state to push')
+          await peer.sendResyncState(new Uint8Array(await blob.arrayBuffer()))
+        }}
+        onRequestResync={() => peer.requestResync()}
+        onDisconnect={() => peer.disconnect()}
+      />
+
       {showLanding && (
         <footer className="site-footer">
           <button type="button" className="btn btn--text" onClick={() => setSettingsOpen(true)}>
             Advanced settings
+          </button>
+          <button type="button" className="btn btn--text" onClick={() => setPeerOpen(true)}>
+            2 Player
           </button>
           <span>Powered by Nostalgist · ROMs are not distributed</span>
         </footer>

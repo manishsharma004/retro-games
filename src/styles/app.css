@@ -908,9 +908,147 @@ button {
   .atmosphere::after,
   .hero__brand,
   .hero,
+  .peer-lobby__panel,
   .spinner,
   .settings-backdrop,
   .settings-panel {
-    animation: none;
+    animation: none !important;
   }
+}
+
+.hero__peer {
+  margin-top: 1rem;
+}
+
+.toolbar__peer {
+  font-size: 0.7rem;
+  color: var(--accent);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  white-space: nowrap;
+}
+
+.peer-lobby {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(3, 10, 7, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.peer-lobby__panel {
+  width: min(560px, 100%);
+  max-height: min(92dvh, 900px);
+  overflow: auto;
+  padding: 1.25rem 1.35rem 1.4rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  animation: rise 0.35s ease-out both;
+}
+
+.peer-lobby__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.peer-lobby__header h2 {
+  margin: 0;
+  font-family: var(--brand);
+  font-size: 0.95rem;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+}
+
+.peer-lobby__lead {
+  margin: 0 0 1.1rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.peer-lobby__actions,
+.peer-lobby__row,
+.peer-lobby__footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-bottom: 0.85rem;
+}
+
+.peer-lobby__exchange {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+.peer-lobby__label {
+  margin: 0 0 0.45rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent-dim);
+}
+
+.peer-lobby__qr {
+  display: block;
+  width: min(280px, 100%);
+  margin: 0 0 0.65rem;
+  border-radius: 8px;
+  background: #e8f7ee;
+}
+
+.peer-lobby__textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 5.5rem;
+  margin-bottom: 0.55rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--text);
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.peer-lobby__video {
+  width: 100%;
+  max-height: 220px;
+  margin-top: 0.6rem;
+  border-radius: 8px;
+  background: #000;
+  object-fit: cover;
+}
+
+.peer-lobby__status {
+  margin: 0.5rem 0 0.85rem;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.peer-lobby__status p {
+  margin: 0 0 0.55rem;
+}
+
+.peer-lobby__hint {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.peer-lobby__note {
+  margin: 0.35rem 0 0.75rem;
+  color: var(--warn);
+  font-size: 0.9rem;
 }

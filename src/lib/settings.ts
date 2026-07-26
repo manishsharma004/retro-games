@@ -58,6 +58,23 @@ export function saveSettings(settings: EmulatorSettings): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
 }
 
+/** Player-2 RetroArch binds for Nostalgist pressDown({ button, player: 2 }).
+ * Uses Digit keys via RetroArch `keypad*` names (not `num*`, which map wrong). */
+const PLAYER2_BINDS: Record<string, string> = {
+  input_player2_up: 'i',
+  input_player2_down: 'k',
+  input_player2_left: 'j',
+  input_player2_right: 'l',
+  input_player2_b: 'n',
+  input_player2_a: 'm',
+  input_player2_y: 'u',
+  input_player2_x: 'o',
+  input_player2_l: 'c',
+  input_player2_r: 'v',
+  input_player2_start: 'p',
+  input_player2_select: 'semicolon',
+}
+
 export function buildRetroarchConfig(settings: EmulatorSettings): Record<string, string | number | boolean> {
   // RetroArch audio_volume is in dB; map 0–100% → -80–0 dB
   const volumeDb = (settings.audioVolume / 100) * 80 - 80
@@ -91,6 +108,7 @@ export function buildRetroarchConfig(settings: EmulatorSettings): Record<string,
     // Keep RetroArch's default Z/X/arrow binds. useKeyboardControls claims
     // those keys (stopPropagation) and drives them via pressDown/pressUp,
     // which synthesizes the same default key codes.
+    ...PLAYER2_BINDS,
   }
 }
 

@@ -105,6 +105,11 @@ export function buildRetroarchConfig(settings: EmulatorSettings): Record<string,
     pause_nonactive: false,
     menu_driver: 'null',
     notice_show: false,
+    // Joypads are polled in JS (useGamepadControls) so device→seat selection and
+    // peer sendInput work. Disable RetroArch's native joypad ports to avoid
+    // double input and guest pad0 silently driving P1.
+    input_player1_joypad_index: -1,
+    input_player2_joypad_index: -1,
     // Keep RetroArch's default Z/X/arrow binds. useKeyboardControls claims
     // those keys (stopPropagation) and drives them via pressDown/pressUp,
     // which synthesizes the same default key codes.

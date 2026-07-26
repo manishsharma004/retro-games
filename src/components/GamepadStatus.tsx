@@ -1,32 +1,47 @@
 import type { ConnectedGamepad } from '../hooks/useGamepads'
+import { shortGamepadName } from '../lib/gamepad'
 
 interface GamepadStatusProps {
   pads: ConnectedGamepad[]
+  onOpen?: () => void
 }
 
-export function GamepadStatus({ pads }: GamepadStatusProps) {
-  if (pads.length === 0) {
+export function GamepadStatus({ pads, onOpen }: GamepadStatusProps) {
+  const label =
+    pads.length === 0
+      ? 'No controller'
+      : pads.length === 1
+        ? shortGamepadName(pads[0].id)
+        : `${pads.length} controllers`
+
+  const title =
+    pads.length === 0
+      ? 'No physical controller detected — click to manage'
+      : 'Click to choose which controller drives each seat'
+
+  if (onOpen) {
     return (
-      <div className="gamepad-status gamepad-status--empty" title="No physical controller detected">
+      <button
+        type="button"
+        className={`gamepad-status gamepad-status--button ${
+          pads.length === 0 ? 'gamepad-status--empty' : 'gamepad-status--connected'
+        }`}
+        title={title}
+        onClick={onOpen}
+      >
         <span className="gamepad-status__dot" />
-        <span>No controller</span>
-      </div>
+        <span>{label}</span>
+      </button>
     )
   }
 
   return (
-    <div className="gamepad-status gamepad-status--connected">
+    <div
+      className={`gamepad-status ${pads.length === 0 ? 'gamepad-status--empty' : 'gamepad-status--connected'}`}
+      title={title}
+    >
       <span className="gamepad-status__dot" />
-      <span>
-        {pads.length === 1
-          ? shortName(pads[0].id)
-          : `${pads.length} controllers`}
-      </span>
+      <span>{label}</span>
     </div>
   )
-}
-
-function shortName(id: string): string {
-  const cleaned = id.replace(/\s*\(.*\)\s*/g, '').trim()
-  return cleaned.length > 28 ? `${cleaned.slice(0, 26)}…` : cleaned
 }

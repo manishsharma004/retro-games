@@ -161,6 +161,9 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       },
       onControl: (msg) => {
         if (msg.type === 'bootstrap') {
+          bootstrapDoneRef.current = false
+          romBufRef.current = null
+          stateBufRef.current = null
           bootstrapMetaRef.current = {
             name: msg.name,
             system: msg.system,

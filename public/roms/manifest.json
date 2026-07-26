@@ -1,0 +1,10 @@
+{
+  "roms": [
+    {
+      "name": "Flappy Bird",
+      "file": "flappybird.nes",
+      "system": "nes",
+      "default": true
+    }
+  ]
+}

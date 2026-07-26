@@ -7,6 +7,7 @@ import { VirtualController } from './components/VirtualController'
 import { useEmulator } from './hooks/useEmulator'
 import { useFullscreen } from './hooks/useFullscreen'
 import { useGamepads } from './hooks/useGamepads'
+import { fetchLibrary, type LibraryRom } from './lib/library'
 import { loadSettings, saveSettings, type EmulatorSettings } from './lib/settings'
 import './styles/app.css'
 
@@ -18,15 +19,35 @@ export default function App() {
   const [settings, setSettings] = useState<EmulatorSettings>(() => loadSettings())
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [touchDevice] = useState(() => prefersTouch())
+  const [library, setLibrary] = useState<LibraryRom[]>([])
+  const autoLoadedRef = useRef(false)
   const shellRef = useRef<HTMLDivElement>(null)
   const { isFullscreen, toggle: toggleFullscreen } = useFullscreen(shellRef)
   const pads = useGamepads()
 
   const emu = useEmulator(settings)
+  const { launchLibrary } = emu
 
   useEffect(() => {
     saveSettings(settings)
   }, [settings])
+
+  // Load bundled ROMs and auto-launch the default one on first visit.
+  useEffect(() => {
+    let cancelled = false
+    void fetchLibrary().then((roms) => {
+      if (cancelled) return
+      setLibrary(roms)
+      const preset = roms.find((rom) => rom.default)
+      if (preset && !autoLoadedRef.current) {
+        autoLoadedRef.current = true
+        launchLibrary(preset)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [launchLibrary])
 
   const showVirtual = useMemo(() => {
     if (settings.showVirtualController === 'auto') return touchDevice
@@ -52,6 +73,25 @@ export default function App() {
             onFile={emu.launchFile}
             onDemo={emu.launchDemo}
           />
+          {library.length > 0 && (
+            <div className="library">
+              <p className="library__title">Built-in games</p>
+              <div className="library__grid">
+                {library.map((rom) => (
+                  <button
+                    key={rom.file}
+                    type="button"
+                    className="btn btn--ghost library__item"
+                    disabled={emu.status === 'loading'}
+                    onClick={() => emu.launchLibrary(rom)}
+                  >
+                    <span className="library__name">{rom.name}</span>
+                    <span className="library__system">{rom.system.toUpperCase()}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {emu.error && <p className="hero__error">{emu.error}</p>}
         </header>
       )}

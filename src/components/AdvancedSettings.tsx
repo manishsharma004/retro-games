@@ -161,6 +161,17 @@ export function AdvancedSettings({
                 onChange={(e) => patch('swapAB', e.target.checked)}
               />
             </label>
+            <label className="field field--row">
+              <span>Allow opposing directions</span>
+              <input
+                type="checkbox"
+                checked={settings.allowOpposingDirections}
+                onChange={(e) => patch('allowOpposingDirections', e.target.checked)}
+              />
+            </label>
+            <p className="settings-hint">
+              Enables simultaneous Up+Down / Left+Right. Apply &amp; relaunch after changing.
+            </p>
             <div className="keyboard-hints">
               <strong>Keyboard</strong>
               <ul>

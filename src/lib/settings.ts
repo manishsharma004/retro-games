@@ -9,6 +9,7 @@ export interface EmulatorSettings {
   audioVolume: number
   showVirtualController: boolean | 'auto'
   swapAB: boolean
+  allowOpposingDirections: boolean
   frameSkip: number
   integerScale: boolean
   nesRegion: 'Auto' | 'NTSC' | 'PAL'
@@ -25,6 +26,7 @@ export const DEFAULT_SETTINGS: EmulatorSettings = {
   audioVolume: 80,
   showVirtualController: 'auto',
   swapAB: false,
+  allowOpposingDirections: true,
   frameSkip: 0,
   integerScale: false,
   nesRegion: 'Auto',
@@ -74,13 +76,19 @@ export function buildCoreConfig(
   system: 'nes' | 'snes',
   settings: EmulatorSettings,
 ): Record<string, string> {
+  // Allow pressing Up+Down / Left+Right at once for reliable simultaneous
+  // multi-key / diagonal input. Both cores disable this by default.
+  const upDownAllowed = settings.allowOpposingDirections ? 'enabled' : 'disabled'
+
   if (system === 'nes') {
     return {
       fceumm_region: settings.nesRegion,
       fceumm_turbo_enable: settings.nesTurbo,
+      fceumm_up_down_allowed: upDownAllowed,
     }
   }
   return {
     snes9x_region: settings.snesRegion,
+    snes9x_up_down_allowed: upDownAllowed,
   }
 }

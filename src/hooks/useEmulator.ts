@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Nostalgist } from 'nostalgist'
 import { SYSTEMS, type SystemId, detectSystem } from '../lib/cores'
 import {
-  canvasBackingStoreSize,
-  prepareCanvasLayout,
+  attachStageResizeSync,
+  prepareResponsiveCanvas,
+  readStageSize,
 } from '../lib/canvasLock'
 import { romUrl, type LibraryRom } from '../lib/library'
 import {
@@ -73,6 +74,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
   const savedStateRef = useRef<Blob | null>(null)
   const gameRef = useRef<ActiveGame | null>(null)
   const settingsRef = useRef(settings)
+  const resizeSyncCleanupRef = useRef<(() => void) | null>(null)
   const pressCountsRef = useRef(new Map<string, number>())
   const stateIoBusyRef = useRef(false)
   const [status, setStatus] = useState<EmulatorStatus>('idle')
@@ -85,6 +87,8 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
   statusRef.current = status
 
   const cleanup = useCallback(() => {
+    resizeSyncCleanupRef.current?.()
+    resizeSyncCleanupRef.current = null
     if (nostalgistRef.current) {
       try {
         nostalgistRef.current.exit({ removeCanvas: false })
@@ -104,18 +108,28 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     let cancelled = false
 
     const run = async () => {
-      // Wait for layout after player un-parks from the landing view.
+      // Wait until the stage has real layout (player un-parks from landing view).
+      let stage: HTMLElement | null = null
       for (let i = 0; i < 90; i++) {
         await new Promise<void>((r) => requestAnimationFrame(() => r()))
         if (cancelled) return
-        const el = canvasRef.current
-        if (el && el.clientWidth >= 780 && el.clientHeight >= 580) break
+        const canvas = canvasRef.current
+        stage = canvas?.parentElement ?? null
+        if (stage && readStageSize(stage)) break
       }
       if (cancelled) return
 
       const canvas = canvasRef.current
-      if (!canvas) {
+      if (!canvas || !stage) {
         setError('Canvas is not ready')
+        setStatus('error')
+        setPending(null)
+        return
+      }
+
+      const layout = readStageSize(stage)
+      if (!layout) {
+        setError('Game stage is not laid out yet')
         setStatus('error')
         setPending(null)
         return
@@ -131,21 +145,20 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
         const current = settingsRef.current
         const system = SYSTEMS[pending.game.system]
 
-        // Smoke-test recipe: fixed 800×600 CSS + size. No transforms, no RO hooks.
-        prepareCanvasLayout(canvas)
-        const backing = canvasBackingStoreSize()
+        prepareResponsiveCanvas(canvas)
 
         const nostalgist = await Nostalgist.launch({
           core: system.core,
           rom: pending.rom,
           state: pending.state,
           element: canvas,
-          size: backing,
+          size: 'auto',
           style: {
-            width: '800px',
-            height: '600px',
-            display: 'block',
+            width: '100%',
+            height: '100%',
             backgroundColor: '#000',
+            position: 'static',
+            display: 'block',
             imageRendering: current.videoSmooth ? 'auto' : 'pixelated',
           },
           shader: current.shader || undefined,
@@ -158,6 +171,10 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
           nostalgist.exit({ removeCanvas: false })
           return
         }
+
+        prepareResponsiveCanvas(canvas)
+        resizeSyncCleanupRef.current?.()
+        resizeSyncCleanupRef.current = attachStageResizeSync(nostalgist, stage)
 
         nostalgistRef.current = nostalgist
         if (pending.startPaused) {

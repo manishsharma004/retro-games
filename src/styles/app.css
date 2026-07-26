@@ -517,8 +517,11 @@ button {
 }
 
 .virtual-pad {
+  --vp-scale: 1;
   width: min(100%, 560px);
-  padding: 0.35rem 0.75rem 0.85rem;
+  /* Keep controls off the very edges, respecting device safe areas. */
+  padding: 0.35rem max(1rem, env(safe-area-inset-right)) max(0.85rem, env(safe-area-inset-bottom))
+    max(1rem, env(safe-area-inset-left));
   user-select: none;
   touch-action: none;
   flex-shrink: 0;
@@ -533,16 +536,20 @@ button {
   bottom: 0;
   width: 100%;
   max-width: 100%;
-  padding: 0 1.25rem 1rem;
+  /* Extra inset so the stick / face buttons are not flush against the edges. */
+  padding-top: 0;
+  padding-right: max(2rem, env(safe-area-inset-right));
+  padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+  padding-left: max(2rem, env(safe-area-inset-left));
   z-index: 6;
-  opacity: 0.5;
+  opacity: var(--vp-opacity, 0.5);
   pointer-events: none;
   transition: opacity 0.2s ease;
 }
 
 .virtual-pad--overlay:focus-within,
 .virtual-pad--overlay:active {
-  opacity: 0.85;
+  opacity: 1;
 }
 
 .virtual-pad--overlay .vp-btn,
@@ -582,14 +589,14 @@ button {
 
 .vp-btn--shoulder {
   flex: 1;
-  min-height: 2.4rem;
+  min-height: calc(2.4rem * var(--vp-scale));
   letter-spacing: 0.08em;
 }
 
 .vp-dpad {
   display: grid;
-  grid-template-columns: repeat(3, 2.6rem);
-  grid-template-rows: repeat(3, 2.6rem);
+  grid-template-columns: repeat(3, calc(2.6rem * var(--vp-scale)));
+  grid-template-rows: repeat(3, calc(2.6rem * var(--vp-scale)));
   gap: 0.2rem;
   justify-self: start;
 }
@@ -619,8 +626,8 @@ button {
 
 .vp-stick {
   position: relative;
-  width: 8rem;
-  height: 8rem;
+  width: calc(8rem * var(--vp-scale));
+  height: calc(8rem * var(--vp-scale));
   border-radius: 50%;
   border: 1px solid rgba(61, 255, 154, 0.25);
   background:
@@ -635,9 +642,9 @@ button {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 3.4rem;
-  height: 3.4rem;
-  margin: -1.7rem 0 0 -1.7rem;
+  width: calc(3.4rem * var(--vp-scale));
+  height: calc(3.4rem * var(--vp-scale));
+  margin: calc(-1.7rem * var(--vp-scale)) 0 0 calc(-1.7rem * var(--vp-scale));
   border-radius: 50%;
   background: rgba(61, 255, 154, 0.32);
   border: 1px solid var(--accent);
@@ -653,9 +660,9 @@ button {
 }
 
 .vp-btn--meta {
-  min-width: 4.5rem;
+  min-width: calc(4.5rem * var(--vp-scale));
   padding: 0.45rem 0.55rem;
-  font-size: 0.7rem;
+  font-size: calc(0.7rem * var(--vp-scale));
   text-transform: uppercase;
   letter-spacing: 0.04em;
   border-radius: 999px;
@@ -668,24 +675,24 @@ button {
 }
 
 .vp-actions--nes {
-  grid-template-columns: repeat(2, 3rem);
+  grid-template-columns: repeat(2, calc(3rem * var(--vp-scale)));
 }
 
 .vp-actions--snes {
-  grid-template-columns: repeat(2, 2.85rem);
-  grid-template-rows: repeat(2, 2.85rem);
+  grid-template-columns: repeat(2, calc(2.85rem * var(--vp-scale)));
+  grid-template-rows: repeat(2, calc(2.85rem * var(--vp-scale)));
 }
 
 .vp-btn--face {
-  width: 3rem;
-  height: 3rem;
+  width: calc(3rem * var(--vp-scale));
+  height: calc(3rem * var(--vp-scale));
   border-radius: 50%;
-  font-size: 0.85rem;
+  font-size: calc(0.85rem * var(--vp-scale));
 }
 
 .vp-actions--snes .vp-btn--face {
-  width: 2.85rem;
-  height: 2.85rem;
+  width: calc(2.85rem * var(--vp-scale));
+  height: calc(2.85rem * var(--vp-scale));
 }
 
 .vp-btn--a {

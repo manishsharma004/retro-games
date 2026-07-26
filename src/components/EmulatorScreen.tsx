@@ -28,6 +28,7 @@ export function EmulatorScreen({
           the aspect ratio via object-fit; windowed mode uses a fixed ratio box. */}
       <div className="play-stage" style={isFullscreen ? undefined : { aspectRatio: aspect }}>
         <canvas
+          id="canvas"
           ref={canvasRef}
           className={`play-canvas ${showPlaceholder ? 'play-canvas--hidden' : ''}`}
           width={800}

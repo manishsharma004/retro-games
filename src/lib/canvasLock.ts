@@ -3,36 +3,36 @@ import type { Nostalgist } from 'nostalgist'
 /**
  * Fixed CSS *layout* size for the emulator canvas.
  *
- * RetroArch's emscripten platform sets the WebGL backing store to
- * `layoutSize * devicePixelRatio` (see PlatformEmscriptenWatchCanvasSizeAndDpr).
- * CSS must stay fixed so ResizeObserver does not chase the stage size and enter
- * an infinite resize loop. Visual fill of the stage is done with transform only.
+ * RetroArch sets the WebGL backing store from ResizeObserver, preferring
+ * `devicePixelContentBoxSize` or `contentRect × devicePixelRatio`. A floating
+ * DPR (browser zoom / cloud VM quirks) both causes resize thrash and can
+ * request enormous GL buffers that blow the WASM heap (`memory access out of
+ * bounds`).
+ *
+ * We keep layout fixed and force an effective DPR of 1 for the emulator so the
+ * backing store stays equal to the CSS box.
  */
 export const CANVAS_LAYOUT_WIDTH = 800
 export const CANVAS_LAYOUT_HEIGHT = 600
 
-/** @deprecated Use CANVAS_LAYOUT_WIDTH — kept for call-site clarity during migration. */
+/** Emulator always uses 1:1 CSS px → buffer px. */
+export const EMULATOR_DEVICE_PIXEL_RATIO = 1
+
+/** @deprecated alias */
 export const CANVAS_BUFFER_WIDTH = CANVAS_LAYOUT_WIDTH
-/** @deprecated Use CANVAS_LAYOUT_HEIGHT */
+/** @deprecated alias */
 export const CANVAS_BUFFER_HEIGHT = CANVAS_LAYOUT_HEIGHT
 
-/** Backing-store size RetroArch / Nostalgist should use (CSS layout × DPR). */
 export function canvasBackingStoreSize(
   layoutWidth = CANVAS_LAYOUT_WIDTH,
   layoutHeight = CANVAS_LAYOUT_HEIGHT,
-  dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1,
 ): { width: number; height: number } {
   return {
-    width: Math.max(1, Math.round(layoutWidth * dpr)),
-    height: Math.max(1, Math.round(layoutHeight * dpr)),
+    width: Math.max(1, Math.round(layoutWidth * EMULATOR_DEVICE_PIXEL_RATIO)),
+    height: Math.max(1, Math.round(layoutHeight * EMULATOR_DEVICE_PIXEL_RATIO)),
   }
 }
 
-/**
- * Ensure layout metrics RA reads (clientWidth / RO contentRect) match the fixed
- * CSS box *before* Nostalgist.launch. Do not freeze canvas.width/height — RA must
- * be free to set the DPR-scaled backing store.
- */
 export function prepareCanvasLayout(canvas: HTMLCanvasElement): void {
   canvas.style.setProperty('width', `${CANVAS_LAYOUT_WIDTH}px`, 'important')
   canvas.style.setProperty('height', `${CANVAS_LAYOUT_HEIGHT}px`, 'important')
@@ -55,13 +55,109 @@ export function prepareCanvasLayout(canvas: HTMLCanvasElement): void {
 }
 
 /**
- * After launch: keep fixed CSS layout and scale with transform so the stage is
- * filled without changing layout metrics RetroArch reads.
+ * Install BEFORE Nostalgist.launch.
  *
- * Intentionally does NOT:
- * - freeze canvas.width / height (desyncs GL buffer from RA's DPR size → OOB)
- * - clamp Module.setCanvasSize to CSS pixels (same desync)
- * - filter ResizeObserver on the canvas (blocks RA from correcting size)
+ * RetroArch's PlatformEmscriptenWatchCanvasSizeAndDpr multiplies layout by
+ * devicePixelRatio (or reads devicePixelContentBoxSize). Spoof both so the
+ * backing store stays at the fixed layout size regardless of browser zoom.
+ */
+export function installEmulatorPixelRatioGuard(
+  canvas: HTMLCanvasElement,
+  layoutWidth = CANVAS_LAYOUT_WIDTH,
+  layoutHeight = CANVAS_LAYOUT_HEIGHT,
+): () => void {
+  const cleanups: Array<() => void> = []
+
+  // Force window.devicePixelRatio → 1 for RA's JS callbacks.
+  const dprDesc = Object.getOwnPropertyDescriptor(window, 'devicePixelRatio')
+  try {
+    Object.defineProperty(window, 'devicePixelRatio', {
+      configurable: true,
+      enumerable: true,
+      get: () => EMULATOR_DEVICE_PIXEL_RATIO,
+    })
+    cleanups.push(() => {
+      if (dprDesc) Object.defineProperty(window, 'devicePixelRatio', dprDesc)
+      else delete (window as { devicePixelRatio?: number }).devicePixelRatio
+    })
+  } catch {
+    // Some environments disallow redefining devicePixelRatio.
+  }
+
+  // Rewrite ResizeObserver notifications for the emulator canvas.
+  const OriginalRO = window.ResizeObserver
+  window.ResizeObserver = class EmulatorGuardedRO extends OriginalRO {
+    constructor(callback: ResizeObserverCallback) {
+      super((entries, observer) => {
+        const mapped = entries.map((entry) => {
+          if (entry.target !== canvas) return entry
+          const contentRect = new DOMRectReadOnly(0, 0, layoutWidth, layoutHeight)
+          return {
+            target: entry.target,
+            contentRect,
+            borderBoxSize: [
+              { inlineSize: layoutWidth, blockSize: layoutHeight },
+            ] as unknown as ReadonlyArray<ResizeObserverSize>,
+            contentBoxSize: [
+              { inlineSize: layoutWidth, blockSize: layoutHeight },
+            ] as unknown as ReadonlyArray<ResizeObserverSize>,
+            // Critical: RA prefers this when present — must be layout, not
+            // layout × real DPR, or we recreate the OOB-sized buffer.
+            devicePixelContentBoxSize: [
+              {
+                inlineSize: layoutWidth * EMULATOR_DEVICE_PIXEL_RATIO,
+                blockSize: layoutHeight * EMULATOR_DEVICE_PIXEL_RATIO,
+              },
+            ] as unknown as ReadonlyArray<ResizeObserverSize>,
+          } as ResizeObserverEntry
+        })
+        callback(mapped, observer)
+      })
+    }
+  } as typeof ResizeObserver
+  cleanups.push(() => {
+    window.ResizeObserver = OriginalRO
+  })
+
+  // Belt-and-suspenders: layout metrics RA may poll before RO fires.
+  const metric = (value: number) => ({
+    configurable: true,
+    enumerable: true,
+    get: () => value,
+  })
+  try {
+    Object.defineProperty(canvas, 'clientWidth', metric(layoutWidth))
+    Object.defineProperty(canvas, 'clientHeight', metric(layoutHeight))
+    Object.defineProperty(canvas, 'offsetWidth', metric(layoutWidth))
+    Object.defineProperty(canvas, 'offsetHeight', metric(layoutHeight))
+    cleanups.push(() => {
+      for (const prop of [
+        'clientWidth',
+        'clientHeight',
+        'offsetWidth',
+        'offsetHeight',
+      ] as const) {
+        delete (canvas as unknown as Record<string, unknown>)[prop]
+      }
+    })
+  } catch {
+    // ignore
+  }
+
+  return () => {
+    for (const fn of cleanups.reverse()) {
+      try {
+        fn()
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
+
+/**
+ * After launch: fixed CSS layout + transform scale to fill the stage.
+ * Does not freeze canvas.width/height — RA must set the (DPR-spoofed) buffer.
  */
 export function lockEmulatorCanvas(
   _nostalgist: Nostalgist,
@@ -73,7 +169,6 @@ export function lockEmulatorCanvas(
   const cleanups: Array<() => void> = []
 
   prepareCanvasLayout(canvas)
-  // Re-assert layout sizes in case Nostalgist/RA tweaked style during init.
   canvas.style.setProperty('width', `${layoutWidth}px`, 'important')
   canvas.style.setProperty('height', `${layoutHeight}px`, 'important')
 
@@ -94,8 +189,6 @@ export function lockEmulatorCanvas(
   stageRo.observe(stage)
   cleanups.push(() => stageRo.disconnect())
 
-  // If the browser zoom / DPR changes, ask RA to re-measure. Fixed CSS keeps
-  // layout stable; RA's own observer updates the backing store.
   const onWindowResize = () => {
     requestAnimationFrame(fit)
   }
@@ -113,13 +206,9 @@ export function lockEmulatorCanvas(
   }
 }
 
-/**
- * @deprecated No longer used — filtering RO caused RA's internal fb size to
- * diverge from the real GL buffer. Kept as a no-op so older call sites compile
- * until fully removed.
- */
+/** @deprecated use installEmulatorPixelRatioGuard */
 export function installCanvasResizeObserverGuard(
-  _canvas: HTMLCanvasElement,
+  canvas: HTMLCanvasElement,
 ): () => void {
-  return () => {}
+  return installEmulatorPixelRatioGuard(canvas)
 }

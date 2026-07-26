@@ -1,6 +1,13 @@
-import type { Nostalgist } from 'nostalgist'
-
-/** Fixed emulator frame size — matches the known-good smoke test. */
+/**
+ * Fixed emulator canvas layout — matches the known-good smoke test.
+ *
+ * Do NOT apply CSS transform to the canvas or an ancestor. RetroArch reads
+ * ResizeObserver devicePixelContentBoxSize; transforms change that size and
+ * cause `RuntimeError: memory access out of bounds` in the WASM main loop.
+ *
+ * Visual fit: center the 800×600 box in the host (letterbox). Fullscreen can
+ * still center a larger host around the same fixed stage.
+ */
 export const CANVAS_LAYOUT_WIDTH = 800
 export const CANVAS_LAYOUT_HEIGHT = 600
 
@@ -9,43 +16,18 @@ export const CANVAS_BUFFER_WIDTH = CANVAS_LAYOUT_WIDTH
 /** @deprecated alias */
 export const CANVAS_BUFFER_HEIGHT = CANVAS_LAYOUT_HEIGHT
 
-/**
- * Scale the fixed 800×600 stage (iframe) to fit the host. The iframe document
- * owns the real canvas at a stable 800×600 — do not touch its buffer from here.
- */
-export function lockEmulatorStage(stage: HTMLElement, host: HTMLElement): () => void {
-  stage.style.setProperty('width', `${CANVAS_LAYOUT_WIDTH}px`, 'important')
-  stage.style.setProperty('height', `${CANVAS_LAYOUT_HEIGHT}px`, 'important')
-  stage.style.setProperty('transform-origin', 'center center', 'important')
-
-  const fit = () => {
-    const rect = host.getBoundingClientRect()
-    if (rect.width < 1 || rect.height < 1) return
-    const scale = Math.min(
-      rect.width / CANVAS_LAYOUT_WIDTH,
-      rect.height / CANVAS_LAYOUT_HEIGHT,
-    )
-    stage.style.setProperty('transform', `scale(${scale})`, 'important')
-  }
-  fit()
-  const ro = new ResizeObserver(() => {
-    requestAnimationFrame(fit)
-  })
-  ro.observe(host)
-  window.addEventListener('resize', fit)
-
-  return () => {
-    ro.disconnect()
-    window.removeEventListener('resize', fit)
-  }
+export function canvasBackingStoreSize(): { width: number; height: number } {
+  return { width: CANVAS_LAYOUT_WIDTH, height: CANVAS_LAYOUT_HEIGHT }
 }
 
-/** @deprecated */
-export function lockEmulatorCanvas(
-  _nostalgist: Nostalgist,
-  _canvas: HTMLCanvasElement,
-  stage: HTMLElement,
-  host: HTMLElement,
-): () => void {
-  return lockEmulatorStage(stage, host)
+export function prepareCanvasLayout(canvas: HTMLCanvasElement): void {
+  if (!canvas.id) canvas.id = 'canvas'
+  canvas.style.setProperty('width', `${CANVAS_LAYOUT_WIDTH}px`, 'important')
+  canvas.style.setProperty('height', `${CANVAS_LAYOUT_HEIGHT}px`, 'important')
+  canvas.style.setProperty('max-width', 'none', 'important')
+  canvas.style.setProperty('max-height', 'none', 'important')
+  canvas.style.setProperty('display', 'block', 'important')
+  canvas.style.setProperty('position', 'static', 'important')
+  canvas.style.setProperty('transform', 'none', 'important')
+  canvas.style.setProperty('object-fit', 'fill', 'important')
 }

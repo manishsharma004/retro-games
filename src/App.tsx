@@ -38,8 +38,11 @@ export default function App() {
     onRelease: emu.pressUp,
   })
 
+  // Debounce persistence so slider drags do not sync localStorage every frame
+  // (storage I/O on the main thread stalls the emulator).
   useEffect(() => {
-    saveSettings(settings)
+    const timer = window.setTimeout(() => saveSettings(settings), 300)
+    return () => window.clearTimeout(timer)
   }, [settings])
 
   // Load bundled ROMs and auto-launch the default one on first visit.

@@ -51,12 +51,15 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
   const settingsRef = useRef(settings)
   // Ref-count presses so keyboard + on-screen pad can share a button.
   const pressCountsRef = useRef(new Map<string, number>())
+  const stateIoBusyRef = useRef(false)
   const [status, setStatus] = useState<EmulatorStatus>('idle')
   const [error, setError] = useState<string | null>(null)
   const [game, setGame] = useState<ActiveGame | null>(null)
   const [pending, setPending] = useState<PendingLaunch | null>(null)
+  const statusRef = useRef(status)
 
   settingsRef.current = settings
+  statusRef.current = status
 
   const cleanup = useCallback(() => {
     if (nostalgistRef.current) {
@@ -249,14 +252,40 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
   }, [])
 
   const saveState = useCallback(async () => {
-    if (!nostalgistRef.current) return
-    const { state } = await nostalgistRef.current.saveState()
-    savedStateRef.current = state
+    const emu = nostalgistRef.current
+    if (!emu || stateIoBusyRef.current) return
+    stateIoBusyRef.current = true
+    // Pause so RetroArch is not also simulating while the main thread blocks
+    // on SAVE_STATE (Emscripten has no real worker threads for this).
+    const wasRunning = statusRef.current === 'running'
+    try {
+      if (wasRunning) emu.pause()
+      const { state } = await emu.saveState()
+      savedStateRef.current = state
+    } finally {
+      if (wasRunning && nostalgistRef.current === emu) {
+        emu.resume()
+        setStatus('running')
+      }
+      stateIoBusyRef.current = false
+    }
   }, [])
 
   const loadState = useCallback(async () => {
-    if (!nostalgistRef.current || !savedStateRef.current) return
-    await nostalgistRef.current.loadState(savedStateRef.current)
+    const emu = nostalgistRef.current
+    if (!emu || !savedStateRef.current || stateIoBusyRef.current) return
+    stateIoBusyRef.current = true
+    const wasRunning = statusRef.current === 'running'
+    try {
+      if (wasRunning) emu.pause()
+      await emu.loadState(savedStateRef.current)
+    } finally {
+      if (wasRunning && nostalgistRef.current === emu) {
+        emu.resume()
+        setStatus('running')
+      }
+      stateIoBusyRef.current = false
+    }
   }, [])
 
   const mapButton = useCallback((button: string) => {

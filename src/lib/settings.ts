@@ -68,13 +68,24 @@ export function buildRetroarchConfig(settings: EmulatorSettings): Record<string,
     video_smooth: settings.videoSmooth,
     video_vsync: settings.videoVsync,
     video_frame_delay: 0,
+    video_shader_enable: Boolean(settings.shader),
     fastforward_frameskip: settings.frameSkip > 0,
     video_font_enable: false,
     video_scale_integer: settings.integerScale,
     aspect_ratio_index: 22, // Core provided
     audio_mute_enable: settings.audioMute,
     audio_volume: volumeDb,
-    savestate_thumbnail_enable: true,
+    // Slightly higher latency reduces WebAudio underrun hiccups on the main thread.
+    audio_latency: 128,
+    // Thumbnails force PNG encode on the Emscripten main thread and freeze play
+    // for multiple seconds on Save. Nostalgist also defaults this to true.
+    savestate_thumbnail_enable: false,
+    savestate_auto_save: false,
+    savestate_auto_load: false,
+    // Disable periodic SRAM flush (can stall the WASM loop for seconds).
+    autosave_interval: '0',
+    // Avoid unexpected pause/resume hitch when the tab briefly loses focus.
+    pause_nonactive: false,
     menu_driver: 'null',
     notice_show: false,
     // Keep RetroArch's default Z/X/arrow binds. useKeyboardControls claims

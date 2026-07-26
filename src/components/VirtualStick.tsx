@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type PointerEvent } from 'react'
+import { useCallback, useRef, type PointerEvent } from 'react'
 
 type Direction = 'up' | 'down' | 'left' | 'right'
 
@@ -12,12 +12,20 @@ interface VirtualStickProps {
  * D-pad button presses (8-way, so a single thumb can hold diagonals like
  * Up+Right). RetroPad analog axes are not driven directly because the emulator
  * press API is digital only.
+ *
+ * Knob position is updated via DOM transforms (not React state) so pointermove
+ * does not re-render the pad / App while the WASM core is running.
  */
 export function VirtualStick({ onPress, onRelease }: VirtualStickProps) {
   const baseRef = useRef<HTMLDivElement>(null)
+  const knobRef = useRef<HTMLDivElement>(null)
   const activeDirs = useRef<Set<Direction>>(new Set())
   const activePointer = useRef<number | null>(null)
-  const [knob, setKnob] = useState({ x: 0, y: 0 })
+
+  const setKnobOffset = useCallback((x: number, y: number) => {
+    const knob = knobRef.current
+    if (knob) knob.style.transform = `translate(${x}px, ${y}px)`
+  }, [])
 
   const releaseAll = useCallback(() => {
     for (const dir of activeDirs.current) onRelease(dir)
@@ -61,10 +69,10 @@ export function VirtualStick({ onPress, onRelease }: VirtualStickProps) {
       const clamped = Math.min(magnitude, radius)
       const nx = magnitude > 0 ? (dx / magnitude) * clamped : 0
       const ny = magnitude > 0 ? (dy / magnitude) * clamped : 0
-      setKnob({ x: nx, y: ny })
+      setKnobOffset(nx, ny)
       applyDirections(dx, dy, radius)
     },
-    [applyDirections],
+    [applyDirections, setKnobOffset],
   )
 
   const onPointerDown = useCallback(
@@ -92,10 +100,10 @@ export function VirtualStick({ onPress, onRelease }: VirtualStickProps) {
     (e: PointerEvent) => {
       if (activePointer.current !== e.pointerId) return
       activePointer.current = null
-      setKnob({ x: 0, y: 0 })
+      setKnobOffset(0, 0)
       releaseAll()
     },
-    [releaseAll],
+    [releaseAll, setKnobOffset],
   )
 
   return (
@@ -109,7 +117,7 @@ export function VirtualStick({ onPress, onRelease }: VirtualStickProps) {
       onPointerUp={onPointerEnd}
       onPointerCancel={onPointerEnd}
     >
-      <div className="vp-stick__knob" style={{ transform: `translate(${knob.x}px, ${knob.y}px)` }} />
+      <div ref={knobRef} className="vp-stick__knob" />
     </div>
   )
 }

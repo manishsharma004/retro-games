@@ -85,6 +85,11 @@ button {
   animation: scan 10s linear infinite;
 }
 
+/* Freeze decorative motion while the WASM core owns the main thread. */
+.app--playing .atmosphere::after {
+  animation: none;
+}
+
 @keyframes scan {
   from {
     transform: translateY(0);
@@ -345,8 +350,9 @@ button {
   padding: 0.55rem 0.75rem;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--panel);
-  backdrop-filter: blur(10px);
+  /* Opaque panel — backdrop-filter over a live WebGL canvas forces expensive
+     readbacks and contributes to hitching during play. */
+  background: #0c1c16;
 }
 
 .toolbar--overlay {

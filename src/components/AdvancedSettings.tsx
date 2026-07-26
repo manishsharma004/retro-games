@@ -12,6 +12,7 @@ interface AdvancedSettingsProps {
   gameName?: string | null
   coreName?: string | null
   gamepadCount: number
+  onOpenControllers?: () => void
 }
 
 export function AdvancedSettings({
@@ -25,6 +26,7 @@ export function AdvancedSettings({
   gameName,
   coreName,
   gamepadCount,
+  onOpenControllers,
 }: AdvancedSettingsProps) {
   if (!open) return null
 
@@ -308,7 +310,17 @@ export function AdvancedSettings({
               </div>
               <div>
                 <dt>Gamepads</dt>
-                <dd>{gamepadCount}</dd>
+                <dd>
+                  {gamepadCount}
+                  {onOpenControllers && (
+                    <>
+                      {' · '}
+                      <button type="button" className="btn btn--text" onClick={onOpenControllers}>
+                        Manage devices
+                      </button>
+                    </>
+                  )}
+                </dd>
               </div>
             </dl>
           </section>

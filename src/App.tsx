@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AdvancedSettings } from './components/AdvancedSettings'
+import { ControllerPanel } from './components/ControllerPanel'
 import { EmulatorScreen } from './components/EmulatorScreen'
 import { GamepadStatus } from './components/GamepadStatus'
 import { PeerLobby } from './components/PeerLobby'
@@ -7,9 +8,15 @@ import { RomLoader } from './components/RomLoader'
 import { VirtualController } from './components/VirtualController'
 import { useEmulator } from './hooks/useEmulator'
 import { useFullscreen } from './hooks/useFullscreen'
+import { useGamepadControls } from './hooks/useGamepadControls'
 import { useGamepads } from './hooks/useGamepads'
 import { useKeyboardControls } from './hooks/useKeyboardControls'
 import { usePeerSession } from './hooks/usePeerSession'
+import {
+  loadControllerBindings,
+  saveControllerBindings,
+  type ControllerBindings,
+} from './lib/gamepad'
 import { fetchLibrary, romUrl, type LibraryRom } from './lib/library'
 import { loadSettings, saveSettings, type EmulatorSettings } from './lib/settings'
 import './styles/app.css'
@@ -22,11 +29,16 @@ function prefersTouch(): boolean {
 
 export default function App() {
   const [settings, setSettings] = useState<EmulatorSettings>(() => loadSettings())
+  const [controllerBindings, setControllerBindings] = useState<ControllerBindings>(() =>
+    loadControllerBindings(),
+  )
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [peerOpen, setPeerOpen] = useState(false)
+  const [controllersOpen, setControllersOpen] = useState(false)
   const [touchDevice] = useState(() => prefersTouch())
   const [library, setLibrary] = useState<LibraryRom[]>([])
   const autoLoadedRef = useRef(false)
+  const skipAutoLoadRef = useRef(false)
   const shellRef = useRef<HTMLDivElement>(null)
   const { isFullscreen, toggle: toggleFullscreen } = useFullscreen(shellRef)
   const pads = useGamepads()
@@ -52,6 +64,8 @@ export default function App() {
       state: Uint8Array
       settings: Partial<EmulatorSettings>
     }) => {
+      skipAutoLoadRef.current = true
+      autoLoadedRef.current = true
       setSettings((prev) => ({
         ...prev,
         swapAB: payload.settings.swapAB ?? prev.swapAB,
@@ -67,15 +81,19 @@ export default function App() {
       emu.launchPeer({
         name: payload.name,
         system: payload.system,
-        rom: new Blob([payload.rom.buffer.slice(
-          payload.rom.byteOffset,
-          payload.rom.byteOffset + payload.rom.byteLength,
-        ) as ArrayBuffer]),
+        rom: new Blob([
+          payload.rom.buffer.slice(
+            payload.rom.byteOffset,
+            payload.rom.byteOffset + payload.rom.byteLength,
+          ) as ArrayBuffer,
+        ]),
         fileName: `${payload.name}.${ext}`,
-        state: new Blob([payload.state.buffer.slice(
-          payload.state.byteOffset,
-          payload.state.byteOffset + payload.state.byteLength,
-        ) as ArrayBuffer]),
+        state: new Blob([
+          payload.state.buffer.slice(
+            payload.state.byteOffset,
+            payload.state.byteOffset + payload.state.byteLength,
+          ) as ArrayBuffer,
+        ]),
         startPaused: true,
       })
     },
@@ -121,6 +139,7 @@ export default function App() {
 
   const localSeat = peer.seat ?? 1
   const peerPlaying = peer.phase === 'playing'
+  const peerLinked = peer.role !== null && peer.phase !== 'idle' && peer.phase !== 'error'
 
   const onLocalPress = useCallback(
     (button: string) => {
@@ -138,16 +157,49 @@ export default function App() {
     [emu, localSeat, peer, peerPlaying],
   )
 
-  const keyboardEnabled =
-    (emu.status === 'running' || emu.status === 'paused') && !settingsOpen && !peerOpen
+  const onPadPress = useCallback(
+    (button: string, player: number) => {
+      emu.pressDown(button, player)
+      if (peerPlaying && player === localSeat) peer.sendInput(button, true)
+    },
+    [emu, localSeat, peer, peerPlaying],
+  )
+
+  const onPadRelease = useCallback(
+    (button: string, player: number) => {
+      emu.pressUp(button, player)
+      if (peerPlaying && player === localSeat) peer.sendInput(button, false)
+    },
+    [emu, localSeat, peer, peerPlaying],
+  )
+
+  const inputEnabled =
+    (emu.status === 'running' || emu.status === 'paused') &&
+    !settingsOpen &&
+    !peerOpen &&
+    !controllersOpen
 
   useKeyboardControls({
-    enabled: keyboardEnabled,
+    enabled: inputEnabled,
     onPress: onLocalPress,
     onRelease: onLocalRelease,
   })
 
-  // Host periodic save-state push while linked.
+  useGamepadControls({
+    enabled: inputEnabled,
+    bindings: controllerBindings,
+    peerSeat: peerLinked ? localSeat : null,
+    onPress: onPadPress,
+    onRelease: onPadRelease,
+  })
+
+  useEffect(() => {
+    if (peer.role === 'guest') {
+      skipAutoLoadRef.current = true
+      autoLoadedRef.current = true
+    }
+  }, [peer.role])
+
   useEffect(() => {
     if (peer.phase !== 'playing' || peer.role !== 'host') return
     const id = window.setInterval(() => {
@@ -167,12 +219,17 @@ export default function App() {
   }, [settings])
 
   useEffect(() => {
+    const timer = window.setTimeout(() => saveControllerBindings(controllerBindings), 300)
+    return () => window.clearTimeout(timer)
+  }, [controllerBindings])
+
+  useEffect(() => {
     let cancelled = false
     void fetchLibrary().then((roms) => {
       if (cancelled) return
       setLibrary(roms)
       const preset = roms.find((rom) => rom.default)
-      if (preset && !autoLoadedRef.current) {
+      if (preset && !autoLoadedRef.current && !skipAutoLoadRef.current) {
         autoLoadedRef.current = true
         launchLibrary(preset)
       }
@@ -192,10 +249,13 @@ export default function App() {
 
   const canHostShareGame = Boolean(
     peer.role === 'host' &&
+      peer.connectionState === 'connected' &&
       emu.game &&
       (emu.status === 'running' || emu.status === 'paused') &&
       (emu.game.file || emu.game.source === 'demo' || emu.game.source === 'library'),
   )
+
+  const emuReadyForPeer = emu.status === 'running' || emu.status === 'paused'
 
   const shareGameWithPeer = useCallback(async () => {
     if (peer.role !== 'host' || !emu.game) throw new Error('Host must have a game loaded')
@@ -241,6 +301,9 @@ export default function App() {
             <button type="button" className="btn btn--primary" onClick={() => setPeerOpen(true)}>
               2 Player
             </button>
+            <button type="button" className="btn btn--ghost" onClick={() => setControllersOpen(true)}>
+              Controllers
+            </button>
           </div>
           {library.length > 0 && (
             <div className="library">
@@ -284,7 +347,7 @@ export default function App() {
             <div className="toolbar__actions">
               <RomLoader
                 compact
-                disabled={emu.status === 'loading'}
+                disabled={emu.status === 'loading' || peerPlaying}
                 onFile={emu.launchFile}
                 onDemo={emu.launchDemo}
               />
@@ -292,7 +355,12 @@ export default function App() {
                 2P
               </button>
               {emu.status === 'paused' ? (
-                <button type="button" className="btn btn--ghost" onClick={emu.resume}>
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={emu.resume}
+                  disabled={peer.phase === 'ready-wait'}
+                >
                   Resume
                 </button>
               ) : (
@@ -309,7 +377,7 @@ export default function App() {
                 type="button"
                 className="btn btn--ghost"
                 onClick={emu.restart}
-                disabled={emu.status === 'loading'}
+                disabled={emu.status === 'loading' || peerPlaying}
               >
                 Reset
               </button>
@@ -333,7 +401,7 @@ export default function App() {
                 type="button"
                 className="btn btn--ghost"
                 onClick={emu.toggleFastForward}
-                disabled={emu.status !== 'running'}
+                disabled={emu.status !== 'running' || peerPlaying}
               >
                 FF
               </button>
@@ -347,7 +415,7 @@ export default function App() {
                 Exit
               </button>
             </div>
-            <GamepadStatus pads={pads} />
+            <GamepadStatus pads={pads} onOpen={() => setControllersOpen(true)} />
           </div>
         )}
 
@@ -389,6 +457,19 @@ export default function App() {
         gameName={emu.game?.name}
         coreName={emu.game?.core}
         gamepadCount={pads.length}
+        onOpenControllers={() => {
+          setSettingsOpen(false)
+          setControllersOpen(true)
+        }}
+      />
+
+      <ControllerPanel
+        open={controllersOpen}
+        onClose={() => setControllersOpen(false)}
+        pads={pads}
+        bindings={controllerBindings}
+        onChange={setControllerBindings}
+        peerSeat={peerLinked ? localSeat : null}
       />
 
       <PeerLobby
@@ -403,6 +484,7 @@ export default function App() {
         error={peer.error}
         remoteReady={peer.remoteReady}
         canHostShareGame={canHostShareGame}
+        emuReady={emuReadyForPeer}
         onCreateHost={() => peer.createHostOffer()}
         onAcceptAnswer={(answer) => peer.acceptGuestAnswer(answer)}
         onJoinOffer={(offer) => peer.joinWithOffer(offer)}
@@ -416,12 +498,19 @@ export default function App() {
         }}
         onRequestResync={() => peer.requestResync()}
         onDisconnect={() => peer.disconnect()}
+        onOpenControllers={() => {
+          setPeerOpen(false)
+          setControllersOpen(true)
+        }}
       />
 
       {showLanding && (
         <footer className="site-footer">
           <button type="button" className="btn btn--text" onClick={() => setSettingsOpen(true)}>
             Advanced settings
+          </button>
+          <button type="button" className="btn btn--text" onClick={() => setControllersOpen(true)}>
+            Controllers
           </button>
           <button type="button" className="btn btn--text" onClick={() => setPeerOpen(true)}>
             2 Player

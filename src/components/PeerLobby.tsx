@@ -16,6 +16,7 @@ interface PeerLobbyProps {
   error: string | null
   remoteReady: boolean
   canHostShareGame: boolean
+  emuReady: boolean
   onCreateHost: () => void | Promise<void>
   onAcceptAnswer: (answer: string) => void | Promise<void>
   onJoinOffer: (offer: string) => void | Promise<void>
@@ -25,6 +26,7 @@ interface PeerLobbyProps {
   onResync: () => void | Promise<void>
   onRequestResync: () => void
   onDisconnect: () => void
+  onOpenControllers?: () => void
 }
 
 type ScanKind = 'offer' | 'answer'
@@ -41,6 +43,7 @@ export function PeerLobby({
   error,
   remoteReady,
   canHostShareGame,
+  emuReady,
   onCreateHost,
   onAcceptAnswer,
   onJoinOffer,
@@ -50,6 +53,7 @@ export function PeerLobby({
   onResync,
   onRequestResync,
   onDisconnect,
+  onOpenControllers,
 }: PeerLobbyProps) {
   const [pasteValue, setPasteValue] = useState('')
   const [qrUrl, setQrUrl] = useState<string | null>(null)
@@ -346,16 +350,33 @@ export function PeerLobby({
             {phase === 'connecting' && role === 'guest' && connectionState === 'connected' && (
               <p className="peer-lobby__hint">Connected — waiting for host to share the ROM…</p>
             )}
+            {(phase === 'ready-wait' || phase === 'playing') &&
+              role === 'host' &&
+              canHostShareGame && (
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  disabled={busy}
+                  onClick={() => void withBusy(onShareGame)}
+                >
+                  Re-share current ROM
+                </button>
+              )}
             {phase === 'ready-wait' && (
               <div className="peer-lobby__row">
-                <button type="button" className="btn btn--ghost" onClick={onReady}>
-                  Ready
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  disabled={!emuReady}
+                  onClick={onReady}
+                >
+                  {emuReady ? 'Ready' : 'Waiting for emulator…'}
                 </button>
                 {role === 'host' && (
                   <button
                     type="button"
                     className="btn btn--primary"
-                    disabled={!remoteReady}
+                    disabled={!remoteReady || !emuReady}
                     onClick={onGo}
                   >
                     {remoteReady ? 'Go — start together' : 'Waiting for guest ready…'}
@@ -378,6 +399,11 @@ export function PeerLobby({
                     Request resync
                   </button>
                 )}
+                {onOpenControllers && (
+                  <button type="button" className="btn btn--ghost" onClick={onOpenControllers}>
+                    Controllers
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -391,6 +417,15 @@ export function PeerLobby({
             </p>
           </div>
         )}
+
+        {(phase === 'idle' || phase === 'host-offer' || phase === 'guest-answer') &&
+          onOpenControllers && (
+            <div className="peer-lobby__row">
+              <button type="button" className="btn btn--ghost" onClick={onOpenControllers}>
+                Choose controllers
+              </button>
+            </div>
+          )}
 
         {(statusNote || error) && (
           <p className="peer-lobby__note">{error ?? statusNote}</p>

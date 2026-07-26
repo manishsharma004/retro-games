@@ -474,9 +474,10 @@ button {
 }
 
 .play-canvas {
-  /* Fixed layout size matching the emulator buffer. Visual fill is done with
-     CSS transform in lockEmulatorCanvas — NOT width/height 100%, which made
-     ResizeObserver report the stage size (1026×769) and crash WASM. */
+  /* Fixed CSS *layout* size. RetroArch sets the WebGL backing store to
+     layout × devicePixelRatio (e.g. 800×600 @ 1.28dpr → 1026×769). Visual
+     fill is CSS transform in lockEmulatorCanvas — NOT width/height 100%,
+     which made ResizeObserver chase the stage and crash WASM. */
   position: absolute;
   left: 50%;
   top: 50%;

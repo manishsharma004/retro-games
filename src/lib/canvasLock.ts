@@ -1,100 +1,86 @@
 import type { Nostalgist } from 'nostalgist'
 
-/** Fixed backing-store + CSS layout size for the emulator canvas. */
-export const CANVAS_BUFFER_WIDTH = 800
-export const CANVAS_BUFFER_HEIGHT = 600
-
-type ModuleCanvas = {
-  setCanvasSize?: (width: number, height: number) => void
-  canvas?: HTMLCanvasElement
-  _emscripten_set_canvas_element_size?: (target: unknown, w: number, h: number) => number
-  _emscripten_set_canvas_size?: (w: number, h: number) => void
-}
-
 /**
- * Install BEFORE Nostalgist.launch so RetroArch cannot observe real stage size.
- * Filters ResizeObserver notifications for the emulator canvas.
+ * Fixed CSS *layout* size for the emulator canvas.
+ *
+ * RetroArch's emscripten platform sets the WebGL backing store to
+ * `layoutSize * devicePixelRatio` (see PlatformEmscriptenWatchCanvasSizeAndDpr).
+ * CSS must stay fixed so ResizeObserver does not chase the stage size and enter
+ * an infinite resize loop. Visual fill of the stage is done with transform only.
  */
-export function installCanvasResizeObserverGuard(canvas: HTMLCanvasElement): () => void {
-  const OriginalRO = window.ResizeObserver
-  window.ResizeObserver = class GuardedResizeObserver extends OriginalRO {
-    constructor(callback: ResizeObserverCallback) {
-      super((entries, observer) => {
-        const filtered = entries.filter((entry) => entry.target !== canvas)
-        if (filtered.length === 0) return
-        callback(filtered, observer)
-      })
-    }
-  } as typeof ResizeObserver
+export const CANVAS_LAYOUT_WIDTH = 800
+export const CANVAS_LAYOUT_HEIGHT = 600
 
-  return () => {
-    window.ResizeObserver = OriginalRO
+/** @deprecated Use CANVAS_LAYOUT_WIDTH — kept for call-site clarity during migration. */
+export const CANVAS_BUFFER_WIDTH = CANVAS_LAYOUT_WIDTH
+/** @deprecated Use CANVAS_LAYOUT_HEIGHT */
+export const CANVAS_BUFFER_HEIGHT = CANVAS_LAYOUT_HEIGHT
+
+/** Backing-store size RetroArch / Nostalgist should use (CSS layout × DPR). */
+export function canvasBackingStoreSize(
+  layoutWidth = CANVAS_LAYOUT_WIDTH,
+  layoutHeight = CANVAS_LAYOUT_HEIGHT,
+  dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1,
+): { width: number; height: number } {
+  return {
+    width: Math.max(1, Math.round(layoutWidth * dpr)),
+    height: Math.max(1, Math.round(layoutHeight * dpr)),
   }
 }
 
 /**
- * After launch: freeze buffer size, use fixed CSS px (not 100%), scale with
- * transform so visuals fill the stage without changing layout metrics RA reads.
+ * Ensure layout metrics RA reads (clientWidth / RO contentRect) match the fixed
+ * CSS box *before* Nostalgist.launch. Do not freeze canvas.width/height — RA must
+ * be free to set the DPR-scaled backing store.
  */
-export function lockEmulatorCanvas(
-  nostalgist: Nostalgist,
-  canvas: HTMLCanvasElement,
-  stage: HTMLElement,
-  bufferWidth = CANVAS_BUFFER_WIDTH,
-  bufferHeight = CANVAS_BUFFER_HEIGHT,
-): () => void {
-  const cleanups: Array<() => void> = []
-  const nativeWidth = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'width')
-  const nativeHeight = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'height')
-
-  const writeBufferNative = () => {
-    try {
-      nativeWidth?.set?.call(canvas, bufferWidth)
-      nativeHeight?.set?.call(canvas, bufferHeight)
-    } catch {
-      // ignore
-    }
-  }
-
-  const Module = (() => {
-    try {
-      return nostalgist.getEmscriptenModule() as ModuleCanvas
-    } catch {
-      return null
-    }
-  })()
-
-  // Initial buffer via Emscripten if available.
-  try {
-    if (typeof Module?.setCanvasSize === 'function') {
-      Module.setCanvasSize(bufferWidth, bufferHeight)
-    } else {
-      writeBufferNative()
-    }
-  } catch {
-    writeBufferNative()
-  }
-
-  // CRITICAL: real CSS layout size must be the buffer size — NOT 100% of stage.
-  // ResizeObserver contentRect follows layout, not our clientWidth overrides.
-  canvas.style.setProperty('width', `${bufferWidth}px`, 'important')
-  canvas.style.setProperty('height', `${bufferHeight}px`, 'important')
+export function prepareCanvasLayout(canvas: HTMLCanvasElement): void {
+  canvas.style.setProperty('width', `${CANVAS_LAYOUT_WIDTH}px`, 'important')
+  canvas.style.setProperty('height', `${CANVAS_LAYOUT_HEIGHT}px`, 'important')
   canvas.style.setProperty('max-width', 'none', 'important')
   canvas.style.setProperty('max-height', 'none', 'important')
   canvas.style.setProperty('position', 'absolute', 'important')
-  canvas.style.setProperty('inset', 'auto', 'important')
   canvas.style.setProperty('left', '50%', 'important')
   canvas.style.setProperty('top', '50%', 'important')
   canvas.style.setProperty('right', 'auto', 'important')
   canvas.style.setProperty('bottom', 'auto', 'important')
+  canvas.style.setProperty('inset', 'auto', 'important')
+  canvas.style.setProperty('display', 'block', 'important')
   canvas.style.setProperty('object-fit', 'fill', 'important')
   canvas.style.setProperty('transform-origin', 'center center', 'important')
+  canvas.style.setProperty(
+    'transform',
+    'translate(-50%, -50%) scale(1)',
+    'important',
+  )
+}
 
-  // Scale visually; transform does not change clientWidth / RO contentRect.
+/**
+ * After launch: keep fixed CSS layout and scale with transform so the stage is
+ * filled without changing layout metrics RetroArch reads.
+ *
+ * Intentionally does NOT:
+ * - freeze canvas.width / height (desyncs GL buffer from RA's DPR size → OOB)
+ * - clamp Module.setCanvasSize to CSS pixels (same desync)
+ * - filter ResizeObserver on the canvas (blocks RA from correcting size)
+ */
+export function lockEmulatorCanvas(
+  _nostalgist: Nostalgist,
+  canvas: HTMLCanvasElement,
+  stage: HTMLElement,
+  layoutWidth = CANVAS_LAYOUT_WIDTH,
+  layoutHeight = CANVAS_LAYOUT_HEIGHT,
+): () => void {
+  const cleanups: Array<() => void> = []
+
+  prepareCanvasLayout(canvas)
+  // Re-assert layout sizes in case Nostalgist/RA tweaked style during init.
+  canvas.style.setProperty('width', `${layoutWidth}px`, 'important')
+  canvas.style.setProperty('height', `${layoutHeight}px`, 'important')
+
   const fit = () => {
     const rect = stage.getBoundingClientRect()
     if (rect.width < 1 || rect.height < 1) return
-    const scale = Math.min(rect.width / bufferWidth, rect.height / bufferHeight)
+    const scale = Math.min(rect.width / layoutWidth, rect.height / layoutHeight)
     canvas.style.setProperty(
       'transform',
       `translate(-50%, -50%) scale(${scale})`,
@@ -108,98 +94,13 @@ export function lockEmulatorCanvas(
   stageRo.observe(stage)
   cleanups.push(() => stageRo.disconnect())
 
-  // Freeze attribute accessors.
-  if (nativeWidth?.set && nativeHeight?.set) {
-    try {
-      Object.defineProperty(canvas, 'width', {
-        configurable: true,
-        enumerable: true,
-        get: () => bufferWidth,
-        set: () => {
-          /* ignore RA writes */
-        },
-      })
-      Object.defineProperty(canvas, 'height', {
-        configurable: true,
-        enumerable: true,
-        get: () => bufferHeight,
-        set: () => {
-          /* ignore */
-        },
-      })
-      cleanups.push(() => {
-        Object.defineProperty(canvas, 'width', {
-          configurable: true,
-          enumerable: true,
-          get: nativeWidth.get,
-          set: nativeWidth.set,
-        })
-        Object.defineProperty(canvas, 'height', {
-          configurable: true,
-          enumerable: true,
-          get: nativeHeight.get,
-          set: nativeHeight.set,
-        })
-      })
-    } catch {
-      // ignore
-    }
+  // If the browser zoom / DPR changes, ask RA to re-measure. Fixed CSS keeps
+  // layout stable; RA's own observer updates the backing store.
+  const onWindowResize = () => {
+    requestAnimationFrame(fit)
   }
-
-  // Clamp Module.setCanvasSize.
-  if (Module && typeof Module.setCanvasSize === 'function') {
-    const original = Module.setCanvasSize.bind(Module)
-    Module.setCanvasSize = (width: number, height: number) => {
-      if (width === bufferWidth && height === bufferHeight) {
-        try {
-          writeBufferNative()
-          original(bufferWidth, bufferHeight)
-        } catch {
-          writeBufferNative()
-        }
-      }
-      // Drop stage-sized requests (1026×769 etc.).
-    }
-    cleanups.push(() => {
-      Module.setCanvasSize = original
-    })
-  }
-
-  // Clamp low-level Emscripten canvas size helpers if present.
-  if (Module && typeof Module._emscripten_set_canvas_element_size === 'function') {
-    const original = Module._emscripten_set_canvas_element_size.bind(Module)
-    Module._emscripten_set_canvas_element_size = (_target, w, h) => {
-      if (w === bufferWidth && h === bufferHeight) {
-        try {
-          return original(_target, bufferWidth, bufferHeight)
-        } catch {
-          return 0
-        }
-      }
-      return 0
-    }
-    cleanups.push(() => {
-      Module._emscripten_set_canvas_element_size = original
-    })
-  }
-  if (Module && typeof Module._emscripten_set_canvas_size === 'function') {
-    const original = Module._emscripten_set_canvas_size.bind(Module)
-    Module._emscripten_set_canvas_size = (w, h) => {
-      if (w === bufferWidth && h === bufferHeight) {
-        try {
-          original(bufferWidth, bufferHeight)
-        } catch {
-          // ignore
-        }
-      }
-    }
-    cleanups.push(() => {
-      Module._emscripten_set_canvas_size = original
-    })
-  }
-
-  // Re-assert native buffer after traps are installed.
-  writeBufferNative()
+  window.addEventListener('resize', onWindowResize)
+  cleanups.push(() => window.removeEventListener('resize', onWindowResize))
 
   return () => {
     for (const fn of cleanups.reverse()) {
@@ -210,4 +111,15 @@ export function lockEmulatorCanvas(
       }
     }
   }
+}
+
+/**
+ * @deprecated No longer used — filtering RO caused RA's internal fb size to
+ * diverge from the real GL buffer. Kept as a no-op so older call sites compile
+ * until fully removed.
+ */
+export function installCanvasResizeObserverGuard(
+  _canvas: HTMLCanvasElement,
+): () => void {
+  return () => {}
 }

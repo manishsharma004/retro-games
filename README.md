@@ -17,6 +17,8 @@ https://manishsharma004.github.io/retro-games/
 
 Deploys automatically to GitHub Pages on every push to `main` (see `.github/workflows/deploy-pages.yml`).
 
+> First-time setup: in the repo **Settings → Pages → Build and deployment**, set **Source** to **GitHub Actions**, then re-run the workflow if needed.
+
 ## Quick start
 
 ```bash

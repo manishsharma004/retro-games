@@ -524,6 +524,32 @@ button {
   flex-shrink: 0;
 }
 
+/* Overlay mode: float semi-transparent controls over the game so the full
+   screen is used for display. Empty space passes taps through to the game. */
+.virtual-pad--overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  max-width: 100%;
+  padding: 0 1.25rem 1rem;
+  z-index: 6;
+  opacity: 0.5;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.virtual-pad--overlay:focus-within,
+.virtual-pad--overlay:active {
+  opacity: 0.85;
+}
+
+.virtual-pad--overlay .vp-btn,
+.virtual-pad--overlay .vp-stick {
+  pointer-events: auto;
+}
+
 .virtual-pad__shoulders {
   display: flex;
   justify-content: space-between;
@@ -589,6 +615,34 @@ button {
 .vp-dpad__down {
   grid-column: 2;
   grid-row: 3;
+}
+
+.vp-stick {
+  position: relative;
+  width: 8rem;
+  height: 8rem;
+  border-radius: 50%;
+  border: 1px solid rgba(61, 255, 154, 0.25);
+  background:
+    radial-gradient(circle at 50% 50%, rgba(61, 255, 154, 0.08), transparent 70%),
+    rgba(20, 48, 36, 0.85);
+  justify-self: start;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.vp-stick__knob {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3.4rem;
+  height: 3.4rem;
+  margin: -1.7rem 0 0 -1.7rem;
+  border-radius: 50%;
+  background: rgba(61, 255, 154, 0.32);
+  border: 1px solid var(--accent);
+  box-shadow: 0 0 12px rgba(61, 255, 154, 0.35);
+  pointer-events: none;
 }
 
 .vp-meta {
@@ -821,7 +875,8 @@ button {
       'meta meta';
   }
 
-  .vp-dpad {
+  .vp-dpad,
+  .vp-stick {
     grid-area: dpad;
   }
 

@@ -188,6 +188,8 @@ export default function App() {
               onPress={emu.pressDown}
               onRelease={emu.pressUp}
               visible={showVirtual && emu.status !== 'loading'}
+              dpadMode={settings.virtualDpadMode}
+              overlay={settings.virtualControlsOverlay}
             />
           )}
         </EmulatorScreen>

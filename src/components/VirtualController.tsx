@@ -1,5 +1,6 @@
 import { useCallback, useRef, type PointerEvent } from 'react'
 import type { SystemId } from '../lib/cores'
+import { VirtualStick } from './VirtualStick'
 
 type ButtonName =
   | 'up'
@@ -20,6 +21,8 @@ interface VirtualControllerProps {
   onPress: (button: string) => void
   onRelease: (button: string) => void
   visible: boolean
+  dpadMode: 'dpad' | 'stick'
+  overlay: boolean
 }
 
 export function VirtualController({
@@ -27,6 +30,8 @@ export function VirtualController({
   onPress,
   onRelease,
   visible,
+  dpadMode,
+  overlay,
 }: VirtualControllerProps) {
   const active = useRef(new Set<string>())
 
@@ -62,7 +67,10 @@ export function VirtualController({
   const isSnes = system === 'snes'
 
   return (
-    <div className="virtual-pad" aria-label="On-screen controller">
+    <div
+      className={`virtual-pad ${overlay ? 'virtual-pad--overlay' : ''}`}
+      aria-label="On-screen controller"
+    >
       <div className="virtual-pad__shoulders">
         {isSnes && (
           <>
@@ -77,28 +85,32 @@ export function VirtualController({
       </div>
 
       <div className="virtual-pad__main">
-        <div className="vp-dpad" role="group" aria-label="D-pad">
-          <button type="button" className="vp-btn vp-dpad__up" {...bind('up')} aria-label="Up" />
-          <button
-            type="button"
-            className="vp-btn vp-dpad__left"
-            {...bind('left')}
-            aria-label="Left"
-          />
-          <div className="vp-dpad__center" />
-          <button
-            type="button"
-            className="vp-btn vp-dpad__right"
-            {...bind('right')}
-            aria-label="Right"
-          />
-          <button
-            type="button"
-            className="vp-btn vp-dpad__down"
-            {...bind('down')}
-            aria-label="Down"
-          />
-        </div>
+        {dpadMode === 'stick' ? (
+          <VirtualStick onPress={onPress} onRelease={onRelease} />
+        ) : (
+          <div className="vp-dpad" role="group" aria-label="D-pad">
+            <button type="button" className="vp-btn vp-dpad__up" {...bind('up')} aria-label="Up" />
+            <button
+              type="button"
+              className="vp-btn vp-dpad__left"
+              {...bind('left')}
+              aria-label="Left"
+            />
+            <div className="vp-dpad__center" />
+            <button
+              type="button"
+              className="vp-btn vp-dpad__right"
+              {...bind('right')}
+              aria-label="Right"
+            />
+            <button
+              type="button"
+              className="vp-btn vp-dpad__down"
+              {...bind('down')}
+              aria-label="Down"
+            />
+          </div>
+        )}
 
         <div className="vp-meta">
           <button type="button" className="vp-btn vp-btn--meta" {...bind('select')}>

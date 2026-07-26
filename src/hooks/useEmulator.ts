@@ -2,8 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Nostalgist } from 'nostalgist'
 import { SYSTEMS, type SystemId, detectSystem } from '../lib/cores'
 import {
-  CANVAS_LAYOUT_HEIGHT,
-  CANVAS_LAYOUT_WIDTH,
   canvasBackingStoreSize,
   lockEmulatorCanvas,
   prepareCanvasLayout,
@@ -171,7 +169,6 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
             ...buildRetroarchConfig(current),
             savestate_thumbnail_enable: false,
             menu_driver: 'null',
-            notice_show: false,
             video_font_enable: false,
           },
           retroarchCoreConfig: buildCoreConfig(pending.game.system, current),

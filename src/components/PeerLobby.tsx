@@ -246,7 +246,8 @@ export function PeerLobby({
                 </div>
                 <p className="peer-lobby__hint">
                   Send the string through iMessage, WhatsApp, Slack, email, or any chat — then paste on
-                  the other device. Same Wi‑Fi or hotspot recommended for WebRTC.
+                  the other device. Take your time pasting; the host waits for the answer. Same Wi‑Fi
+                  or hotspot recommended for WebRTC.
                 </p>
               </div>
             )}
@@ -382,6 +383,15 @@ export function PeerLobby({
           </div>
         )}
 
+        {phase === 'error' && (
+          <div className="peer-lobby__status">
+            <p className="peer-lobby__hint">
+              Signaling was interrupted. Disconnect and create a fresh host offer, then paste the
+              answer before starting a new exchange on the other device.
+            </p>
+          </div>
+        )}
+
         {(statusNote || error) && (
           <p className="peer-lobby__note">{error ?? statusNote}</p>
         )}
@@ -398,7 +408,7 @@ export function PeerLobby({
                 setStatusNote(null)
               }}
             >
-              Disconnect
+              {phase === 'error' ? 'Start over' : 'Disconnect'}
             </button>
           </div>
         )}

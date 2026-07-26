@@ -177,6 +177,35 @@ export function AdvancedSettings({
               Overlay floats semi-transparent controls over the game so the full screen is used for
               display.
             </p>
+            <label className="field">
+              <span>Control size</span>
+              <select
+                value={settings.virtualControlsSize}
+                onChange={(e) =>
+                  patch(
+                    'virtualControlsSize',
+                    e.target.value as EmulatorSettings['virtualControlsSize'],
+                  )
+                }
+              >
+                <option value="small">Small</option>
+                <option value="medium">Medium</option>
+                <option value="large">Large</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Overlay opacity</span>
+              <input
+                type="range"
+                min={20}
+                max={100}
+                step={5}
+                value={Math.round(settings.virtualControlsOpacity * 100)}
+                disabled={!settings.virtualControlsOverlay}
+                onChange={(e) => patch('virtualControlsOpacity', Number(e.target.value) / 100)}
+              />
+              <em>{Math.round(settings.virtualControlsOpacity * 100)}%</em>
+            </label>
             <label className="field field--row">
               <span>Swap A/B (and X/Y)</span>
               <input

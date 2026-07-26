@@ -190,6 +190,8 @@ export default function App() {
               visible={showVirtual && emu.status !== 'loading'}
               dpadMode={settings.virtualDpadMode}
               overlay={settings.virtualControlsOverlay}
+              size={settings.virtualControlsSize}
+              opacity={settings.virtualControlsOpacity}
             />
           )}
         </EmulatorScreen>

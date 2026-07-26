@@ -10,6 +10,8 @@ export interface EmulatorSettings {
   showVirtualController: boolean | 'auto'
   virtualDpadMode: 'dpad' | 'stick'
   virtualControlsOverlay: boolean
+  virtualControlsSize: 'small' | 'medium' | 'large'
+  virtualControlsOpacity: number
   swapAB: boolean
   allowOpposingDirections: boolean
   frameSkip: number
@@ -29,6 +31,8 @@ export const DEFAULT_SETTINGS: EmulatorSettings = {
   showVirtualController: 'auto',
   virtualDpadMode: 'dpad',
   virtualControlsOverlay: false,
+  virtualControlsSize: 'medium',
+  virtualControlsOpacity: 0.5,
   swapAB: false,
   allowOpposingDirections: true,
   frameSkip: 0,

@@ -1,4 +1,4 @@
-import { useCallback, useRef, type PointerEvent } from 'react'
+import { useCallback, useRef, type CSSProperties, type PointerEvent } from 'react'
 import type { SystemId } from '../lib/cores'
 import { VirtualStick } from './VirtualStick'
 
@@ -23,6 +23,14 @@ interface VirtualControllerProps {
   visible: boolean
   dpadMode: 'dpad' | 'stick'
   overlay: boolean
+  size: 'small' | 'medium' | 'large'
+  opacity: number
+}
+
+const SIZE_SCALE: Record<VirtualControllerProps['size'], number> = {
+  small: 0.8,
+  medium: 1,
+  large: 1.25,
 }
 
 export function VirtualController({
@@ -32,6 +40,8 @@ export function VirtualController({
   visible,
   dpadMode,
   overlay,
+  size,
+  opacity,
 }: VirtualControllerProps) {
   const active = useRef(new Set<string>())
 
@@ -65,10 +75,15 @@ export function VirtualController({
   if (!visible) return null
 
   const isSnes = system === 'snes'
+  const style = {
+    '--vp-scale': SIZE_SCALE[size],
+    '--vp-opacity': opacity,
+  } as CSSProperties
 
   return (
     <div
       className={`virtual-pad ${overlay ? 'virtual-pad--overlay' : ''}`}
+      style={style}
       aria-label="On-screen controller"
     >
       <div className="virtual-pad__shoulders">

@@ -1,8 +1,11 @@
 import type { RefObject } from 'react'
 import type { SystemId } from '../lib/cores'
+import { CANVAS_LAYOUT_HEIGHT, CANVAS_LAYOUT_WIDTH } from '../lib/canvasLock'
 
 interface EmulatorScreenProps {
-  canvasRef: RefObject<HTMLCanvasElement | null>
+  frameRef: RefObject<HTMLIFrameElement | null>
+  hostRef: RefObject<HTMLDivElement | null>
+  stageRef: RefObject<HTMLDivElement | null>
   system: SystemId | null
   status: string
   shellRef: RefObject<HTMLDivElement | null>
@@ -11,7 +14,9 @@ interface EmulatorScreenProps {
 }
 
 export function EmulatorScreen({
-  canvasRef,
+  frameRef,
+  hostRef,
+  stageRef,
   system: _system,
   status,
   shellRef,
@@ -19,19 +24,21 @@ export function EmulatorScreen({
   children,
 }: EmulatorScreenProps) {
   const showPlaceholder = status === 'idle' || status === 'error'
+  const frameSrc = `${import.meta.env.BASE_URL}emulator-frame.html`
 
   return (
     <div className="play-shell" ref={shellRef}>
-      {/* Host is the flexible viewport; stage is a fixed 800×600 box (same as the
-          working nostalgist smoke test) scaled to fit via transform. */}
-      <div className="play-stage-host">
-        <div className="play-stage">
-          <canvas
-            id="canvas"
-            ref={canvasRef}
-            className={`play-canvas ${showPlaceholder ? 'play-canvas--hidden' : ''}`}
-            width={800}
-            height={600}
+      <div className="play-stage-host" ref={hostRef}>
+        <div className="play-stage" ref={stageRef}>
+          <iframe
+            ref={frameRef}
+            className={`play-frame ${showPlaceholder ? 'play-frame--hidden' : ''}`}
+            title="Retro Games emulator"
+            src={frameSrc}
+            width={CANVAS_LAYOUT_WIDTH}
+            height={CANVAS_LAYOUT_HEIGHT}
+            // Same-origin frame; allow autoplay/gamepad for the WASM core.
+            allow="autoplay; gamepad"
           />
           {status === 'loading' && (
             <div className="play-overlay">

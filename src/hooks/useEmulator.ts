@@ -5,6 +5,7 @@ import {
   CANVAS_LAYOUT_HEIGHT,
   CANVAS_LAYOUT_WIDTH,
   canvasBackingStoreSize,
+  installEmulatorPixelRatioGuard,
   lockEmulatorCanvas,
   prepareCanvasLayout,
 } from '../lib/canvasLock'
@@ -140,11 +141,15 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
         const system = SYSTEMS[pending.game.system]
         const stage = canvas.parentElement
 
-        // Fixed CSS layout before RA's ResizeObserver reads clientWidth.
-        // Backing store must be layout × devicePixelRatio — matching what
-        // PlatformEmscriptenWatchCanvasSizeAndDpr sets — so Nostalgist's
-        // postRun resize() does not shrink the GL buffer and OOB the main loop.
+        // Fixed CSS layout + spoof DPR=1 before RA attaches ResizeObserver.
+        // Cloud/browser zoom can report wild devicePixelRatio values; RA would
+        // then allocate layout×DPR GL buffers and OOB the WASM heap.
         prepareCanvasLayout(canvas)
+        const removePixelGuard = installEmulatorPixelRatioGuard(
+          canvas,
+          CANVAS_LAYOUT_WIDTH,
+          CANVAS_LAYOUT_HEIGHT,
+        )
         const backing = canvasBackingStoreSize(
           CANVAS_LAYOUT_WIDTH,
           CANVAS_LAYOUT_HEIGHT,
@@ -174,12 +179,13 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
         })
 
         if (cancelled) {
+          removePixelGuard()
           nostalgist.exit({ removeCanvas: false })
           return
         }
 
         canvasStabilizeCleanupRef.current?.()
-        canvasStabilizeCleanupRef.current = stage
+        const unlock = stage
           ? lockEmulatorCanvas(
               nostalgist,
               canvas,
@@ -187,7 +193,11 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
               CANVAS_LAYOUT_WIDTH,
               CANVAS_LAYOUT_HEIGHT,
             )
-          : null
+          : () => {}
+        canvasStabilizeCleanupRef.current = () => {
+          unlock()
+          removePixelGuard()
+        }
 
         nostalgistRef.current = nostalgist
         if (pending.startPaused) {

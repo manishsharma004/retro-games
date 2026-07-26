@@ -104,10 +104,11 @@ export function VirtualController({
           <VirtualStick onPress={onPress} onRelease={onRelease} />
         ) : (
           <div className="vp-dpad" role="group" aria-label="D-pad">
-            <button type="button" className="vp-btn vp-dpad__up" {...bind('up')} aria-label="Up" />
+            <button type="button" className="vp-btn vp-dpad__up" tabIndex={-1} {...bind('up')} aria-label="Up" />
             <button
               type="button"
               className="vp-btn vp-dpad__left"
+              tabIndex={-1}
               {...bind('left')}
               aria-label="Left"
             />
@@ -115,12 +116,14 @@ export function VirtualController({
             <button
               type="button"
               className="vp-btn vp-dpad__right"
+              tabIndex={-1}
               {...bind('right')}
               aria-label="Right"
             />
             <button
               type="button"
               className="vp-btn vp-dpad__down"
+              tabIndex={-1}
               {...bind('down')}
               aria-label="Down"
             />
@@ -147,10 +150,10 @@ export function VirtualController({
               </button>
             </>
           )}
-          <button type="button" className="vp-btn vp-btn--face vp-btn--b" {...bind('b')}>
+          <button type="button" className="vp-btn vp-btn--face vp-btn--b" tabIndex={-1} {...bind('b')}>
             B
           </button>
-          <button type="button" className="vp-btn vp-btn--face vp-btn--a" {...bind('a')}>
+          <button type="button" className="vp-btn vp-btn--face vp-btn--a" tabIndex={-1} {...bind('a')}>
             A
           </button>
         </div>

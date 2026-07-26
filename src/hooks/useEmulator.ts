@@ -49,6 +49,8 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
   const savedStateRef = useRef<Blob | null>(null)
   const gameRef = useRef<ActiveGame | null>(null)
   const settingsRef = useRef(settings)
+  // Ref-count presses so keyboard + on-screen pad can share a button.
+  const pressCountsRef = useRef(new Map<string, number>())
   const [status, setStatus] = useState<EmulatorStatus>('idle')
   const [error, setError] = useState<string | null>(null)
   const [game, setGame] = useState<ActiveGame | null>(null)
@@ -65,6 +67,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
       }
       nostalgistRef.current = null
     }
+    pressCountsRef.current.clear()
   }, [])
 
   useEffect(() => () => cleanup(), [cleanup])
@@ -265,16 +268,24 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     return button
   }, [])
 
+  // Ref-count presses so keyboard + on-screen pad can hold the same button
+  // without one side's release canceling the other.
   const pressDown = useCallback(
     (button: string) => {
-      nostalgistRef.current?.pressDown(mapButton(button))
+      const mapped = mapButton(button)
+      const next = (pressCountsRef.current.get(mapped) ?? 0) + 1
+      pressCountsRef.current.set(mapped, next)
+      if (next === 1) nostalgistRef.current?.pressDown(mapped)
     },
     [mapButton],
   )
 
   const pressUp = useCallback(
     (button: string) => {
-      nostalgistRef.current?.pressUp(mapButton(button))
+      const mapped = mapButton(button)
+      const next = Math.max(0, (pressCountsRef.current.get(mapped) ?? 0) - 1)
+      pressCountsRef.current.set(mapped, next)
+      if (next === 0) nostalgistRef.current?.pressUp(mapped)
     },
     [mapButton],
   )

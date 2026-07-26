@@ -7,6 +7,7 @@ import { VirtualController } from './components/VirtualController'
 import { useEmulator } from './hooks/useEmulator'
 import { useFullscreen } from './hooks/useFullscreen'
 import { useGamepads } from './hooks/useGamepads'
+import { useKeyboardControls } from './hooks/useKeyboardControls'
 import { fetchLibrary, type LibraryRom } from './lib/library'
 import { loadSettings, saveSettings, type EmulatorSettings } from './lib/settings'
 import './styles/app.css'
@@ -27,6 +28,15 @@ export default function App() {
 
   const emu = useEmulator(settings)
   const { launchLibrary } = emu
+
+  const keyboardEnabled =
+    (emu.status === 'running' || emu.status === 'paused') && !settingsOpen
+
+  useKeyboardControls({
+    enabled: keyboardEnabled,
+    onPress: emu.pressDown,
+    onRelease: emu.pressUp,
+  })
 
   useEffect(() => {
     saveSettings(settings)

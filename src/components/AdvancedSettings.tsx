@@ -233,6 +233,11 @@ export function AdvancedSettings({
                 <li>Y / X (SNES): A / S</li>
                 <li>Start / Select: Enter / Shift</li>
               </ul>
+              <p className="settings-hint">
+                Z+X and Z+arrows are handled by a dedicated keyboard bridge so
+                presses are not dropped when toolbar or on-screen buttons have
+                focus.
+              </p>
             </div>
           </section>
 

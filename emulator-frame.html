@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=800, height=600" />
+    <title>Emulator frame</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 800px;
+        height: 600px;
+        overflow: hidden;
+        background: #000;
+      }
+      #canvas {
+        width: 800px;
+        height: 600px;
+        display: block;
+        background: #000;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="canvas" width="800" height="600"></canvas>
+    <script type="module" src="/src/emulatorFrameMain.ts"></script>
+  </body>
+</html>

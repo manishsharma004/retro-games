@@ -19,11 +19,13 @@ suite.
 - Keyboard input during play is handled by `useKeyboardControls` (capture-phase
   listeners → `pressDown`/`pressUp` with `stopPropagation`). This avoids
   Nostalgist's `respondToGlobalEvents` path, which ignores keys while focus is
-  on interactable elements (toolbar / on-screen `<button>`s) and was dropping
-  Z+X / Z+arrow combos. RetroArch keeps its default Z/X/arrow binds because
-  `pressDown` synthesizes those same key codes — do not remap to `num*`
-  (Nostalgist maps `num1`→`Numpad1` while RetroArch treats `num1` as digit 1).
-  Synthetic/automated key events (computer-use) may still be flaky against the
+  on interactable elements (toolbar / on-screen `<button>`s).
+- **Keyboard ghosting:** Z + arrow + X cannot register on many membrane
+  keyboards (Mario run+jump while moving). A is primarily **Space** (X still
+  works as an alternate). RetroArch keeps default Z/X/arrow binds because
+  `pressDown` synthesizes those codes — do not remap to `num*` (Nostalgist
+  maps `num1`→`Numpad1` while RetroArch treats `num1` as digit 1).
+- Synthetic/automated key events (computer-use) may still be flaky against the
   WASM core; prefer on-screen controls for automation, and test real keyboard
   input manually in a browser.
 - The on-screen virtual controller shows whenever the browser reports a coarse pointer; the cloud VM's browser reports touch, so the pad appears even on the "desktop" cloud browser (it is hidden on real non-touch desktops).

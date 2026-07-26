@@ -330,16 +330,14 @@ button {
 }
 
 .player--parked {
+  /* Keep real layout size so a launch that races the idle→playing transition
+     still sees an 800×600 canvas (1×1 clip caused WASM OOB / black screen). */
   position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  min-height: 0;
-  padding: 0;
+  inset: 0;
+  visibility: hidden;
   pointer-events: none;
   opacity: 0;
+  z-index: -1;
 }
 
 .toolbar {

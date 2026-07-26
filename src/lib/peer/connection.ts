@@ -45,6 +45,8 @@ export interface PeerConnectionHandlers {
     data: Uint8Array
   }) => void
   onError?: (error: Error) => void
+  /** Guest regenerated answer after ICE died while waiting for host — re-share this string. */
+  onSignalRefresh?: (signal: string) => void
 }
 
 interface PendingTransfer {
@@ -54,7 +56,7 @@ interface PendingTransfer {
   received: number
 }
 
-function waitForIceGathering(pc: RTCPeerConnection): Promise<void> {
+function waitForIceGathering(pc: RTCPeerConnection, timeoutMs = 8000): Promise<void> {
   if (pc.iceGatheringState === 'complete') return Promise.resolve()
   return new Promise((resolve) => {
     let done = false
@@ -69,8 +71,7 @@ function waitForIceGathering(pc: RTCPeerConnection): Promise<void> {
       if (pc.iceGatheringState === 'complete') finish()
     }
     pc.addEventListener('icegatheringstatechange', check)
-    // Safety timeout — use whatever candidates we have.
-    const timer = window.setTimeout(finish, 2500)
+    const timer = window.setTimeout(finish, timeoutMs)
   })
 }
 
@@ -85,6 +86,10 @@ export class PeerConnection {
   /** True after the offerer has applied the remote answer (both sides can finish ICE). */
   private offererAnswerApplied = false
   private connectWatchTimer: number | null = null
+  /** Raw remote offer SDP — used to refresh a guest answer if ICE dies while waiting. */
+  private remoteOfferSdp: string | null = null
+  private refreshingAnswer = false
+  private isAnswerer = false
 
   constructor(handlers: PeerConnectionHandlers = {}) {
     this.handlers = handlers
@@ -118,7 +123,7 @@ export class PeerConnection {
       if (this.state === 'connecting' || this.state === 'awaiting-answer') {
         this.handlers.onError?.(
           new Error(
-            'Connection timed out — start a new session, paste the answer sooner, or use the same Wi‑Fi',
+            'Connection timed out — start a new session on both devices (same Wi‑Fi/hotspot), and paste the latest answer',
           ),
         )
         this.setState('failed')
@@ -126,26 +131,44 @@ export class PeerConnection {
     }, timeoutMs)
   }
 
+  private teardownPc(keepOffer = false) {
+    this.clearConnectWatch()
+    try {
+      this.channel?.close()
+    } catch {
+      // ignore
+    }
+    try {
+      this.pc?.close()
+    } catch {
+      // ignore
+    }
+    this.channel = null
+    this.pc = null
+    this.pending.clear()
+    this.transferKinds.clear()
+    this.offererAnswerApplied = false
+    if (!keepOffer) this.remoteOfferSdp = null
+  }
+
   private ensurePc(): RTCPeerConnection {
     if (this.pc) return this.pc
     const pc = new RTCPeerConnection({
       iceServers: ICE_SERVERS,
-      iceCandidatePoolSize: 8,
+      iceCandidatePoolSize: 10,
     })
     pc.onconnectionstatechange = () => {
       const s = pc.connectionState
       if (s === 'connected') {
         this.clearConnectWatch()
-        this.setState('connected')
+        // Prefer DataChannel onopen as the source of truth; still mark connected here.
+        if (this.channel?.readyState === 'open') this.setState('connected')
+        else if (!SIGNALING_WAIT_STATES.has(this.state)) this.setState('connecting')
         return
       }
-      // While waiting for paste of offer/answer, browsers may report connecting/failed
-      // because ICE has no remote peer yet — ignore those so the host can still paste.
       if (SIGNALING_WAIT_STATES.has(this.state)) return
 
       if (s === 'failed') {
-        // Guest may hit failed while host still pastes the answer; only fail the
-        // offerer after answer is applied, or either side after a connect watch.
         if (this.offererAnswerApplied || this.state === 'connecting') {
           this.setState('failed')
         }
@@ -158,18 +181,57 @@ export class PeerConnection {
       }
     }
     pc.oniceconnectionstatechange = () => {
+      const ice = pc.iceConnectionState
+      if (ice === 'connected' || ice === 'completed') {
+        if (this.channel?.readyState === 'open') {
+          this.clearConnectWatch()
+          this.setState('connected')
+        }
+        return
+      }
+      if (ice !== 'failed' && ice !== 'disconnected') return
+
+      // Guest waiting for host to paste answer: ICE often dies — refresh answer.
+      if (
+        this.isAnswerer &&
+        SIGNALING_WAIT_STATES.has(this.state) &&
+        this.remoteOfferSdp &&
+        !this.offererAnswerApplied &&
+        !this.refreshingAnswer
+      ) {
+        void this.refreshAnswerAfterIceFailure()
+        return
+      }
+
       if (SIGNALING_WAIT_STATES.has(this.state)) return
-      if (pc.iceConnectionState !== 'failed') return
-      // Soft-fail only once we expected a live path (host applied answer).
       if (!this.offererAnswerApplied && this.state !== 'connecting') return
       if (this.state === 'connected') return
       this.handlers.onError?.(
-        new Error('ICE connection failed — try same Wi‑Fi/hotspot and a fresh session'),
+        new Error('ICE connection failed — use the same Wi‑Fi/hotspot and start a fresh session'),
       )
       this.setState('failed')
     }
     this.pc = pc
     return pc
+  }
+
+  private async refreshAnswerAfterIceFailure() {
+    if (!this.remoteOfferSdp || this.refreshingAnswer) return
+    this.refreshingAnswer = true
+    try {
+      const signal = await this.buildAnswerFromRemoteOffer(this.remoteOfferSdp, true)
+      this.handlers.onSignalRefresh?.(signal)
+      this.handlers.onError?.(
+        new Error('Link timed out while waiting — a fresh answer was generated. Send it to the host again.'),
+      )
+    } catch (err) {
+      this.handlers.onError?.(
+        err instanceof Error ? err : new Error('Could not refresh answer after ICE failure'),
+      )
+      this.setState('failed')
+    } finally {
+      this.refreshingAnswer = false
+    }
   }
 
   private wireChannel(channel: RTCDataChannel) {
@@ -185,8 +247,6 @@ export class PeerConnection {
       }
     }
     channel.onerror = () => {
-      // Ignore DataChannel errors during paste wait — channel stays "connecting"
-      // until the remote answer is applied.
       if (SIGNALING_WAIT_STATES.has(this.state)) return
       this.handlers.onError?.(new Error('DataChannel error'))
     }
@@ -274,6 +334,7 @@ export class PeerConnection {
   async createOffer(): Promise<string> {
     this.close()
     this.offererAnswerApplied = false
+    this.isAnswerer = false
     this.setState('creating-offer')
     const pc = this.ensurePc()
     const channel = pc.createDataChannel('retro-games', { ordered: true })
@@ -294,29 +355,32 @@ export class PeerConnection {
     this.offererAnswerApplied = true
     this.setState('connecting')
     await pc.setRemoteDescription({ type: 'answer', sdp })
-    // Both sides now have full SDP — expect DataChannel soon.
-    this.watchForConnect(45000)
+    this.watchForConnect(60000)
   }
 
   async createAnswerFromOffer(encoded: string): Promise<string> {
-    this.close()
+    const sdp = decompressSignal(encoded)
+    this.remoteOfferSdp = sdp
+    this.isAnswerer = true
+    return this.buildAnswerFromRemoteOffer(sdp, false)
+  }
+
+  private async buildAnswerFromRemoteOffer(sdp: string, isRefresh: boolean): Promise<string> {
+    this.teardownPc(true)
     this.offererAnswerApplied = false
+    this.isAnswerer = true
     this.setState('creating-answer')
     const pc = this.ensurePc()
     pc.ondatachannel = (event) => this.wireChannel(event.channel)
-    const sdp = decompressSignal(encoded)
     await pc.setRemoteDescription({ type: 'offer', sdp })
     const answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
     await waitForIceGathering(pc)
     const local = pc.localDescription
     if (!local?.sdp) throw new Error('Failed to create answer SDP')
-    // Stay in creating-answer-adjacent wait: guest ICE may run before the host
-    // pastes the answer. Use awaiting-answer semantics so premature ICE failure
-    // does not wipe the UI — host applying the answer completes the handshake.
     this.setState('awaiting-answer')
-    // Soft upper bound while waiting for host to accept (manual paste can be slow).
-    this.watchForConnect(180000)
+    // Guest ICE runs before host pastes — allow a long wait, with refresh on failure.
+    this.watchForConnect(isRefresh ? 120000 : 180000)
     return compressSignal(local.sdp)
   }
 
@@ -339,7 +403,6 @@ export class PeerConnection {
       const end = Math.min(start + CHUNK_PAYLOAD_SIZE, data.byteLength)
       const payload = data.subarray(start, end)
       this.channel.send(encodeChunk(id, i, count, payload))
-      // Yield so UI can paint and the browser can flush the socket buffer.
       if (i % 4 === 3) await new Promise<void>((r) => setTimeout(r, 0))
     }
     this.sendControl({ type: 'transfer-end', id, kind })
@@ -347,22 +410,8 @@ export class PeerConnection {
   }
 
   close(): void {
-    this.clearConnectWatch()
-    this.offererAnswerApplied = false
-    try {
-      this.channel?.close()
-    } catch {
-      // ignore
-    }
-    try {
-      this.pc?.close()
-    } catch {
-      // ignore
-    }
-    this.channel = null
-    this.pc = null
-    this.pending.clear()
-    this.transferKinds.clear()
+    this.teardownPc(false)
+    this.isAnswerer = false
     this.setState('closed')
   }
 }

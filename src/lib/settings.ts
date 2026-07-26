@@ -1,5 +1,3 @@
-import { INTERNAL_RETROARCH_KEY_BINDS } from './keyboard'
-
 export type ShaderOption = '' | 'crt/crt-easymode'
 
 export interface EmulatorSettings {
@@ -79,10 +77,9 @@ export function buildRetroarchConfig(settings: EmulatorSettings): Record<string,
     savestate_thumbnail_enable: true,
     menu_driver: 'null',
     notice_show: false,
-    // Bind Retropad to keys the user never presses. Real Z/X/arrows are
-    // handled by useKeyboardControls → pressDown/pressUp so multi-key
-    // input is not dropped when a toolbar/on-screen button has focus.
-    ...INTERNAL_RETROARCH_KEY_BINDS,
+    // Keep RetroArch's default Z/X/arrow binds. useKeyboardControls claims
+    // those keys (stopPropagation) and drives them via pressDown/pressUp,
+    // which synthesizes the same default key codes.
   }
 }
 

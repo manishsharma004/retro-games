@@ -147,7 +147,12 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           }, 0)
         } else if (state === 'failed') {
           updatePhase('error')
-          setError('Peer connection failed')
+          setError((prev) => prev ?? 'Peer connection failed')
+        } else if (state === 'awaiting-answer') {
+          // Keep host-offer / guest-answer UI — do not treat ICE noise as failure.
+          if (roleRef.current === 'host' && phaseRef.current === 'connecting') {
+            updatePhase('host-offer')
+          }
         }
       },
       onError: (err) => {

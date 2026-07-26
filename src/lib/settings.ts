@@ -8,6 +8,8 @@ export interface EmulatorSettings {
   audioMute: boolean
   audioVolume: number
   showVirtualController: boolean | 'auto'
+  virtualDpadMode: 'dpad' | 'stick'
+  virtualControlsOverlay: boolean
   swapAB: boolean
   allowOpposingDirections: boolean
   frameSkip: number
@@ -25,6 +27,8 @@ export const DEFAULT_SETTINGS: EmulatorSettings = {
   audioMute: false,
   audioVolume: 80,
   showVirtualController: 'auto',
+  virtualDpadMode: 'dpad',
+  virtualControlsOverlay: false,
   swapAB: false,
   allowOpposingDirections: true,
   frameSkip: 0,

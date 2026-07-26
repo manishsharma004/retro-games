@@ -153,6 +153,30 @@ export function AdvancedSettings({
                 <option value="false">Hide</option>
               </select>
             </label>
+            <label className="field">
+              <span>Directional control</span>
+              <select
+                value={settings.virtualDpadMode}
+                onChange={(e) =>
+                  patch('virtualDpadMode', e.target.value as EmulatorSettings['virtualDpadMode'])
+                }
+              >
+                <option value="dpad">D-pad (buttons)</option>
+                <option value="stick">Analog stick (one thumb)</option>
+              </select>
+            </label>
+            <label className="field field--row">
+              <span>Overlay controls on screen</span>
+              <input
+                type="checkbox"
+                checked={settings.virtualControlsOverlay}
+                onChange={(e) => patch('virtualControlsOverlay', e.target.checked)}
+              />
+            </label>
+            <p className="settings-hint">
+              Overlay floats semi-transparent controls over the game so the full screen is used for
+              display.
+            </p>
             <label className="field field--row">
               <span>Swap A/B (and X/Y)</span>
               <input

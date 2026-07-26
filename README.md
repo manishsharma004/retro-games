@@ -11,6 +11,12 @@ Play **NES** and **SNES** ROMs entirely in your browser with [Nostalgist](https:
 - Advanced RetroArch / core settings (shaders, rewind, region, turbo, and more)
 - Optional homebrew demo (`flappybird.nes` via Nostalgist’s public resolver)
 
+## Live site
+
+https://manishsharma004.github.io/retro-games/
+
+Deploys automatically to GitHub Pages on every push to `main` (see `.github/workflows/deploy-pages.yml`).
+
 ## Quick start
 
 ```bash
@@ -24,6 +30,8 @@ Build for production:
 npm run build
 npm run preview
 ```
+
+> Production builds use `base: '/retro-games/'` so assets resolve correctly on GitHub Pages.
 
 ## Controls
 

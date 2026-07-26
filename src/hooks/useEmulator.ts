@@ -2,10 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Nostalgist } from 'nostalgist'
 import { SYSTEMS, type SystemId, detectSystem } from '../lib/cores'
 import {
-  CANVAS_BUFFER_HEIGHT,
-  CANVAS_BUFFER_WIDTH,
-  installCanvasResizeObserverGuard,
+  CANVAS_LAYOUT_HEIGHT,
+  CANVAS_LAYOUT_WIDTH,
+  canvasBackingStoreSize,
   lockEmulatorCanvas,
+  prepareCanvasLayout,
 } from '../lib/canvasLock'
 import { romUrl, type LibraryRom } from '../lib/library'
 import {
@@ -139,19 +140,26 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
         const system = SYSTEMS[pending.game.system]
         const stage = canvas.parentElement
 
-        // Must install before launch — RA attaches ResizeObserver during init.
-        const removeRoGuard = installCanvasResizeObserverGuard(canvas)
+        // Fixed CSS layout before RA's ResizeObserver reads clientWidth.
+        // Backing store must be layout × devicePixelRatio — matching what
+        // PlatformEmscriptenWatchCanvasSizeAndDpr sets — so Nostalgist's
+        // postRun resize() does not shrink the GL buffer and OOB the main loop.
+        prepareCanvasLayout(canvas)
+        const backing = canvasBackingStoreSize(
+          CANVAS_LAYOUT_WIDTH,
+          CANVAS_LAYOUT_HEIGHT,
+        )
 
         const nostalgist = await Nostalgist.launch({
           core: system.core,
           rom: pending.rom,
           state: pending.state,
           element: canvas,
-          size: { width: CANVAS_BUFFER_WIDTH, height: CANVAS_BUFFER_HEIGHT },
+          size: backing,
           style: {
-            // Fixed CSS px (not 100%) so RO contentRect stays at buffer size.
-            width: `${CANVAS_BUFFER_WIDTH}px`,
-            height: `${CANVAS_BUFFER_HEIGHT}px`,
+            // Fixed CSS px (not 100%) so RO contentRect stays stable.
+            width: `${CANVAS_LAYOUT_WIDTH}px`,
+            height: `${CANVAS_LAYOUT_HEIGHT}px`,
             backgroundColor: '#000',
             position: 'absolute',
             left: '50%',
@@ -166,25 +174,20 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
         })
 
         if (cancelled) {
-          removeRoGuard()
           nostalgist.exit({ removeCanvas: false })
           return
         }
 
         canvasStabilizeCleanupRef.current?.()
-        const unlock = stage
+        canvasStabilizeCleanupRef.current = stage
           ? lockEmulatorCanvas(
               nostalgist,
               canvas,
               stage,
-              CANVAS_BUFFER_WIDTH,
-              CANVAS_BUFFER_HEIGHT,
+              CANVAS_LAYOUT_WIDTH,
+              CANVAS_LAYOUT_HEIGHT,
             )
-          : () => {}
-        canvasStabilizeCleanupRef.current = () => {
-          unlock()
-          removeRoGuard()
-        }
+          : null
 
         nostalgistRef.current = nostalgist
         if (pending.startPaused) {

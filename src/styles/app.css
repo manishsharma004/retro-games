@@ -447,7 +447,7 @@ button {
   justify-content: center;
 }
 
-/* Flexible viewport that the fixed 800×600 stage is scaled into. */
+/* Flexible host — centers the fixed 800×600 stage (letterbox, no transform). */
 .play-stage-host {
   position: relative;
   flex: 1 1 auto;
@@ -473,7 +473,7 @@ button {
   flex-shrink: 0;
 }
 
-/* Fixed emulator box — same metrics as the working smoke test. */
+/* Fixed emulator box — never CSS-transformed (breaks RA devicePixelContentBoxSize). */
 .play-stage {
   position: relative;
   width: 800px;
@@ -481,28 +481,24 @@ button {
   flex-shrink: 0;
   background: #000;
   overflow: hidden;
-  transform-origin: center center;
 }
 
 .play-canvas {
-  width: 800px;
-  height: 600px;
+  width: 800px !important;
+  height: 600px !important;
+  max-width: none !important;
+  max-height: none !important;
   display: block;
   image-rendering: pixelated;
   background: #000;
 }
 
 .play-frame {
-  width: 800px;
-  height: 600px;
-  border: 0;
-  display: block;
-  background: #000;
-  overflow: hidden;
+  display: none;
 }
 
 .play-frame--hidden {
-  visibility: hidden;
+  display: none;
 }
 
 .play-canvas--hidden {

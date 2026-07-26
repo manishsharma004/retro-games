@@ -1,11 +1,8 @@
 import type { RefObject } from 'react'
 import type { SystemId } from '../lib/cores'
-import { CANVAS_LAYOUT_HEIGHT, CANVAS_LAYOUT_WIDTH } from '../lib/canvasLock'
 
 interface EmulatorScreenProps {
-  frameRef: RefObject<HTMLIFrameElement | null>
-  hostRef: RefObject<HTMLDivElement | null>
-  stageRef: RefObject<HTMLDivElement | null>
+  canvasRef: RefObject<HTMLCanvasElement | null>
   system: SystemId | null
   status: string
   shellRef: RefObject<HTMLDivElement | null>
@@ -14,9 +11,7 @@ interface EmulatorScreenProps {
 }
 
 export function EmulatorScreen({
-  frameRef,
-  hostRef,
-  stageRef,
+  canvasRef,
   system: _system,
   status,
   shellRef,
@@ -24,21 +19,19 @@ export function EmulatorScreen({
   children,
 }: EmulatorScreenProps) {
   const showPlaceholder = status === 'idle' || status === 'error'
-  const frameSrc = `${import.meta.env.BASE_URL}emulator-frame.html`
 
   return (
     <div className="play-shell" ref={shellRef}>
-      <div className="play-stage-host" ref={hostRef}>
-        <div className="play-stage" ref={stageRef}>
-          <iframe
-            ref={frameRef}
-            className={`play-frame ${showPlaceholder ? 'play-frame--hidden' : ''}`}
-            title="Retro Games emulator"
-            src={frameSrc}
-            width={CANVAS_LAYOUT_WIDTH}
-            height={CANVAS_LAYOUT_HEIGHT}
-            // Same-origin frame; allow autoplay/gamepad for the WASM core.
-            allow="autoplay; gamepad"
+      <div className="play-stage-host">
+        {/* Fixed 800×600 — no CSS transform. Transforming the canvas/ancestor
+            changes devicePixelContentBoxSize and makes RetroArch OOB the WASM heap. */}
+        <div className="play-stage">
+          <canvas
+            id="canvas"
+            ref={canvasRef}
+            className={`play-canvas ${showPlaceholder ? 'play-canvas--hidden' : ''}`}
+            width={800}
+            height={600}
           />
           {status === 'loading' && (
             <div className="play-overlay">

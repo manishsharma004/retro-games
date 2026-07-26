@@ -434,9 +434,7 @@ export default function App() {
         )}
 
         <EmulatorScreen
-          frameRef={emu.frameRef}
-          hostRef={emu.hostRef}
-          stageRef={emu.stageRef}
+          canvasRef={emu.canvasRef}
           shellRef={shellRef}
           system={emu.game?.system ?? null}
           status={emu.status}

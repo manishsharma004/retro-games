@@ -106,10 +106,11 @@ export function buildRetroarchConfig(settings: EmulatorSettings): Record<string,
     menu_driver: 'null',
     notice_show: false,
     // Joypads are polled in JS (useGamepadControls) so device→seat selection and
-    // peer sendInput work. Disable RetroArch's native joypad ports to avoid
-    // double input and guest pad0 silently driving P1.
-    input_player1_joypad_index: -1,
-    input_player2_joypad_index: -1,
+    // peer sendInput work. Do NOT set joypad_index to -1 — on the emscripten
+    // build that blacks out the video (WASM still "runs"). Point both seats at
+    // an unused pad index instead so RetroArch's native joypad path stays idle.
+    input_player1_joypad_index: 99,
+    input_player2_joypad_index: 99,
     // Keep RetroArch's default Z/X/arrow binds. useKeyboardControls claims
     // those keys (stopPropagation) and drives them via pressDown/pressUp,
     // which synthesizes the same default key codes.

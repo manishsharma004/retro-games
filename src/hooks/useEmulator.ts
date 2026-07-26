@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Nostalgist } from 'nostalgist'
 import { SYSTEMS, type SystemId, detectSystem } from '../lib/cores'
+import { romUrl, type LibraryRom } from '../lib/library'
 import {
   buildCoreConfig,
   buildRetroarchConfig,
@@ -13,7 +14,7 @@ export interface ActiveGame {
   name: string
   system: SystemId
   core: string
-  source: 'file' | 'demo'
+  source: 'file' | 'demo' | 'library'
   file?: File
 }
 
@@ -29,6 +30,7 @@ export interface UseEmulatorResult {
   canvasRef: React.RefObject<HTMLCanvasElement | null>
   launchFile: (file: File) => void
   launchDemo: () => void
+  launchLibrary: (entry: LibraryRom) => void
   exit: () => void
   pause: () => void
   resume: () => void
@@ -184,6 +186,37 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     })
   }, [queueLaunch])
 
+  const launchLibrary = useCallback(
+    (entry: LibraryRom) => {
+      const game: ActiveGame = {
+        name: entry.name,
+        system: entry.system,
+        core: SYSTEMS[entry.system].core,
+        source: 'library',
+      }
+      setError(null)
+      setStatus('loading')
+      setGame(game)
+      gameRef.current = game
+
+      void (async () => {
+        try {
+          const res = await fetch(romUrl(entry.file))
+          if (!res.ok) {
+            throw new Error(`Could not load ${entry.file} (HTTP ${res.status})`)
+          }
+          const blob = await res.blob()
+          const file = new File([blob], entry.file, { type: 'application/octet-stream' })
+          queueLaunch({ game: { ...game, file }, rom: file })
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Failed to load ROM')
+          setStatus('error')
+        }
+      })()
+    },
+    [queueLaunch],
+  )
+
   const exit = useCallback(() => {
     setPending(null)
     cleanup()
@@ -263,6 +296,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     canvasRef,
     launchFile,
     launchDemo,
+    launchLibrary,
     exit,
     pause,
     resume,

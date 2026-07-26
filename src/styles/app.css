@@ -204,6 +204,41 @@ button {
   backdrop-filter: none;
 }
 
+.library {
+  width: min(100%, 420px);
+  margin-top: 1.5rem;
+}
+
+.library__title {
+  margin: 0 0 0.6rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent-dim);
+}
+
+.library__grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.library__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.library__system {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.05rem 0.4rem;
+}
+
 .btn {
   appearance: none;
   border: 1px solid transparent;
@@ -403,7 +438,8 @@ button {
   border-radius: 0;
   border: 0;
   background: #000;
-  padding: 0.5rem;
+  padding: 0;
+  gap: 0;
   justify-content: center;
 }
 
@@ -416,8 +452,16 @@ button {
 }
 
 .play-shell:fullscreen .play-stage {
-  width: min(100%, calc((100dvh - 9rem) * 4 / 3));
-  max-height: calc(100dvh - 9rem);
+  flex: 1 1 auto;
+  width: auto;
+  min-height: 0;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* Leave room for the on-screen pad when it is visible in fullscreen */
+.play-shell:fullscreen .virtual-pad {
+  flex-shrink: 0;
 }
 
 .play-canvas {

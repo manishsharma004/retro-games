@@ -180,6 +180,7 @@ export default function App() {
           shellRef={shellRef}
           system={emu.game?.system ?? null}
           status={emu.status}
+          isFullscreen={isFullscreen}
         >
           {emu.game && isPlaying && (
             <VirtualController

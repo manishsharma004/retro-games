@@ -5,6 +5,7 @@ import {
   CANVAS_LAYOUT_HEIGHT,
   CANVAS_LAYOUT_WIDTH,
   canvasBackingStoreSize,
+  createCanvasSizeEmscriptenHooks,
   installEmulatorPixelRatioGuard,
   lockEmulatorCanvas,
   prepareCanvasLayout,
@@ -141,9 +142,8 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
         const system = SYSTEMS[pending.game.system]
         const stage = canvas.parentElement
 
-        // Fixed CSS layout + spoof DPR=1 before RA attaches ResizeObserver.
-        // Cloud/browser zoom can report wild devicePixelRatio values; RA would
-        // then allocate layout×DPR GL buffers and OOB the WASM heap.
+        // Fixed CSS layout + RO rewrite + clamp RA's canvas-dimension callback
+        // so C-side fb size stays 800×600 even when browser DPR is wild.
         prepareCanvasLayout(canvas)
         const removePixelGuard = installEmulatorPixelRatioGuard(
           canvas,
@@ -162,7 +162,6 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
           element: canvas,
           size: backing,
           style: {
-            // Fixed CSS px (not 100%) so RO contentRect stays stable.
             width: `${CANVAS_LAYOUT_WIDTH}px`,
             height: `${CANVAS_LAYOUT_HEIGHT}px`,
             backgroundColor: '#000',
@@ -176,6 +175,10 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
           cache: { core: true, shader: true },
           retroarchConfig: buildRetroarchConfig(current),
           retroarchCoreConfig: buildCoreConfig(pending.game.system, current),
+          emscriptenModule: createCanvasSizeEmscriptenHooks(
+            CANVAS_LAYOUT_WIDTH,
+            CANVAS_LAYOUT_HEIGHT,
+          ),
         })
 
         if (cancelled) {

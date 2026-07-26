@@ -438,6 +438,15 @@ button {
   overflow: hidden;
 }
 
+/* Overlay pad: stage is the viewport; shell grows to fill the player column. */
+.play-shell--pad-overlay {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  justify-content: stretch;
+  align-items: stretch;
+}
+
 .play-shell:fullscreen {
   border-radius: 0;
   border: 0;
@@ -457,6 +466,15 @@ button {
   overflow: hidden;
 }
 
+/* Overlay mode: stage fills the shell so controls float over the game viewport. */
+.play-stage--pad-overlay {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: 100%;
+  min-height: 0;
+  max-height: 100%;
+}
+
 .play-shell:fullscreen .play-stage {
   flex: 1 1 0;
   width: 100%;
@@ -465,9 +483,8 @@ button {
   max-height: 100%;
 }
 
-/* Leave room for the on-screen pad when it is visible in fullscreen */
-.play-shell:fullscreen .virtual-pad {
-  flex-shrink: 0;
+.play-shell:fullscreen .play-stage--pad-overlay {
+  flex: 1 1 0;
 }
 
 .play-canvas {
@@ -534,20 +551,20 @@ button {
   flex-shrink: 0;
 }
 
-/* Overlay mode: float semi-transparent controls over the game so the full
-   screen is used for display. Empty space passes taps through to the game. */
+/* Overlay mode: semi-transparent controls over the game viewport. Empty areas pass
+   taps through; only buttons/stick receive pointer events. */
 .virtual-pad--overlay {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
   width: 100%;
   max-width: 100%;
-  /* Extra inset so the stick / face buttons are not flush against the edges. */
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
   padding-top: 0;
-  padding-right: max(2rem, env(safe-area-inset-right));
-  padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
-  padding-left: max(2rem, env(safe-area-inset-left));
+  padding-right: max(1.25rem, env(safe-area-inset-right));
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  padding-left: max(1.25rem, env(safe-area-inset-left));
   z-index: 6;
   opacity: var(--vp-opacity, 0.5);
   pointer-events: none;
@@ -556,12 +573,29 @@ button {
 
 .virtual-pad--overlay:focus-within,
 .virtual-pad--overlay:active {
-  opacity: 1;
+  opacity: min(1, calc(var(--vp-opacity, 0.5) + 0.35));
 }
 
 .virtual-pad--overlay .vp-btn,
 .virtual-pad--overlay .vp-stick {
   pointer-events: auto;
+  background: rgba(20, 48, 36, 0.42);
+  border-color: rgba(61, 255, 154, 0.35);
+  backdrop-filter: blur(4px);
+}
+
+.virtual-pad--overlay .vp-stick {
+  background:
+    radial-gradient(circle at 50% 50%, rgba(61, 255, 154, 0.12), transparent 70%),
+    rgba(20, 48, 36, 0.38);
+}
+
+.virtual-pad--overlay .vp-dpad__center {
+  background: rgba(61, 255, 154, 0.06);
+}
+
+.virtual-pad--overlay .vp-btn:active {
+  background: rgba(61, 255, 154, 0.38);
 }
 
 .virtual-pad__shoulders {
@@ -902,6 +936,44 @@ button {
     grid-area: meta;
     flex-direction: row;
     justify-content: center;
+  }
+}
+
+/* Landscape: full viewport for the game; semi-transparent pad overlays the stage. */
+@media (orientation: landscape) {
+  .player .play-shell--pad-overlay {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .player .play-stage--pad-overlay {
+    width: 100%;
+    max-height: none;
+    min-height: 0;
+  }
+
+  .player:not(:has(.play-shell:fullscreen)) .play-stage--pad-overlay {
+    max-height: calc(100dvh - 4.5rem);
+  }
+
+  .virtual-pad--overlay .virtual-pad__main {
+    grid-template-columns: 1fr auto 1fr;
+    grid-template-areas: none;
+  }
+
+  .virtual-pad--overlay .vp-dpad,
+  .virtual-pad--overlay .vp-stick {
+    grid-area: auto;
+    justify-self: start;
+  }
+
+  .virtual-pad--overlay .vp-actions {
+    grid-area: auto;
+    justify-self: end;
+  }
+
+  .virtual-pad--overlay .vp-meta {
+    grid-area: auto;
   }
 }
 

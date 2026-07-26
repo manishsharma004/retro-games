@@ -10,6 +10,7 @@ import { useEmulator } from './hooks/useEmulator'
 import { useFullscreen } from './hooks/useFullscreen'
 import { useGamepadControls } from './hooks/useGamepadControls'
 import { useGamepads } from './hooks/useGamepads'
+import { useLandscape } from './hooks/useLandscape'
 import { useKeyboardControls } from './hooks/useKeyboardControls'
 import { usePeerSession } from './hooks/usePeerSession'
 import {
@@ -256,6 +257,10 @@ export default function App() {
     return settings.showVirtualController
   }, [settings.showVirtualController, touchDevice])
 
+  const isLandscape = useLandscape()
+  // Landscape: float semi-transparent controls over the game (no separate pad row).
+  const padOverlay = settings.virtualControlsOverlay || isLandscape
+
   const isPlaying = emu.status === 'running' || emu.status === 'paused' || emu.status === 'loading'
   const showLanding = !isPlaying
 
@@ -439,6 +444,7 @@ export default function App() {
           system={emu.game?.system ?? null}
           status={emu.status}
           isFullscreen={isFullscreen}
+          padOverlay={padOverlay}
         >
           {emu.game && isPlaying && (
             <VirtualController
@@ -447,7 +453,7 @@ export default function App() {
               onRelease={onLocalRelease}
               visible={showVirtual && emu.status !== 'loading'}
               dpadMode={settings.virtualDpadMode}
-              overlay={settings.virtualControlsOverlay}
+              overlay={padOverlay}
               size={settings.virtualControlsSize}
               opacity={settings.virtualControlsOpacity}
             />

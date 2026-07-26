@@ -141,8 +141,15 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
         const stage = canvas.parentElement
         const host = stage?.parentElement
 
-        // Same recipe as the working smoke test: fixed 800×600 CSS + size.
-        // Scale the stage (not the canvas buffer) to fill the host.
+        // Exact smoke-test recipe that renders Flappy Bird with 0 OOB in this
+        // browser: fixed 800×600 CSS + size. Wait until the canvas has real
+        // layout (player may have just un-parked from the landing view).
+        prepareCanvasLayout(canvas)
+        for (let i = 0; i < 90; i++) {
+          if (canvas.clientWidth >= 780 && canvas.clientHeight >= 580) break
+          await new Promise<void>((r) => requestAnimationFrame(() => r()))
+          if (cancelled) return
+        }
         prepareCanvasLayout(canvas)
         const backing = canvasBackingStoreSize()
 
@@ -153,19 +160,31 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
           element: canvas,
           size: backing,
           style: {
-            width: `${CANVAS_LAYOUT_WIDTH}px`,
-            height: `${CANVAS_LAYOUT_HEIGHT}px`,
-            backgroundColor: '#000',
+            width: '800px',
+            height: '600px',
             display: 'block',
-            position: 'static',
-            imageRendering: current.videoSmooth ? 'auto' : 'pixelated',
+            backgroundColor: '#000',
           },
           shader: current.shader || undefined,
           cache: { core: true, shader: true },
-          retroarchConfig: buildRetroarchConfig(current),
+          retroarchConfig: {
+            ...buildRetroarchConfig(current),
+            savestate_thumbnail_enable: false,
+            menu_driver: 'null',
+            notice_show: false,
+            video_font_enable: false,
+          },
           retroarchCoreConfig: buildCoreConfig(pending.game.system, current),
         })
 
+        if (cancelled) {
+          nostalgist.exit({ removeCanvas: false })
+          return
+        }
+
+        // Defer stage scaling until after the first frames so RA's ResizeObserver
+        // settles on the unscaled 800×600 box (same as smoke).
+        await new Promise<void>((r) => requestAnimationFrame(() => r()))
         if (cancelled) {
           nostalgist.exit({ removeCanvas: false })
           return

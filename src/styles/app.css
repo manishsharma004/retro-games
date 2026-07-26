@@ -474,10 +474,9 @@ button {
 }
 
 .play-canvas {
-  /* Absolute fill: CSS display size is owned by .play-stage. Emscripten may
-     rewrite canvas width/height (backing store) without changing layout, which
-     breaks the ResizeObserver ↔ setCanvasSize feedback loop that spams
-     "Setting real canvas size" and eventually OOBs WASM memory. */
+  /* CSS fills the stage for display. lockEmulatorCanvas reports a fixed
+     clientWidth/Height to RetroArch so it does not mirror the stage size into
+     the backing store (which caused the resize ↔ OOB loop). */
   position: absolute;
   inset: 0;
   width: 100% !important;

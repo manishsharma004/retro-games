@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Nostalgist } from 'nostalgist'
 import { SYSTEMS, type SystemId, detectSystem } from '../lib/cores'
+import {
+  CANVAS_BUFFER_HEIGHT,
+  CANVAS_BUFFER_WIDTH,
+  lockEmulatorCanvas,
+} from '../lib/canvasLock'
 import { romUrl, type LibraryRom } from '../lib/library'
 import {
   buildCoreConfig,
@@ -67,53 +72,6 @@ function pressKey(player: number, button: string): string {
   return `${player}:${button}`
 }
 
-/** Cap + debounce RetroArch/Emscripten canvas buffer resizes to stop RO loops. */
-function stabilizeEmscriptenCanvas(nostalgist: Nostalgist): () => void {
-  try {
-    const Module = nostalgist.getEmscriptenModule() as {
-      setCanvasSize?: (width: number, height: number) => void
-    }
-    if (typeof Module.setCanvasSize !== 'function') return () => {}
-
-    const original = Module.setCanvasSize.bind(Module)
-    let lastW = 0
-    let lastH = 0
-    let raf: number | null = null
-    let pendingW = 0
-    let pendingH = 0
-
-    Module.setCanvasSize = (width: number, height: number) => {
-      const w = Math.max(64, Math.min(Math.floor(width) || 0, 1280))
-      const h = Math.max(64, Math.min(Math.floor(height) || 0, 960))
-      if (w === lastW && h === lastH) return
-      // Ignore 1px thrash from subpixel layout / scrollbar flicker.
-      if (lastW > 0 && Math.abs(w - lastW) <= 1 && Math.abs(h - lastH) <= 1) return
-
-      pendingW = w
-      pendingH = h
-      if (raf !== null) return
-      raf = window.requestAnimationFrame(() => {
-        raf = null
-        if (pendingW === lastW && pendingH === lastH) return
-        lastW = pendingW
-        lastH = pendingH
-        try {
-          original(pendingW, pendingH)
-        } catch {
-          // Swallow WASM OOB from a bad mid-frame resize.
-        }
-      })
-    }
-
-    return () => {
-      if (raf !== null) window.cancelAnimationFrame(raf)
-      Module.setCanvasSize = original
-    }
-  } catch {
-    return () => {}
-  }
-}
-
 export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const nostalgistRef = useRef<Nostalgist | null>(null)
@@ -178,25 +136,15 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
       try {
         const current = settingsRef.current
         const system = SYSTEMS[pending.game.system]
-        // Snapshot container size once — avoid size:'auto' continuously tracking a
-        // live layout that RetroArch also writes back into (ResizeObserver loop).
         const stage = canvas.parentElement
-        const rect = stage?.getBoundingClientRect()
-        const launchWidth = Math.max(
-          256,
-          Math.min(Math.floor(rect?.width || canvas.clientWidth || 800), 960),
-        )
-        const launchHeight = Math.max(
-          224,
-          Math.min(Math.floor(rect?.height || canvas.clientHeight || 600), 720),
-        )
 
         const nostalgist = await Nostalgist.launch({
           core: system.core,
           rom: pending.rom,
           state: pending.state,
           element: canvas,
-          size: { width: launchWidth, height: launchHeight },
+          // Fixed buffer; lockEmulatorCanvas keeps RA from resizing to stage CSS.
+          size: { width: CANVAS_BUFFER_WIDTH, height: CANVAS_BUFFER_HEIGHT },
           style: {
             width: '100%',
             height: '100%',
@@ -204,6 +152,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
             position: 'absolute',
             inset: '0',
             display: 'block',
+            objectFit: 'contain',
             imageRendering: current.videoSmooth ? 'auto' : 'pixelated',
           },
           shader: current.shader || undefined,
@@ -218,7 +167,15 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
         }
 
         canvasStabilizeCleanupRef.current?.()
-        canvasStabilizeCleanupRef.current = stabilizeEmscriptenCanvas(nostalgist)
+        if (stage) {
+          canvasStabilizeCleanupRef.current = lockEmulatorCanvas(
+            nostalgist,
+            canvas,
+            stage,
+            CANVAS_BUFFER_WIDTH,
+            CANVAS_BUFFER_HEIGHT,
+          )
+        }
 
         nostalgistRef.current = nostalgist
         if (pending.startPaused) {

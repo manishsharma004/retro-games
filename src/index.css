@@ -1,0 +1,4 @@
+/* Base reset lives in styles/app.css via App import; keep file for Vite entry. */
+html {
+  height: 100%;
+}

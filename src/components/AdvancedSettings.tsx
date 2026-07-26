@@ -229,14 +229,16 @@ export function AdvancedSettings({
               <strong>Keyboard</strong>
               <ul>
                 <li>D-Pad: Arrow keys</li>
-                <li>B / A: Z / X</li>
+                <li>B (run): Z</li>
+                <li>A (jump): Space — also X</li>
                 <li>Y / X (SNES): A / S</li>
                 <li>Start / Select: Enter / Shift</li>
               </ul>
               <p className="settings-hint">
-                Multi-key input (Z+X, Z+arrows) uses a keyboard bridge so
-                presses are not dropped when toolbar or on-screen buttons have
-                focus.
+                Prefer Space for jump while running (Z + arrow). Z + arrow + X
+                is blocked by hardware keyboard ghosting on many keyboards;
+                Space avoids that. A keyboard bridge also keeps multi-key input
+                working when toolbar or on-screen buttons have focus.
               </p>
             </div>
           </section>

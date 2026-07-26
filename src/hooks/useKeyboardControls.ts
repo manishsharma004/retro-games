@@ -13,8 +13,8 @@ interface UseKeyboardControlsOptions {
 
 /**
  * Reliable multi-key keyboard controls for the emulator.
- * Tracks pressed buttons ourselves so Z+X and Z+arrows cannot be dropped
- * by focus filters or key-repeat noise on the native RetroArch path.
+ * Tracks pressed buttons ourselves so focus filters cannot drop combos,
+ * and so alternate keys (Space/X → A) can share a RetroPad button.
  */
 export function useKeyboardControls({
   enabled,
@@ -52,6 +52,13 @@ export function useKeyboardControls({
       heldCodes.clear()
     }
 
+    const stillHeld = (button: RetroPadButton) => {
+      for (const other of heldCodes.values()) {
+        if (other === button) return true
+      }
+      return false
+    }
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (isTypingTarget(event.target)) return
 
@@ -75,18 +82,9 @@ export function useKeyboardControls({
       event.stopPropagation()
       heldCodes.delete(event.code)
 
-      // Select is bound to both Shift keys — only release when neither is held.
-      if (button === 'select') {
-        const otherShift = event.code === 'ShiftLeft' ? 'ShiftRight' : 'ShiftLeft'
-        if (heldCodes.has(otherShift)) return
-      }
-
-      // Start is bound to Enter and NumpadEnter.
-      if (button === 'start') {
-        const otherEnter = event.code === 'Enter' ? 'NumpadEnter' : 'Enter'
-        if (heldCodes.has(otherEnter)) return
-      }
-
+      // Several physical keys can map to one button (Space + X → A, both Shifts
+      // → Select). Only release when none of those keys remain down.
+      if (stillHeld(button)) return
       release(button)
     }
 

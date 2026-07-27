@@ -1,4 +1,4 @@
-import { useCallback, useRef, type PointerEvent } from 'react'
+import { useCallback, useRef, type CSSProperties, type PointerEvent } from 'react'
 
 type Direction = 'up' | 'down' | 'left' | 'right'
 
@@ -6,6 +6,8 @@ interface VirtualStickProps {
   onPress: (button: string) => void
   onRelease: (button: string) => void
   disabled?: boolean
+  className?: string
+  style?: CSSProperties
 }
 
 /**
@@ -17,7 +19,13 @@ interface VirtualStickProps {
  * Knob position is updated via DOM transforms (not React state) so pointermove
  * does not re-render the pad / App while the WASM core is running.
  */
-export function VirtualStick({ onPress, onRelease, disabled = false }: VirtualStickProps) {
+export function VirtualStick({
+  onPress,
+  onRelease,
+  disabled = false,
+  className,
+  style,
+}: VirtualStickProps) {
   const baseRef = useRef<HTMLDivElement>(null)
   const knobRef = useRef<HTMLDivElement>(null)
   const activeDirs = useRef<Set<Direction>>(new Set())
@@ -113,9 +121,11 @@ export function VirtualStick({ onPress, onRelease, disabled = false }: VirtualSt
   return (
     <div
       ref={baseRef}
-      className="vp-stick"
+      className={['vp-stick', className].filter(Boolean).join(' ')}
+      style={style}
       role="group"
       aria-label="Analog stick"
+      data-layout-button="stick"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerEnd}

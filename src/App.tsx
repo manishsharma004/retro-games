@@ -476,7 +476,6 @@ export default function App() {
           canvasRef={emu.canvasRef}
           system={emu.game?.system ?? null}
           status={emu.status}
-          isFullscreen={isFullscreen}
           padOverlay={padOverlay}
         >
           {emu.game && isPlaying && (
@@ -488,6 +487,8 @@ export default function App() {
               dpadMode={settings.virtualDpadMode}
               overlay={padOverlay}
               size={settings.virtualControlsSize}
+              /* Portrait: enlarge thumbs so controls fill the docked band. */
+              scaleBoost={isLandscape ? 1 : 1.45}
               opacity={settings.virtualControlsOpacity}
               layout={settings.virtualControlsLayout}
             />

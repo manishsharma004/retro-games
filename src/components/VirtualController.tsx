@@ -36,6 +36,8 @@ interface VirtualControllerProps {
   size: 'small' | 'medium' | 'large'
   opacity: number
   layout: VirtualControlsLayout
+  /** Extra scale multiplier (e.g. portrait boost so thumbs fit vertical layouts). */
+  scaleBoost?: number
   /** When true, zones are outlined for the layout editor preview. */
   editing?: boolean
   hiddenElements?: Set<string>
@@ -62,6 +64,7 @@ export function VirtualController({
   size,
   opacity,
   layout,
+  scaleBoost = 1,
   editing = false,
   hiddenElements,
   editorGlobalScale = 1,
@@ -105,7 +108,7 @@ export function VirtualController({
   const zonePositions = resolveLayoutZones(layout)
 
   const style = {
-    '--vp-scale': SIZE_SCALE[size],
+    '--vp-scale': SIZE_SCALE[size] * scaleBoost,
     '--vp-opacity': opacity,
   } as CSSProperties
 

@@ -42,12 +42,38 @@ function exitNativeFullscreen(): Promise<void> {
   return Promise.resolve()
 }
 
+function clearFauxViewportStyles(el: HTMLElement) {
+  el.style.removeProperty('top')
+  el.style.removeProperty('left')
+  el.style.removeProperty('width')
+  el.style.removeProperty('height')
+}
+
+/**
+ * Pin a faux-fullscreen element to the visual viewport. iOS Safari's layout
+ * viewport is taller than what's on screen when the URL bar shows, which is
+ * what caused the huge black gap + undersized stage in CSS fullscreen.
+ */
+function syncFauxViewport(el: HTMLElement) {
+  const vv = window.visualViewport
+  if (!vv) {
+    el.style.top = '0px'
+    el.style.left = '0px'
+    el.style.width = '100%'
+    el.style.height = '100%'
+    return
+  }
+  el.style.top = `${vv.offsetTop}px`
+  el.style.left = `${vv.offsetLeft}px`
+  el.style.width = `${vv.width}px`
+  el.style.height = `${vv.height}px`
+}
+
 /**
  * Fullscreen for the play surface. Uses the native Fullscreen API when the
  * browser allows it (desktop / iPadOS). On iPhone Safari — which does not
  * expose Fullscreen for arbitrary DOM nodes — falls back to a CSS fixed
- * viewport overlay (apply `player--fullscreen` when `isFullscreen` is true
- * and the element is not the document fullscreenElement).
+ * viewport overlay (`player--fullscreen`), sized to the visual viewport.
  */
 export function useFullscreen(targetRef: RefObject<HTMLElement | null>) {
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -71,8 +97,36 @@ export function useFullscreen(targetRef: RefObject<HTMLElement | null>) {
   useEffect(() => {
     if (!cssFallback) return
 
-    const prevOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
+    const el = targetRef.current
+    const html = document.documentElement
+    const body = document.body
+    const prev = {
+      htmlOverflow: html.style.overflow,
+      bodyOverflow: body.style.overflow,
+      bodyPosition: body.style.position,
+      bodyWidth: body.style.width,
+      bodyTop: body.style.top,
+      scrollX: window.scrollX,
+      scrollY: window.scrollY,
+    }
+
+    html.classList.add('rg-faux-fullscreen')
+    body.classList.add('rg-faux-fullscreen')
+    html.style.overflow = 'hidden'
+    body.style.overflow = 'hidden'
+    body.style.position = 'fixed'
+    body.style.width = '100%'
+    body.style.top = `-${prev.scrollY}px`
+
+    const sync = () => {
+      if (el) syncFauxViewport(el)
+    }
+    sync()
+
+    const vv = window.visualViewport
+    vv?.addEventListener('resize', sync)
+    vv?.addEventListener('scroll', sync)
+    window.addEventListener('resize', sync)
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -81,11 +135,23 @@ export function useFullscreen(targetRef: RefObject<HTMLElement | null>) {
       }
     }
     document.addEventListener('keydown', onKeyDown)
+
     return () => {
-      document.body.style.overflow = prevOverflow
+      vv?.removeEventListener('resize', sync)
+      vv?.removeEventListener('scroll', sync)
+      window.removeEventListener('resize', sync)
       document.removeEventListener('keydown', onKeyDown)
+      html.classList.remove('rg-faux-fullscreen')
+      body.classList.remove('rg-faux-fullscreen')
+      html.style.overflow = prev.htmlOverflow
+      body.style.overflow = prev.bodyOverflow
+      body.style.position = prev.bodyPosition
+      body.style.width = prev.bodyWidth
+      body.style.top = prev.bodyTop
+      window.scrollTo(prev.scrollX, prev.scrollY)
+      if (el) clearFauxViewportStyles(el)
     }
-  }, [cssFallback])
+  }, [cssFallback, targetRef])
 
   const enter = useCallback(async () => {
     const el = targetRef.current

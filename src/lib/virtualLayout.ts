@@ -116,6 +116,10 @@ const DEFAULT_ZONE_BUTTONS: Record<VirtualLayoutZoneId, Partial<Record<VirtualLa
 const NES_ACTION_BUTTONS: VirtualLayoutButtonId[] = ['b', 'a']
 const SNES_ACTION_BUTTONS: VirtualLayoutButtonId[] = ['y', 'x', 'b', 'a']
 const DPAD_BUTTONS: VirtualLayoutButtonId[] = ['up', 'left', 'right', 'down']
+const STICK_BUTTONS: VirtualLayoutButtonId[] = ['stick']
+const META_BUTTONS: VirtualLayoutButtonId[] = ['select', 'start']
+const SHOULDER_BUTTONS: VirtualLayoutButtonId[] = ['l', 'r']
+const EMPTY_BUTTONS: VirtualLayoutButtonId[] = []
 
 export function buttonsForZone(
   zoneId: VirtualLayoutZoneId,
@@ -124,13 +128,13 @@ export function buttonsForZone(
 ): VirtualLayoutButtonId[] {
   switch (zoneId) {
     case 'left':
-      return dpadMode === 'stick' ? ['stick'] : DPAD_BUTTONS
+      return dpadMode === 'stick' ? STICK_BUTTONS : DPAD_BUTTONS
     case 'meta':
-      return ['select', 'start']
+      return META_BUTTONS
     case 'actions':
       return system === 'snes' ? SNES_ACTION_BUTTONS : NES_ACTION_BUTTONS
     case 'shoulders':
-      return system === 'snes' ? ['l', 'r'] : []
+      return system === 'snes' ? SHOULDER_BUTTONS : EMPTY_BUTTONS
   }
 }
 

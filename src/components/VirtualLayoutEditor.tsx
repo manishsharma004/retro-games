@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
 import type { SystemId } from '../lib/cores'
 import {
   BUTTON_LABELS,
@@ -103,7 +103,10 @@ export function VirtualLayoutEditor({
   }, [open, layout])
 
   const previewLayout = customLayoutFromZones(draftZones)
-  const activeZoneButtons = buttonsForZone(selectedZone, system, dpadMode)
+  const activeZoneButtons = useMemo(
+    () => buttonsForZone(selectedZone, system, dpadMode),
+    [selectedZone, system, dpadMode],
+  )
 
   useLayoutEffect(() => {
     if (!open || editMode !== 'buttons') return
@@ -112,6 +115,7 @@ export function VirtualLayoutEditor({
     const zoneEl = stage.querySelector(`[data-layout-zone="${selectedZone}"]`)
     if (!zoneEl) return
     const stageRect = stage.getBoundingClientRect()
+    if (stageRect.width <= 0 || stageRect.height <= 0) return
     const next: Partial<Record<VirtualLayoutButtonId, { x: number; y: number }>> = {}
 
     for (const buttonId of activeZoneButtons) {
@@ -124,8 +128,16 @@ export function VirtualLayoutEditor({
       }
     }
 
-    setButtonHandlePositions(next)
-  }, [open, editMode, selectedZone, activeZoneButtons, draftZones, dpadMode, system])
+    setButtonHandlePositions((prev) => {
+      const same =
+        activeZoneButtons.every((id) => {
+          const a = prev[id]
+          const b = next[id]
+          return a && b && a.x === b.x && a.y === b.y
+        }) && activeZoneButtons.length === Object.keys(next).length
+      return same ? prev : next
+    })
+  }, [open, editMode, selectedZone, activeZoneButtons, draftZones])
 
   const updateZoneButtons = useCallback(
     (

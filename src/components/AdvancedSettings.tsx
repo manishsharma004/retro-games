@@ -1,4 +1,5 @@
 import type { EmulatorSettings, ShaderOption } from '../lib/settings'
+import { DEFAULT_LAYOUT, customLayoutFromZones, getEditableZones, presetLayout, type VirtualLayoutPreset } from '../lib/virtualLayout'
 import type { SystemId } from '../lib/cores'
 
 interface AdvancedSettingsProps {
@@ -13,6 +14,7 @@ interface AdvancedSettingsProps {
   coreName?: string | null
   gamepadCount: number
   onOpenControllers?: () => void
+  onOpenLayoutEditor?: () => void
 }
 
 export function AdvancedSettings({
@@ -27,6 +29,7 @@ export function AdvancedSettings({
   coreName,
   gamepadCount,
   onOpenControllers,
+  onOpenLayoutEditor,
 }: AdvancedSettingsProps) {
   if (!open) return null
 
@@ -208,6 +211,52 @@ export function AdvancedSettings({
               />
               <em>{Math.round(settings.virtualControlsOpacity * 100)}%</em>
             </label>
+            <label className="field">
+              <span>Layout preset</span>
+              <select
+                value={settings.virtualControlsLayout.preset}
+                onChange={(e) => {
+                  const preset = e.target.value as VirtualLayoutPreset
+                  if (preset === 'default') {
+                    patch('virtualControlsLayout', DEFAULT_LAYOUT)
+                  } else if (preset === 'custom') {
+                    patch(
+                      'virtualControlsLayout',
+                      customLayoutFromZones(getEditableZones(settings.virtualControlsLayout)),
+                    )
+                  } else {
+                    patch('virtualControlsLayout', presetLayout(preset))
+                  }
+                }}
+              >
+                <option value="default">Default (grid)</option>
+                <option value="compact">Compact</option>
+                <option value="wide">Wide</option>
+                <option value="custom">Custom</option>
+              </select>
+            </label>
+            <div className="field field--row">
+              <span>Layout positions</span>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                disabled={!isRunning || !onOpenLayoutEditor}
+                onClick={onOpenLayoutEditor}
+              >
+                Edit layout
+              </button>
+            </div>
+            <p className="settings-hint">
+              Presets reposition control zones. Use Edit layout while playing to drag zones into place
+              (saved as Custom).
+            </p>
+            <button
+              type="button"
+              className="btn btn--text"
+              onClick={() => patch('virtualControlsLayout', DEFAULT_LAYOUT)}
+            >
+              Reset layout to default
+            </button>
             <label className="field field--row">
               <span>Swap A/B (and X/Y)</span>
               <input

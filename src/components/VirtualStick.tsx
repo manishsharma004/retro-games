@@ -5,6 +5,7 @@ type Direction = 'up' | 'down' | 'left' | 'right'
 interface VirtualStickProps {
   onPress: (button: string) => void
   onRelease: (button: string) => void
+  disabled?: boolean
 }
 
 /**
@@ -16,7 +17,7 @@ interface VirtualStickProps {
  * Knob position is updated via DOM transforms (not React state) so pointermove
  * does not re-render the pad / App while the WASM core is running.
  */
-export function VirtualStick({ onPress, onRelease }: VirtualStickProps) {
+export function VirtualStick({ onPress, onRelease, disabled = false }: VirtualStickProps) {
   const baseRef = useRef<HTMLDivElement>(null)
   const knobRef = useRef<HTMLDivElement>(null)
   const activeDirs = useRef<Set<Direction>>(new Set())
@@ -77,6 +78,7 @@ export function VirtualStick({ onPress, onRelease }: VirtualStickProps) {
 
   const onPointerDown = useCallback(
     (e: PointerEvent) => {
+      if (disabled) return
       e.preventDefault()
       const base = baseRef.current
       if (!base) return
@@ -84,26 +86,28 @@ export function VirtualStick({ onPress, onRelease }: VirtualStickProps) {
       activePointer.current = e.pointerId
       track(e)
     },
-    [track],
+    [disabled, track],
   )
 
   const onPointerMove = useCallback(
     (e: PointerEvent) => {
+      if (disabled) return
       if (activePointer.current !== e.pointerId) return
       e.preventDefault()
       track(e)
     },
-    [track],
+    [disabled, track],
   )
 
   const onPointerEnd = useCallback(
     (e: PointerEvent) => {
+      if (disabled) return
       if (activePointer.current !== e.pointerId) return
       activePointer.current = null
       setKnobOffset(0, 0)
       releaseAll()
     },
-    [releaseAll, setKnobOffset],
+    [disabled, releaseAll, setKnobOffset],
   )
 
   return (

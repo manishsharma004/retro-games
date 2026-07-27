@@ -1,3 +1,5 @@
+import { DEFAULT_LAYOUT, sanitizeLayout, type VirtualControlsLayout } from './virtualLayout'
+
 export type ShaderOption = '' | 'crt/crt-easymode'
 
 export interface EmulatorSettings {
@@ -12,6 +14,7 @@ export interface EmulatorSettings {
   virtualControlsOverlay: boolean
   virtualControlsSize: 'small' | 'medium' | 'large'
   virtualControlsOpacity: number
+  virtualControlsLayout: VirtualControlsLayout
   swapAB: boolean
   allowOpposingDirections: boolean
   frameSkip: number
@@ -33,6 +36,7 @@ export const DEFAULT_SETTINGS: EmulatorSettings = {
   virtualControlsOverlay: false,
   virtualControlsSize: 'medium',
   virtualControlsOpacity: 0.5,
+  virtualControlsLayout: DEFAULT_LAYOUT,
   swapAB: false,
   allowOpposingDirections: true,
   frameSkip: 0,
@@ -48,7 +52,12 @@ export function loadSettings(): EmulatorSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return { ...DEFAULT_SETTINGS }
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) }
+    const parsed = JSON.parse(raw) as Partial<EmulatorSettings>
+    return {
+      ...DEFAULT_SETTINGS,
+      ...parsed,
+      virtualControlsLayout: sanitizeLayout(parsed.virtualControlsLayout),
+    }
   } catch {
     return { ...DEFAULT_SETTINGS }
   }

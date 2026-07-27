@@ -38,6 +38,8 @@ interface VirtualControllerProps {
   layout: VirtualControlsLayout
   /** When true, zones are outlined for the layout editor preview. */
   editing?: boolean
+  hiddenElements?: Set<string>
+  editorGlobalScale?: number
 }
 
 const SIZE_SCALE: Record<VirtualControllerProps['size'], number> = {
@@ -61,6 +63,8 @@ export function VirtualController({
   opacity,
   layout,
   editing = false,
+  hiddenElements,
+  editorGlobalScale = 1,
 }: VirtualControllerProps) {
   const active = useRef(new Set<string>())
 
@@ -129,8 +133,38 @@ export function VirtualController({
   const actionButtons = resolveZoneButtons(actionsZone, 'actions', system, dpadMode)
   const shoulderButtons = resolveZoneButtons(shouldersZone, 'shoulders', system, dpadMode)
 
-  const btnStyle = (button: VirtualLayoutButton | undefined) =>
-    button ? asCss(buttonStyle(button)) : undefined
+  const mergeBtn = (
+    zoneId: string,
+    buttonId: string,
+    button: VirtualLayoutButton | undefined,
+  ): CSSProperties | undefined => {
+    if (!button) return hiddenStyle(zoneId, buttonId)
+    return { ...asCss(buttonStyle(button)), ...hiddenStyle(zoneId, buttonId) }
+  }
+
+  const zoneCss = (zone: { x: number; y: number; scale?: number } | undefined) =>
+    zone ? zoneStyleWithGlobal(zone) : undefined
+
+  const isHidden = (zoneId: string, buttonId?: string) => {
+    if (!hiddenElements?.size) return false
+    const zoneKey = `zone:${zoneId}`
+    const buttonKey = buttonId ? `button:${zoneId}:${buttonId}` : null
+    if (hiddenElements.has(zoneKey) && !buttonId) return true
+    if (buttonKey && hiddenElements.has(buttonKey)) return true
+    return false
+  }
+
+  const hiddenStyle = (zoneId: string, buttonId?: string): CSSProperties | undefined =>
+    isHidden(zoneId, buttonId) ? { visibility: 'hidden', pointerEvents: 'none' } : undefined
+
+  const zoneStyleWithGlobal = (zone: { x: number; y: number; scale?: number }) => {
+    const base = zoneStyle(zone)
+    const scale = (zone.scale ?? 1) * editorGlobalScale
+    return {
+      ...base,
+      transform: `translate(-50%, -50%) scale(${scale})`,
+    } as CSSProperties
+  }
 
   const renderDpad = () => {
     if (leftCustomButtons) {
@@ -139,7 +173,7 @@ export function VirtualController({
           <button
             type="button"
             className="vp-btn vp-dpad__btn"
-            style={btnStyle(leftButtons.up)}
+            style={mergeBtn('left', 'up', leftButtons.up)}
             tabIndex={-1}
             data-layout-button="up"
             {...bind('up')}
@@ -148,7 +182,7 @@ export function VirtualController({
           <button
             type="button"
             className="vp-btn vp-dpad__btn"
-            style={btnStyle(leftButtons.left)}
+            style={mergeBtn('left', 'left', leftButtons.left)}
             tabIndex={-1}
             data-layout-button="left"
             {...bind('left')}
@@ -158,7 +192,7 @@ export function VirtualController({
           <button
             type="button"
             className="vp-btn vp-dpad__btn"
-            style={btnStyle(leftButtons.right)}
+            style={mergeBtn('left', 'right', leftButtons.right)}
             tabIndex={-1}
             data-layout-button="right"
             {...bind('right')}
@@ -167,7 +201,7 @@ export function VirtualController({
           <button
             type="button"
             className="vp-btn vp-dpad__btn"
-            style={btnStyle(leftButtons.down)}
+            style={mergeBtn('left', 'down', leftButtons.down)}
             tabIndex={-1}
             data-layout-button="down"
             {...bind('down')}
@@ -194,7 +228,11 @@ export function VirtualController({
         onPress={onPress}
         onRelease={onRelease}
         disabled={editing}
-        style={leftCustomButtons && leftButtons.stick ? btnStyle(leftButtons.stick) : undefined}
+        style={
+          leftCustomButtons && leftButtons.stick
+            ? mergeBtn('left', 'stick', leftButtons.stick)
+            : hiddenStyle('left', 'stick')
+        }
         className={leftCustomButtons ? 'vp-stick--custom' : undefined}
       />
     ) : (
@@ -211,7 +249,10 @@ export function VirtualController({
   const leftNode = (
     <div
       className={leftWrapperClass}
-      style={customLayout && leftZone ? (zoneStyle(leftZone) as CSSProperties) : undefined}
+      style={{
+        ...(customLayout && leftZone ? zoneCss(leftZone) : undefined),
+        ...hiddenStyle('left'),
+      }}
       data-layout-zone="left"
     >
       {leftContent}
@@ -228,7 +269,10 @@ export function VirtualController({
         ]
           .filter(Boolean)
           .join(' ')}
-        style={customLayout && shouldersZone ? (zoneStyle(shouldersZone) as CSSProperties) : undefined}
+        style={{
+          ...(customLayout && shouldersZone ? zoneCss(shouldersZone) : undefined),
+          ...hiddenStyle('shoulders'),
+        }}
         data-layout-zone="shoulders"
       >
         {isSnes && (
@@ -236,7 +280,7 @@ export function VirtualController({
             <button
               type="button"
               className="vp-btn vp-btn--shoulder"
-              style={shouldersCustomButtons ? btnStyle(shoulderButtons.l) : undefined}
+              style={shouldersCustomButtons ? mergeBtn('shoulders', 'l', shoulderButtons.l) : undefined}
               tabIndex={-1}
               data-layout-button="l"
               {...bind('l')}
@@ -246,7 +290,7 @@ export function VirtualController({
             <button
               type="button"
               className="vp-btn vp-btn--shoulder"
-              style={shouldersCustomButtons ? btnStyle(shoulderButtons.r) : undefined}
+              style={shouldersCustomButtons ? mergeBtn('shoulders', 'r', shoulderButtons.r) : undefined}
               tabIndex={-1}
               data-layout-button="r"
               {...bind('r')}
@@ -268,13 +312,16 @@ export function VirtualController({
           ]
             .filter(Boolean)
             .join(' ')}
-          style={customLayout && metaZone ? (zoneStyle(metaZone) as CSSProperties) : undefined}
+          style={{
+            ...(customLayout && metaZone ? zoneCss(metaZone) : undefined),
+            ...hiddenStyle('meta'),
+          }}
           data-layout-zone="meta"
         >
           <button
             type="button"
             className="vp-btn vp-btn--meta"
-            style={metaCustomButtons ? btnStyle(metaButtons.select) : undefined}
+            style={metaCustomButtons ? mergeBtn('meta', 'select', metaButtons.select) : undefined}
             tabIndex={-1}
             data-layout-button="select"
             {...bind('select')}
@@ -284,7 +331,7 @@ export function VirtualController({
           <button
             type="button"
             className="vp-btn vp-btn--meta"
-            style={metaCustomButtons ? btnStyle(metaButtons.start) : undefined}
+            style={metaCustomButtons ? mergeBtn('meta', 'start', metaButtons.start) : undefined}
             tabIndex={-1}
             data-layout-button="start"
             {...bind('start')}
@@ -302,7 +349,10 @@ export function VirtualController({
           ]
             .filter(Boolean)
             .join(' ')}
-          style={customLayout && actionsZone ? (zoneStyle(actionsZone) as CSSProperties) : undefined}
+          style={{
+            ...(customLayout && actionsZone ? zoneCss(actionsZone) : undefined),
+            ...hiddenStyle('actions'),
+          }}
           data-layout-zone="actions"
         >
           {isSnes && (
@@ -310,7 +360,7 @@ export function VirtualController({
               <button
                 type="button"
                 className="vp-btn vp-btn--face vp-btn--y"
-                style={actionsCustomButtons ? btnStyle(actionButtons.y) : undefined}
+                style={actionsCustomButtons ? mergeBtn('actions', 'y', actionButtons.y) : undefined}
                 tabIndex={-1}
                 data-layout-button="y"
                 {...bind('y')}
@@ -320,7 +370,7 @@ export function VirtualController({
               <button
                 type="button"
                 className="vp-btn vp-btn--face vp-btn--x"
-                style={actionsCustomButtons ? btnStyle(actionButtons.x) : undefined}
+                style={actionsCustomButtons ? mergeBtn('actions', 'x', actionButtons.x) : undefined}
                 tabIndex={-1}
                 data-layout-button="x"
                 {...bind('x')}
@@ -332,7 +382,7 @@ export function VirtualController({
           <button
             type="button"
             className="vp-btn vp-btn--face vp-btn--b"
-            style={actionsCustomButtons ? btnStyle(actionButtons.b) : undefined}
+            style={actionsCustomButtons ? mergeBtn('actions', 'b', actionButtons.b) : undefined}
             tabIndex={-1}
             data-layout-button="b"
             {...bind('b')}
@@ -342,7 +392,7 @@ export function VirtualController({
           <button
             type="button"
             className="vp-btn vp-btn--face vp-btn--a"
-            style={actionsCustomButtons ? btnStyle(actionButtons.a) : undefined}
+            style={actionsCustomButtons ? mergeBtn('actions', 'a', actionButtons.a) : undefined}
             tabIndex={-1}
             data-layout-button="a"
             {...bind('a')}

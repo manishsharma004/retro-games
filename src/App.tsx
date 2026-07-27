@@ -472,22 +472,37 @@ export default function App() {
               layout={settings.virtualControlsLayout}
             />
           )}
-          {emu.game && isPlaying && layoutEditorOpen && (
-            <VirtualLayoutEditor
-              open={layoutEditorOpen}
-              system={emu.game.system}
-              layout={settings.virtualControlsLayout}
-              dpadMode={settings.virtualDpadMode}
-              size={settings.virtualControlsSize}
-              opacity={settings.virtualControlsOpacity}
-              onSave={(nextLayout) => {
-                setSettings((prev) => ({ ...prev, virtualControlsLayout: nextLayout }))
-                setLayoutEditorOpen(false)
-              }}
-              onCancel={() => setLayoutEditorOpen(false)}
-            />
-          )}
         </EmulatorScreen>
+
+        {emu.game && isPlaying && layoutEditorOpen && (
+          <VirtualLayoutEditor
+            open={layoutEditorOpen}
+            system={emu.game.system}
+            layout={settings.virtualControlsLayout}
+            dpadMode={settings.virtualDpadMode}
+            size={settings.virtualControlsSize}
+            opacity={settings.virtualControlsOpacity}
+            gameName={emu.game.name}
+            gamepadName={pads[0]?.id ?? null}
+            onSave={(nextLayout, options) => {
+              setSettings((prev) => ({
+                ...prev,
+                virtualControlsLayout: nextLayout,
+                virtualControlsOpacity: options?.opacity ?? prev.virtualControlsOpacity,
+              }))
+              setLayoutEditorOpen(false)
+            }}
+            onCancel={() => setLayoutEditorOpen(false)}
+            onOpenSettings={() => {
+              setLayoutEditorOpen(false)
+              setSettingsOpen(true)
+            }}
+            onOpenControllers={() => {
+              setLayoutEditorOpen(false)
+              setControllersOpen(true)
+            }}
+          />
+        )}
 
         {isPlaying && emu.error && <p className="player__error">{emu.error}</p>}
       </div>

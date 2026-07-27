@@ -4,11 +4,13 @@ import {
   BUTTON_LABELS,
   buttonsForZone,
   customLayoutFromZones,
-  defaultButtonsForZone,
+  ensureAllZoneButtons,
   getEditableZones,
   LAYOUT_ZONE_LABELS,
   mergeZoneButtons,
+  resetZoneButtons,
   resolveZoneButtons,
+  resolveZoneScale,
   zoneUsesCustomButtons,
   type VirtualControlsLayout,
   type VirtualLayoutButton,
@@ -32,6 +34,7 @@ interface VirtualLayoutEditorProps {
 type EditMode = 'zones' | 'buttons'
 
 const ZONE_ORDER: VirtualLayoutZoneId[] = ['left', 'actions', 'meta', 'shoulders']
+const DRAG_THRESHOLD_PX = 6
 
 function pointerToPercent(
   container: HTMLElement,
@@ -39,6 +42,7 @@ function pointerToPercent(
   clientY: number,
 ): { x: number; y: number } {
   const rect = container.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return { x: 0, y: 0 }
   const x = ((clientX - rect.left) / rect.width) * 100
   const y = ((clientY - rect.top) / rect.height) * 100
   return {
@@ -52,23 +56,6 @@ function ensureZone(
   zoneId: VirtualLayoutZoneId,
 ): VirtualLayoutZone {
   return zones[zoneId] ?? getEditableZones({ preset: 'custom', zones })[zoneId]!
-}
-
-function ensureZoneButtons(
-  zones: VirtualControlsLayout['zones'],
-  zoneId: VirtualLayoutZoneId,
-  system: SystemId,
-  dpadMode: 'dpad' | 'stick',
-): VirtualControlsLayout['zones'] {
-  const zone = ensureZone(zones, zoneId)
-  if (zoneUsesCustomButtons(zone)) return zones
-  return {
-    ...zones,
-    [zoneId]: {
-      ...zone,
-      buttons: defaultButtonsForZone(zoneId, system, dpadMode),
-    },
-  }
 }
 
 export function VirtualLayoutEditor({
@@ -86,6 +73,9 @@ export function VirtualLayoutEditor({
   const dragButtonRef = useRef<{ zoneId: VirtualLayoutZoneId; buttonId: VirtualLayoutButtonId } | null>(
     null,
   )
+  const dragOriginRef = useRef<{ x: number; y: number } | null>(null)
+  const draggingRef = useRef(false)
+
   const [editMode, setEditMode] = useState<EditMode>('zones')
   const [selectedZone, setSelectedZone] = useState<VirtualLayoutZoneId>('left')
   const [selectedButton, setSelectedButton] = useState<VirtualLayoutButtonId | null>(null)
@@ -107,6 +97,11 @@ export function VirtualLayoutEditor({
     () => buttonsForZone(selectedZone, system, dpadMode),
     [selectedZone, system, dpadMode],
   )
+
+  const selectedZoneData = ensureZone(draftZones, selectedZone)
+  const selectedButtonLayout = selectedButton
+    ? resolveZoneButtons(selectedZoneData, selectedZone, system, dpadMode)[selectedButton]
+    : undefined
 
   useLayoutEffect(() => {
     if (!open || editMode !== 'buttons') return
@@ -133,11 +128,18 @@ export function VirtualLayoutEditor({
         activeZoneButtons.every((id) => {
           const a = prev[id]
           const b = next[id]
-          return a && b && a.x === b.x && a.y === b.y
+          return a && b && Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5
         }) && activeZoneButtons.length === Object.keys(next).length
       return same ? prev : next
     })
   }, [open, editMode, selectedZone, activeZoneButtons, draftZones])
+
+  const updateZone = useCallback((zoneId: VirtualLayoutZoneId, patch: Partial<VirtualLayoutZone>) => {
+    setDraftZones((prev) => ({
+      ...prev,
+      [zoneId]: { ...ensureZone(prev, zoneId), ...patch },
+    }))
+  }, [])
 
   const updateZoneButtons = useCallback(
     (
@@ -146,8 +148,7 @@ export function VirtualLayoutEditor({
       patch: Partial<VirtualLayoutButton>,
     ) => {
       setDraftZones((prev) => {
-        const withButtons = ensureZoneButtons(prev, zoneId, system, dpadMode)
-        const zone = ensureZone(withButtons, zoneId)
+        const zone = ensureZone(prev, zoneId)
         const buttons = mergeZoneButtons(zone, zoneId, system, dpadMode, {
           [buttonId]: {
             ...resolveZoneButtons(zone, zoneId, system, dpadMode)[buttonId]!,
@@ -155,7 +156,7 @@ export function VirtualLayoutEditor({
           },
         })
         return {
-          ...withButtons,
+          ...prev,
           [zoneId]: { ...zone, buttons },
         }
       })
@@ -163,25 +164,54 @@ export function VirtualLayoutEditor({
     [dpadMode, system],
   )
 
+  const selectZone = useCallback(
+    (zoneId: VirtualLayoutZoneId) => {
+      setSelectedZone(zoneId)
+      const buttons = buttonsForZone(zoneId, system, dpadMode)
+      setSelectedButton(buttons[0] ?? null)
+      setDraftZones((prev) => {
+        const zone = ensureZone(prev, zoneId)
+        if (zoneUsesCustomButtons(zone)) return prev
+        return {
+          ...prev,
+          [zoneId]: { ...zone, buttons: resetZoneButtons(zoneId, system, dpadMode) },
+        }
+      })
+    },
+    [dpadMode, system],
+  )
+
+  const enterButtonsMode = useCallback(() => {
+    setEditMode('buttons')
+    setDraftZones((prev) => ensureAllZoneButtons(prev, system, dpadMode))
+    const firstButtons = buttonsForZone(selectedZone, system, dpadMode)
+    setSelectedButton(firstButtons[0] ?? null)
+  }, [dpadMode, selectedZone, system])
+
   const startZoneDrag = useCallback((zoneId: VirtualLayoutZoneId, e: PointerEvent<HTMLButtonElement>) => {
     e.preventDefault()
     e.stopPropagation()
     const container = containerRef.current
     if (!container) return
     dragZoneRef.current = zoneId
+    draggingRef.current = false
+    dragOriginRef.current = { x: e.clientX, y: e.clientY }
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-    const next = pointerToPercent(container, e.clientX, e.clientY)
-    setDraftZones((prev) => ({ ...prev, [zoneId]: { ...ensureZone(prev, zoneId), ...next } }))
   }, [])
 
   const moveZoneDrag = useCallback((e: PointerEvent<HTMLButtonElement>) => {
     const zoneId = dragZoneRef.current
     const container = containerRef.current
-    if (!zoneId || !container) return
+    const origin = dragOriginRef.current
+    if (!zoneId || !container || !origin) return
     e.preventDefault()
+    const dx = e.clientX - origin.x
+    const dy = e.clientY - origin.y
+    if (!draggingRef.current && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return
+    draggingRef.current = true
     const next = pointerToPercent(container, e.clientX, e.clientY)
-    setDraftZones((prev) => ({ ...prev, [zoneId]: { ...ensureZone(prev, zoneId), ...next } }))
-  }, [])
+    updateZone(zoneId, next)
+  }, [updateZone])
 
   const startButtonDrag = useCallback(
     (zoneId: VirtualLayoutZoneId, buttonId: VirtualLayoutButtonId, e: PointerEvent<HTMLButtonElement>) => {
@@ -191,21 +221,25 @@ export function VirtualLayoutEditor({
       const zoneEl = stage?.querySelector(`[data-layout-zone="${zoneId}"]`)
       if (!zoneEl) return
       dragButtonRef.current = { zoneId, buttonId }
+      draggingRef.current = false
+      dragOriginRef.current = { x: e.clientX, y: e.clientY }
       setSelectedButton(buttonId)
       ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-      setDraftZones((prev) => ensureZoneButtons(prev, zoneId, system, dpadMode))
-      const next = pointerToPercent(zoneEl as HTMLElement, e.clientX, e.clientY)
-      updateZoneButtons(zoneId, buttonId, next)
     },
-    [dpadMode, system, updateZoneButtons],
+    [],
   )
 
   const moveButtonDrag = useCallback(
     (e: PointerEvent<HTMLButtonElement>) => {
       const drag = dragButtonRef.current
       const stage = containerRef.current
-      if (!drag || !stage) return
+      const origin = dragOriginRef.current
+      if (!drag || !stage || !origin) return
       e.preventDefault()
+      const dx = e.clientX - origin.x
+      const dy = e.clientY - origin.y
+      if (!draggingRef.current && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return
+      draggingRef.current = true
       const zoneEl = stage.querySelector(`[data-layout-zone="${drag.zoneId}"]`)
       if (!zoneEl) return
       const next = pointerToPercent(zoneEl as HTMLElement, e.clientX, e.clientY)
@@ -217,24 +251,20 @@ export function VirtualLayoutEditor({
   const endDrag = useCallback(() => {
     dragZoneRef.current = null
     dragButtonRef.current = null
+    dragOriginRef.current = null
+    draggingRef.current = false
   }, [])
 
   const handleSave = () => {
     onSave(customLayoutFromZones(draftZones))
   }
 
-  const selectedButtonLayout =
-    selectedButton && editMode === 'buttons'
-      ? resolveZoneButtons(ensureZone(draftZones, selectedZone), selectedZone, system, dpadMode)[
-          selectedButton
-        ]
-      : undefined
-
   if (!open) return null
 
   const showShoulders = system === 'snes'
   const visibleZones = ZONE_ORDER.filter((id) => id !== 'shoulders' || showShoulders)
   const visibleButtonZones = visibleZones.filter((id) => buttonsForZone(id, system, dpadMode).length > 0)
+  const zoneScale = resolveZoneScale(selectedZoneData)
 
   return (
     <div className="layout-editor" role="dialog" aria-label="Edit virtual controller layout">
@@ -254,59 +284,92 @@ export function VirtualLayoutEditor({
             role="tab"
             aria-selected={editMode === 'buttons'}
             className={`btn ${editMode === 'buttons' ? 'btn--primary' : 'btn--ghost'}`}
-            onClick={() => {
-              setEditMode('buttons')
-              setDraftZones((prev) => ensureZoneButtons(prev, selectedZone, system, dpadMode))
-            }}
+            onClick={enterButtonsMode}
           >
             Buttons
           </button>
         </div>
 
         {editMode === 'buttons' && (
-          <div className="layout-editor__zone-tabs" role="tablist" aria-label="Button group">
-            {visibleButtonZones.map((zoneId) => (
-              <button
-                key={zoneId}
-                type="button"
-                role="tab"
-                aria-selected={selectedZone === zoneId}
-                className={`btn ${selectedZone === zoneId ? 'btn--ghost' : 'btn--text'}`}
-                onClick={() => {
-                  setSelectedZone(zoneId)
-                  setSelectedButton(null)
-                  setDraftZones((prev) => ensureZoneButtons(prev, zoneId, system, dpadMode))
-                }}
-              >
-                {LAYOUT_ZONE_LABELS[zoneId]}
-              </button>
-            ))}
-          </div>
-        )}
+          <>
+            <div className="layout-editor__zone-tabs" role="tablist" aria-label="Button group">
+              {visibleButtonZones.map((zoneId) => (
+                <button
+                  key={zoneId}
+                  type="button"
+                  role="tab"
+                  aria-selected={selectedZone === zoneId}
+                  className={`btn ${selectedZone === zoneId ? 'btn--ghost' : 'btn--text'}`}
+                  onClick={() => selectZone(zoneId)}
+                >
+                  {LAYOUT_ZONE_LABELS[zoneId]}
+                </button>
+              ))}
+            </div>
 
-        {editMode === 'buttons' && selectedButton && selectedButtonLayout && (
-          <label className="layout-editor__scale">
-            <span>{BUTTON_LABELS[selectedButton]} size</span>
-            <input
-              type="range"
-              min={50}
-              max={200}
-              step={5}
-              value={Math.round(selectedButtonLayout.scale * 100)}
-              onChange={(e) =>
-                updateZoneButtons(selectedZone, selectedButton, {
-                  scale: Number(e.target.value) / 100,
+            <div className="layout-editor__button-picks">
+              {activeZoneButtons.map((buttonId) => (
+                <button
+                  key={buttonId}
+                  type="button"
+                  className={`btn btn--ghost layout-editor__button-pick${selectedButton === buttonId ? ' layout-editor__button-pick--selected' : ''}`}
+                  onClick={() => setSelectedButton(buttonId)}
+                >
+                  {BUTTON_LABELS[buttonId]}
+                </button>
+              ))}
+            </div>
+
+            <label className="layout-editor__scale">
+              <span>Group size</span>
+              <input
+                type="range"
+                min={50}
+                max={200}
+                step={5}
+                value={Math.round(zoneScale * 100)}
+                onChange={(e) => updateZone(selectedZone, { scale: Number(e.target.value) / 100 })}
+              />
+              <em>{Math.round(zoneScale * 100)}%</em>
+            </label>
+
+            {selectedButton && selectedButtonLayout && (
+              <label className="layout-editor__scale">
+                <span>{BUTTON_LABELS[selectedButton]} size</span>
+                <input
+                  type="range"
+                  min={50}
+                  max={200}
+                  step={5}
+                  value={Math.round(selectedButtonLayout.scale * 100)}
+                  onChange={(e) =>
+                    updateZoneButtons(selectedZone, selectedButton, {
+                      scale: Number(e.target.value) / 100,
+                    })
+                  }
+                />
+                <em>{Math.round(selectedButtonLayout.scale * 100)}%</em>
+              </label>
+            )}
+
+            <button
+              type="button"
+              className="btn btn--text"
+              onClick={() =>
+                updateZone(selectedZone, {
+                  buttons: resetZoneButtons(selectedZone, system, dpadMode),
                 })
               }
-            />
-            <em>{Math.round(selectedButtonLayout.scale * 100)}%</em>
-          </label>
+            >
+              Reset {LAYOUT_ZONE_LABELS[selectedZone]} alignment
+            </button>
+          </>
         )}
 
         <p className="layout-editor__hint">
           {editMode === 'zones'
             ? 'Drag each zone to reposition control groups.'
-            : 'Select a group, then drag buttons or adjust size with the slider.'}
+            : 'Drag the group or individual buttons. Use the pickers and sliders to adjust sizes.'}
         </p>
 
         <div className="layout-editor__actions">
@@ -354,30 +417,44 @@ export function VirtualLayoutEditor({
             )
           })}
 
-        {editMode === 'buttons' &&
-          activeZoneButtons.map((buttonId) => {
-            const pos = buttonHandlePositions[buttonId]
-            if (!pos) return null
-            return (
+        {editMode === 'buttons' && (
+          <>
+            {draftZones[selectedZone] && (
               <button
-                key={buttonId}
                 type="button"
-                className={`layout-editor__handle layout-editor__handle--button${selectedButton === buttonId ? ' layout-editor__handle--selected' : ''}`}
-                style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
-                aria-label={`Drag ${BUTTON_LABELS[buttonId]}`}
-                onPointerDown={(e) => startButtonDrag(selectedZone, buttonId, e)}
-                onPointerMove={moveButtonDrag}
+                className="layout-editor__handle layout-editor__handle--zone"
+                style={{ left: `${draftZones[selectedZone]!.x}%`, top: `${draftZones[selectedZone]!.y}%` }}
+                aria-label={`Drag ${LAYOUT_ZONE_LABELS[selectedZone]} group`}
+                onPointerDown={(e) => startZoneDrag(selectedZone, e)}
+                onPointerMove={moveZoneDrag}
                 onPointerUp={endDrag}
                 onPointerCancel={endDrag}
-                onClick={() => {
-                  setSelectedButton(buttonId)
-                  setDraftZones((prev) => ensureZoneButtons(prev, selectedZone, system, dpadMode))
-                }}
               >
-                <span className="layout-editor__handle-label">{BUTTON_LABELS[buttonId]}</span>
+                <span className="layout-editor__handle-label">{LAYOUT_ZONE_LABELS[selectedZone]}</span>
               </button>
-            )
-          })}
+            )}
+
+            {activeZoneButtons.map((buttonId) => {
+              const pos = buttonHandlePositions[buttonId]
+              if (!pos) return null
+              return (
+                <button
+                  key={buttonId}
+                  type="button"
+                  className={`layout-editor__handle layout-editor__handle--button${selectedButton === buttonId ? ' layout-editor__handle--selected' : ''}`}
+                  style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
+                  aria-label={`Drag ${BUTTON_LABELS[buttonId]}`}
+                  onPointerDown={(e) => startButtonDrag(selectedZone, buttonId, e)}
+                  onPointerMove={moveButtonDrag}
+                  onPointerUp={endDrag}
+                  onPointerCancel={endDrag}
+                >
+                  <span className="layout-editor__handle-label">{BUTTON_LABELS[buttonId]}</span>
+                </button>
+              )
+            })}
+          </>
+        )}
       </div>
     </div>
   )

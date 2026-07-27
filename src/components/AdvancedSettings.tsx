@@ -247,8 +247,8 @@ export function AdvancedSettings({
               </button>
             </div>
             <p className="settings-hint">
-              Presets reposition control zones. Use Edit layout while playing to drag zones into place
-              (saved as Custom).
+              Presets reposition control zones. Use Edit layout while playing to drag zones or
+              fine-tune button positions and sizes inside each group (saved as Custom).
             </p>
             <button
               type="button"

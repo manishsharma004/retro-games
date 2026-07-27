@@ -844,6 +844,30 @@ button {
   pointer-events: auto;
 }
 
+.layout-editor__modes,
+.layout-editor__zone-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.layout-editor__scale {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.layout-editor__scale input[type='range'] {
+  width: 7rem;
+}
+
+.layout-editor__scale em {
+  font-style: normal;
+  min-width: 2.5rem;
+}
+
 .layout-editor__hint {
   margin: 0;
   color: var(--muted);
@@ -887,8 +911,96 @@ button {
   background: rgba(61, 255, 154, 0.22);
 }
 
+.layout-editor__handle--button {
+  padding: 0.25rem 0.55rem;
+  font-size: 0.7rem;
+}
+
+.layout-editor__handle--selected {
+  background: rgba(61, 255, 154, 0.28);
+  box-shadow: 0 0 0 4px rgba(61, 255, 154, 0.2);
+}
+
 .layout-editor__handle-label {
   white-space: nowrap;
+}
+
+/* Custom button layout within zones. */
+.vp-zone--custom-buttons {
+  position: relative;
+}
+
+.vp-zone--left.vp-zone--custom-buttons {
+  width: calc(8.2rem * var(--vp-scale));
+  height: calc(8.2rem * var(--vp-scale));
+}
+
+.vp-meta.vp-zone--custom-buttons {
+  width: calc(5.2rem * var(--vp-scale));
+  height: calc(6.4rem * var(--vp-scale));
+}
+
+.vp-actions.vp-zone--custom-buttons {
+  width: calc(6.8rem * var(--vp-scale));
+  height: calc(6.8rem * var(--vp-scale));
+}
+
+.vp-actions--nes.vp-zone--custom-buttons {
+  height: calc(3.4rem * var(--vp-scale));
+}
+
+.virtual-pad__shoulders.vp-zone--custom-buttons {
+  width: min(72%, 22rem);
+  height: calc(2.8rem * var(--vp-scale));
+}
+
+.vp-dpad--custom {
+  display: block;
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.vp-dpad--custom .vp-btn {
+  position: absolute;
+  width: calc(2.6rem * var(--vp-scale));
+  height: calc(2.6rem * var(--vp-scale));
+}
+
+.vp-dpad--custom .vp-dpad__center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(2.6rem * var(--vp-scale));
+  height: calc(2.6rem * var(--vp-scale));
+  transform: translate(-50%, -50%);
+}
+
+.vp-zone--custom-buttons .vp-btn--meta,
+.vp-zone--custom-buttons .vp-btn--face,
+.vp-zone--custom-buttons .vp-btn--shoulder {
+  position: absolute;
+}
+
+.vp-zone--custom-buttons.vp-meta {
+  display: block;
+}
+
+.vp-zone--custom-buttons.vp-actions {
+  display: block;
+}
+
+.vp-zone--custom-buttons.virtual-pad__shoulders {
+  display: block;
+}
+
+.vp-stick--custom {
+  position: absolute;
+  transform-origin: center center;
+}
+
+.virtual-pad__main > .vp-zone-marker {
+  display: contents;
 }
 
 .settings-backdrop {

@@ -363,9 +363,16 @@ button {
   transition: opacity 0.25s ease;
 }
 
-.play-shell:hover .toolbar--overlay,
+.player:hover .toolbar--overlay,
 .toolbar--overlay:focus-within {
   opacity: 1;
+}
+
+/* Touch devices have no hover — keep the overlay chrome reachable. */
+@media (pointer: coarse) {
+  .toolbar--overlay {
+    opacity: 0.92;
+  }
 }
 
 .toolbar__left {
@@ -447,13 +454,34 @@ button {
   align-items: stretch;
 }
 
-.play-shell:fullscreen {
+/* Native Fullscreen API (:fullscreen) and iOS CSS fallback (.player--fullscreen). */
+.player:fullscreen,
+.player:-webkit-full-screen,
+.player--fullscreen {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-height: 100dvh;
+  z-index: 9999;
+  padding: 0;
+  gap: 0;
+  background: #000;
+  border-radius: 0;
+}
+
+.player:fullscreen .play-shell,
+.player:-webkit-full-screen .play-shell,
+.player--fullscreen .play-shell {
   border-radius: 0;
   border: 0;
   background: #000;
   padding: 0;
   gap: 0;
   justify-content: center;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
 }
 
 .play-stage {
@@ -475,7 +503,9 @@ button {
   max-height: 100%;
 }
 
-.play-shell:fullscreen .play-stage {
+.player:fullscreen .play-stage,
+.player:-webkit-full-screen .play-stage,
+.player--fullscreen .play-stage {
   flex: 1 1 0;
   width: 100%;
   min-height: 0;
@@ -483,7 +513,9 @@ button {
   max-height: 100%;
 }
 
-.play-shell:fullscreen .play-stage--pad-overlay {
+.player:fullscreen .play-stage--pad-overlay,
+.player:-webkit-full-screen .play-stage--pad-overlay,
+.player--fullscreen .play-stage--pad-overlay {
   flex: 1 1 0;
 }
 
@@ -1534,7 +1566,7 @@ button {
     min-height: 0;
   }
 
-  .player:not(:has(.play-shell:fullscreen)) .play-stage--pad-overlay {
+  .player:not(:fullscreen):not(.player--fullscreen) .play-stage--pad-overlay {
     max-height: calc(100dvh - 4.5rem);
   }
 

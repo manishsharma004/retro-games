@@ -42,8 +42,13 @@ export default function App() {
   const [library, setLibrary] = useState<LibraryRom[]>([])
   const autoLoadedRef = useRef(false)
   const skipAutoLoadRef = useRef(false)
-  const shellRef = useRef<HTMLDivElement>(null)
-  const { isFullscreen, toggle: toggleFullscreen } = useFullscreen(shellRef)
+  const playerRef = useRef<HTMLDivElement>(null)
+  const {
+    isFullscreen,
+    cssFallback,
+    toggle: toggleFullscreen,
+    exit: exitFullscreen,
+  } = useFullscreen(playerRef)
   const pads = useGamepads()
 
   const emu = useEmulator(settings)
@@ -267,6 +272,12 @@ export default function App() {
   const isPlaying = emu.status === 'running' || emu.status === 'paused' || emu.status === 'loading'
   const showLanding = !isPlaying
 
+  useEffect(() => {
+    if (!isPlaying && isFullscreen) {
+      void exitFullscreen()
+    }
+  }, [isPlaying, isFullscreen, exitFullscreen])
+
   const canHostShareGame = Boolean(
     peer.role === 'host' &&
       peer.connectionState === 'connected' &&
@@ -350,7 +361,17 @@ export default function App() {
         </header>
       )}
 
-      <div className={isPlaying ? 'player' : 'player player--parked'} aria-hidden={!isPlaying}>
+      <div
+        ref={playerRef}
+        className={[
+          'player',
+          !isPlaying && 'player--parked',
+          isFullscreen && cssFallback && 'player--fullscreen',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+        aria-hidden={!isPlaying}
+      >
         {isPlaying && (
           <div className={`toolbar ${isFullscreen ? 'toolbar--overlay' : ''}`}>
             <div className="toolbar__left">
@@ -453,7 +474,6 @@ export default function App() {
 
         <EmulatorScreen
           canvasRef={emu.canvasRef}
-          shellRef={shellRef}
           system={emu.game?.system ?? null}
           status={emu.status}
           isFullscreen={isFullscreen}

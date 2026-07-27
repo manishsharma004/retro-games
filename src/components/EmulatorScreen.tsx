@@ -6,7 +6,6 @@ interface EmulatorScreenProps {
   canvasRef: RefObject<HTMLCanvasElement | null>
   system: SystemId | null
   status: string
-  shellRef: RefObject<HTMLDivElement | null>
   isFullscreen?: boolean
   /** When true, on-screen controls float over the stage (landscape / setting). */
   padOverlay?: boolean
@@ -17,7 +16,6 @@ export function EmulatorScreen({
   canvasRef,
   system,
   status,
-  shellRef,
   isFullscreen,
   padOverlay = false,
   children,
@@ -26,10 +24,7 @@ export function EmulatorScreen({
   const showPlaceholder = status === 'idle' || status === 'error'
 
   return (
-    <div
-      className={`play-shell${padOverlay ? ' play-shell--pad-overlay' : ''}`}
-      ref={shellRef}
-    >
+    <div className={`play-shell${padOverlay ? ' play-shell--pad-overlay' : ''}`}>
       <div
         className={`play-stage${padOverlay ? ' play-stage--pad-overlay' : ''}`}
         style={isFullscreen || padOverlay ? undefined : { aspectRatio: aspect }}

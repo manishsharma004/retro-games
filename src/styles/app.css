@@ -34,11 +34,13 @@ html,
 body,
 #root {
   min-height: 100%;
+  min-height: 100svh;
   margin: 0;
 }
 
 body {
   min-height: 100dvh;
+  min-height: 100svh;
   overflow-x: hidden;
 }
 
@@ -55,8 +57,16 @@ button {
 .app {
   position: relative;
   min-height: 100dvh;
+  min-height: 100svh;
   display: flex;
   flex-direction: column;
+}
+
+.app--playing {
+  height: 100svh;
+  max-height: 100svh;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .atmosphere {
@@ -324,9 +334,14 @@ button {
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: 100dvh;
+  /* svh = visible viewport with browser chrome; avoids clipping docked
+     controls below the fold on iOS Safari (100dvh is often the large viewport). */
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
   padding: 0.75rem;
   gap: 0.75rem;
+  overflow: hidden;
 }
 
 .player--parked {
@@ -461,41 +476,36 @@ button {
   min-height: 0;
   justify-content: flex-start;
   align-items: stretch;
-  gap: 0.5rem;
+  gap: 0.35rem;
 }
 
 .play-shell--docked .play-stage {
-  width: 100%;
+  /* Grow width from height so max-height can't break the 4:3 box. */
+  width: min(100%, calc(42svh * 4 / 3));
   max-width: 100%;
-  max-height: min(52dvh, calc(100vw * 3 / 4));
-  flex: 0 1 auto;
+  height: auto;
+  max-height: 42svh;
+  min-height: 0;
+  flex: 0 0 auto;
   align-self: center;
 }
 
 .play-shell--docked .virtual-pad {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   width: 100%;
   max-width: 100%;
   min-height: 0;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding-top: 0.15rem;
-  padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+  padding-top: 0.1rem;
+  padding-bottom: max(0.55rem, env(safe-area-inset-bottom, 0px));
+  overflow: hidden;
 }
 
-.player:fullscreen .play-shell--docked,
-.player:-webkit-full-screen .play-shell--docked,
-.player--fullscreen .play-shell--docked {
-  gap: 0.35rem;
-  padding: 0;
-}
-
-.player:fullscreen .play-shell--docked .play-stage,
-.player:-webkit-full-screen .play-shell--docked .play-stage,
-.player--fullscreen .play-shell--docked .play-stage {
-  max-height: min(48dvh, calc(100vw * 3 / 4));
-  width: 100%;
+.play-shell--docked .virtual-pad__main,
+.play-shell--docked .virtual-pad__shoulders {
+  flex-shrink: 0;
 }
 
 /* Native Fullscreen API (:fullscreen) and iOS CSS fallback (.player--fullscreen). */
@@ -536,6 +546,22 @@ body.rg-faux-fullscreen {
   min-height: 0;
   width: 100%;
   overflow: hidden;
+}
+
+/* Docked fullscreen: clear the absolute overlay toolbar so the stage isn't covered. */
+.player:fullscreen .play-shell--docked,
+.player:-webkit-full-screen .play-shell--docked,
+.player--fullscreen .play-shell--docked {
+  gap: 0.25rem;
+  justify-content: flex-start;
+  padding-top: max(3.1rem, calc(env(safe-area-inset-top, 0px) + 2.6rem));
+}
+
+.player:fullscreen .play-shell--docked .play-stage,
+.player:-webkit-full-screen .play-shell--docked .play-stage,
+.player--fullscreen .play-shell--docked .play-stage {
+  width: min(100%, calc(38svh * 4 / 3));
+  max-height: 38svh;
 }
 
 .player:fullscreen .toolbar--overlay,
@@ -1578,12 +1604,41 @@ body.rg-faux-fullscreen {
 }
 
 @media (max-width: 720px) {
+  .toolbar {
+    gap: 0.35rem 0.45rem;
+    padding: 0.35rem 0.5rem;
+  }
+
+  .toolbar__left {
+    flex: 0 1 auto;
+  }
+
+  .toolbar__rom {
+    max-width: min(55vw, 180px);
+    font-size: 0.72rem;
+  }
+
   .toolbar__actions {
-    width: 100%;
+    width: auto;
+    flex: 1 1 auto;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .toolbar__actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .toolbar__actions .btn {
+    padding: 0.32rem 0.5rem;
+    font-size: 0.75rem;
+    flex: 0 0 auto;
   }
 
   .gamepad-status {
-    margin-left: 0;
+    display: none;
   }
 
   .play-stage {

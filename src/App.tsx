@@ -487,8 +487,8 @@ export default function App() {
               dpadMode={settings.virtualDpadMode}
               overlay={padOverlay}
               size={settings.virtualControlsSize}
-              /* Portrait: enlarge thumbs so controls fill the docked band. */
-              scaleBoost={isLandscape ? 1 : 1.45}
+              // Portrait: enlarge thumbs so controls fill the docked band.
+              scaleBoost={isLandscape ? 1 : 1.4}
               opacity={settings.virtualControlsOpacity}
               layout={settings.virtualControlsLayout}
             />

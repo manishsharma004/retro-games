@@ -1,9 +1,11 @@
 import { useCallback, useRef, type CSSProperties, type PointerEvent } from 'react'
 import type { SystemId } from '../lib/cores'
 import {
+  buttonStyle,
   layoutUsesCustomPositions,
   resolveLayoutZones,
   resolveZoneButtons,
+  zoneStyle,
   zoneUsesCustomButtons,
   type VirtualControlsLayout,
   type VirtualLayoutButton,
@@ -44,20 +46,8 @@ const SIZE_SCALE: Record<VirtualControllerProps['size'], number> = {
   large: 1.25,
 }
 
-function zonePositionStyle(x: number, y: number): CSSProperties {
-  return {
-    left: `${x}%`,
-    top: `${y}%`,
-    transform: 'translate(-50%, -50%)',
-  }
-}
-
-function buttonLayoutStyle(button: VirtualLayoutButton): CSSProperties {
-  return {
-    left: `${button.x}%`,
-    top: `${button.y}%`,
-    transform: `translate(-50%, -50%) scale(${button.scale})`,
-  }
+function asCss(style: ReturnType<typeof buttonStyle>): CSSProperties {
+  return style as CSSProperties
 }
 
 export function VirtualController({
@@ -139,14 +129,17 @@ export function VirtualController({
   const actionButtons = resolveZoneButtons(actionsZone, 'actions', system, dpadMode)
   const shoulderButtons = resolveZoneButtons(shouldersZone, 'shoulders', system, dpadMode)
 
+  const btnStyle = (button: VirtualLayoutButton | undefined) =>
+    button ? asCss(buttonStyle(button)) : undefined
+
   const renderDpad = () => {
     if (leftCustomButtons) {
       return (
         <div className="vp-dpad vp-dpad--custom" role="group" aria-label="D-pad">
           <button
             type="button"
-            className="vp-btn vp-dpad__up"
-            style={buttonLayoutStyle(leftButtons.up!)}
+            className="vp-btn vp-dpad__btn"
+            style={btnStyle(leftButtons.up)}
             tabIndex={-1}
             data-layout-button="up"
             {...bind('up')}
@@ -154,8 +147,8 @@ export function VirtualController({
           />
           <button
             type="button"
-            className="vp-btn vp-dpad__left"
-            style={buttonLayoutStyle(leftButtons.left!)}
+            className="vp-btn vp-dpad__btn"
+            style={btnStyle(leftButtons.left)}
             tabIndex={-1}
             data-layout-button="left"
             {...bind('left')}
@@ -164,8 +157,8 @@ export function VirtualController({
           <div className="vp-dpad__center" />
           <button
             type="button"
-            className="vp-btn vp-dpad__right"
-            style={buttonLayoutStyle(leftButtons.right!)}
+            className="vp-btn vp-dpad__btn"
+            style={btnStyle(leftButtons.right)}
             tabIndex={-1}
             data-layout-button="right"
             {...bind('right')}
@@ -173,8 +166,8 @@ export function VirtualController({
           />
           <button
             type="button"
-            className="vp-btn vp-dpad__down"
-            style={buttonLayoutStyle(leftButtons.down!)}
+            className="vp-btn vp-dpad__btn"
+            style={btnStyle(leftButtons.down)}
             tabIndex={-1}
             data-layout-button="down"
             {...bind('down')}
@@ -201,7 +194,7 @@ export function VirtualController({
         onPress={onPress}
         onRelease={onRelease}
         disabled={editing}
-        style={leftCustomButtons && leftButtons.stick ? buttonLayoutStyle(leftButtons.stick) : undefined}
+        style={leftCustomButtons && leftButtons.stick ? btnStyle(leftButtons.stick) : undefined}
         className={leftCustomButtons ? 'vp-stick--custom' : undefined}
       />
     ) : (
@@ -218,7 +211,7 @@ export function VirtualController({
   const leftNode = (
     <div
       className={leftWrapperClass}
-      style={customLayout && leftZone ? zonePositionStyle(leftZone.x, leftZone.y) : undefined}
+      style={customLayout && leftZone ? (zoneStyle(leftZone) as CSSProperties) : undefined}
       data-layout-zone="left"
     >
       {leftContent}
@@ -235,7 +228,7 @@ export function VirtualController({
         ]
           .filter(Boolean)
           .join(' ')}
-        style={customLayout && shouldersZone ? zonePositionStyle(shouldersZone.x, shouldersZone.y) : undefined}
+        style={customLayout && shouldersZone ? (zoneStyle(shouldersZone) as CSSProperties) : undefined}
         data-layout-zone="shoulders"
       >
         {isSnes && (
@@ -243,7 +236,7 @@ export function VirtualController({
             <button
               type="button"
               className="vp-btn vp-btn--shoulder"
-              style={shouldersCustomButtons && shoulderButtons.l ? buttonLayoutStyle(shoulderButtons.l) : undefined}
+              style={shouldersCustomButtons ? btnStyle(shoulderButtons.l) : undefined}
               tabIndex={-1}
               data-layout-button="l"
               {...bind('l')}
@@ -253,7 +246,7 @@ export function VirtualController({
             <button
               type="button"
               className="vp-btn vp-btn--shoulder"
-              style={shouldersCustomButtons && shoulderButtons.r ? buttonLayoutStyle(shoulderButtons.r) : undefined}
+              style={shouldersCustomButtons ? btnStyle(shoulderButtons.r) : undefined}
               tabIndex={-1}
               data-layout-button="r"
               {...bind('r')}
@@ -275,13 +268,13 @@ export function VirtualController({
           ]
             .filter(Boolean)
             .join(' ')}
-          style={customLayout && metaZone ? zonePositionStyle(metaZone.x, metaZone.y) : undefined}
+          style={customLayout && metaZone ? (zoneStyle(metaZone) as CSSProperties) : undefined}
           data-layout-zone="meta"
         >
           <button
             type="button"
             className="vp-btn vp-btn--meta"
-            style={metaCustomButtons && metaButtons.select ? buttonLayoutStyle(metaButtons.select) : undefined}
+            style={metaCustomButtons ? btnStyle(metaButtons.select) : undefined}
             tabIndex={-1}
             data-layout-button="select"
             {...bind('select')}
@@ -291,7 +284,7 @@ export function VirtualController({
           <button
             type="button"
             className="vp-btn vp-btn--meta"
-            style={metaCustomButtons && metaButtons.start ? buttonLayoutStyle(metaButtons.start) : undefined}
+            style={metaCustomButtons ? btnStyle(metaButtons.start) : undefined}
             tabIndex={-1}
             data-layout-button="start"
             {...bind('start')}
@@ -309,7 +302,7 @@ export function VirtualController({
           ]
             .filter(Boolean)
             .join(' ')}
-          style={customLayout && actionsZone ? zonePositionStyle(actionsZone.x, actionsZone.y) : undefined}
+          style={customLayout && actionsZone ? (zoneStyle(actionsZone) as CSSProperties) : undefined}
           data-layout-zone="actions"
         >
           {isSnes && (
@@ -317,7 +310,7 @@ export function VirtualController({
               <button
                 type="button"
                 className="vp-btn vp-btn--face vp-btn--y"
-                style={actionsCustomButtons && actionButtons.y ? buttonLayoutStyle(actionButtons.y) : undefined}
+                style={actionsCustomButtons ? btnStyle(actionButtons.y) : undefined}
                 tabIndex={-1}
                 data-layout-button="y"
                 {...bind('y')}
@@ -327,7 +320,7 @@ export function VirtualController({
               <button
                 type="button"
                 className="vp-btn vp-btn--face vp-btn--x"
-                style={actionsCustomButtons && actionButtons.x ? buttonLayoutStyle(actionButtons.x) : undefined}
+                style={actionsCustomButtons ? btnStyle(actionButtons.x) : undefined}
                 tabIndex={-1}
                 data-layout-button="x"
                 {...bind('x')}
@@ -339,7 +332,7 @@ export function VirtualController({
           <button
             type="button"
             className="vp-btn vp-btn--face vp-btn--b"
-            style={actionsCustomButtons && actionButtons.b ? buttonLayoutStyle(actionButtons.b) : undefined}
+            style={actionsCustomButtons ? btnStyle(actionButtons.b) : undefined}
             tabIndex={-1}
             data-layout-button="b"
             {...bind('b')}
@@ -349,7 +342,7 @@ export function VirtualController({
           <button
             type="button"
             className="vp-btn vp-btn--face vp-btn--a"
-            style={actionsCustomButtons && actionButtons.a ? buttonLayoutStyle(actionButtons.a) : undefined}
+            style={actionsCustomButtons ? btnStyle(actionButtons.a) : undefined}
             tabIndex={-1}
             data-layout-button="a"
             {...bind('a')}

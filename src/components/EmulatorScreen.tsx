@@ -6,7 +6,6 @@ interface EmulatorScreenProps {
   canvasRef: RefObject<HTMLCanvasElement | null>
   system: SystemId | null
   status: string
-  isFullscreen?: boolean
   /** When true, on-screen controls float over the stage (landscape / setting). */
   padOverlay?: boolean
   children?: ReactNode

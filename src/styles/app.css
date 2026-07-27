@@ -454,6 +454,50 @@ button {
   align-items: stretch;
 }
 
+/* Docked pad (portrait): game keeps 4:3; controls fill the leftover band. */
+.play-shell--docked {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  justify-content: flex-start;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
+.play-shell--docked .play-stage {
+  width: 100%;
+  max-width: 100%;
+  max-height: min(52dvh, calc(100vw * 3 / 4));
+  flex: 0 1 auto;
+  align-self: center;
+}
+
+.play-shell--docked .virtual-pad {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-top: 0.15rem;
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+}
+
+.player:fullscreen .play-shell--docked,
+.player:-webkit-full-screen .play-shell--docked,
+.player--fullscreen .play-shell--docked {
+  gap: 0.35rem;
+  padding: 0;
+}
+
+.player:fullscreen .play-shell--docked .play-stage,
+.player:-webkit-full-screen .play-shell--docked .play-stage,
+.player--fullscreen .play-shell--docked .play-stage {
+  max-height: min(48dvh, calc(100vw * 3 / 4));
+  width: 100%;
+}
+
 /* Native Fullscreen API (:fullscreen) and iOS CSS fallback (.player--fullscreen). */
 .player:fullscreen,
 .player:-webkit-full-screen,
@@ -462,12 +506,21 @@ button {
   inset: 0;
   width: 100%;
   height: 100%;
-  max-height: 100dvh;
+  max-height: none;
+  min-height: 0;
   z-index: 9999;
   padding: 0;
   gap: 0;
   background: #000;
   border-radius: 0;
+  overflow: hidden;
+}
+
+html.rg-faux-fullscreen,
+body.rg-faux-fullscreen {
+  overflow: hidden !important;
+  overscroll-behavior: none;
+  touch-action: none;
 }
 
 .player:fullscreen .play-shell,
@@ -482,6 +535,18 @@ button {
   flex: 1 1 auto;
   min-height: 0;
   width: 100%;
+  overflow: hidden;
+}
+
+.player:fullscreen .toolbar--overlay,
+.player:-webkit-full-screen .toolbar--overlay,
+.player--fullscreen .toolbar--overlay {
+  top: max(0.35rem, env(safe-area-inset-top, 0px));
+  left: 0.35rem;
+  right: 0.35rem;
+  max-height: min(28vh, 9rem);
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .play-stage {
@@ -503,20 +568,16 @@ button {
   max-height: 100%;
 }
 
-.player:fullscreen .play-stage,
-.player:-webkit-full-screen .play-stage,
-.player--fullscreen .play-stage {
+/* Only stretch the stage when controls overlay it (landscape). Docked portrait
+   keeps a true 4:3 stage so we don't letterbox inside a tall empty box. */
+.player:fullscreen .play-stage--pad-overlay,
+.player:-webkit-full-screen .play-stage--pad-overlay,
+.player--fullscreen .play-stage--pad-overlay {
   flex: 1 1 0;
   width: 100%;
   min-height: 0;
   max-width: 100%;
   max-height: 100%;
-}
-
-.player:fullscreen .play-stage--pad-overlay,
-.player:-webkit-full-screen .play-stage--pad-overlay,
-.player--fullscreen .play-stage--pad-overlay {
-  flex: 1 1 0;
 }
 
 .play-canvas {

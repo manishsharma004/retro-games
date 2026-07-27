@@ -144,6 +144,14 @@ function buildElements(system: SystemId, dpadMode: 'dpad' | 'stick'): EditorElem
     const buttons = buttonsForZone(zoneId, system, dpadMode)
     if (buttons.length === 0) continue
 
+    items.push({
+      id: elementId(zoneId),
+      kind: 'zone',
+      zoneId,
+      label: LAYOUT_ZONE_LABELS[zoneId],
+      icon: zoneId === 'actions' ? '⊕' : zoneId === 'meta' ? '⊞' : '⊟',
+    })
+
     if (zoneId === 'meta') {
       for (const buttonId of buttons) {
         items.push({
@@ -202,6 +210,8 @@ export function VirtualLayoutEditor({
   const [guides, setGuides] = useState<{ x: number; y: number } | null>(null)
   const [profileOpen, setProfileOpen] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
+  const [leftCollapsed, setLeftCollapsed] = useState(false)
+  const [rightCollapsed, setRightCollapsed] = useState(false)
 
   const elements = useMemo(() => buildElements(system, dpadMode), [system, dpadMode])
   const selected = useMemo(() => elements.find((el) => el.id === selectedId) ?? elements[0], [elements, selectedId])
@@ -215,6 +225,8 @@ export function VirtualLayoutEditor({
     setGlobalScale(100)
     setGlobalOpacity(Math.round(opacity * 100))
     setSnapToGrid(false)
+    setLeftCollapsed(window.matchMedia('(max-width: 960px)').matches)
+    setRightCollapsed(window.matchMedia('(max-width: 960px)').matches)
   }, [open, layout, system, dpadMode, opacity])
 
   const measureSelection = useCallback(() => {
@@ -254,7 +266,7 @@ export function VirtualLayoutEditor({
     const onResize = () => measureSelection()
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
-  }, [open, measureSelection, draftZones, globalScale, globalOpacity, hiddenIds, selectedId])
+  }, [open, measureSelection, draftZones, globalScale, globalOpacity, hiddenIds, selectedId, leftCollapsed, rightCollapsed])
 
   const updateZone = useCallback((zoneId: VirtualLayoutZoneId, patch: Partial<VirtualLayoutZone>) => {
     setDraftZones((prev) => ({
@@ -503,66 +515,86 @@ export function VirtualLayoutEditor({
       </header>
 
       <div className="layout-editor__workspace">
-        <aside className="layout-editor__sidebar layout-editor__sidebar--left">
-          <h3 className="layout-editor__sidebar-title">Quick Edit Tools</h3>
+        <aside
+          className={[
+            'layout-editor__sidebar',
+            'layout-editor__sidebar--left',
+            leftCollapsed && 'layout-editor__sidebar--collapsed',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+        >
+          <button
+            type="button"
+            className="layout-editor__sidebar-toggle"
+            aria-label={leftCollapsed ? 'Expand Quick Edit Tools' : 'Collapse Quick Edit Tools'}
+            aria-expanded={!leftCollapsed}
+            onClick={() => setLeftCollapsed((v) => !v)}
+          >
+            {leftCollapsed ? '»' : '«'}
+          </button>
+          <div className="layout-editor__sidebar-body">
+            <h3 className="layout-editor__sidebar-title">Quick Edit Tools</h3>
 
-          <label className="layout-editor__field">
-            <span>Global Scale</span>
-            <input
-              type="range"
-              min={50}
-              max={200}
-              step={5}
-              value={globalScale}
-              onChange={(e) => setGlobalScale(Number(e.target.value))}
-            />
-            <em>{globalScale}%</em>
-          </label>
-
-          <label className="layout-editor__field">
-            <span>Global Opacity</span>
-            <input
-              type="range"
-              min={20}
-              max={100}
-              step={5}
-              value={globalOpacity}
-              onChange={(e) => setGlobalOpacity(Number(e.target.value))}
-            />
-            <em>{globalOpacity}%</em>
-          </label>
-
-          <label className="layout-editor__toggle">
-            <span>Snap to Grid</span>
-            <input
-              type="checkbox"
-              checked={snapToGrid}
-              onChange={(e) => setSnapToGrid(e.target.checked)}
-            />
-          </label>
-
-          {selected && (
             <label className="layout-editor__field">
-              <span>{selected.label} size</span>
+              <span>Global Scale</span>
               <input
                 type="range"
                 min={50}
                 max={200}
                 step={5}
-                value={selectedScale}
-                onChange={(e) => {
-                  const scale = Number(e.target.value) / 100
-                  if (selected.kind === 'zone') updateZone(selected.zoneId, { scale })
-                  else if (selected.buttonId) updateZoneButtons(selected.zoneId, selected.buttonId, { scale })
-                }}
+                value={globalScale}
+                onChange={(e) => setGlobalScale(Number(e.target.value))}
               />
-              <em>{selectedScale}%</em>
+              <em>{globalScale}%</em>
             </label>
-          )}
 
-          <button type="button" className="btn btn--ghost layout-editor__reset" onClick={handleReset}>
-            Reset to Defaults
-          </button>
+            <label className="layout-editor__field">
+              <span>Global Opacity</span>
+              <input
+                type="range"
+                min={20}
+                max={100}
+                step={5}
+                value={globalOpacity}
+                onChange={(e) => setGlobalOpacity(Number(e.target.value))}
+              />
+              <em>{globalOpacity}%</em>
+            </label>
+
+            <label className="layout-editor__toggle">
+              <span>Snap to Grid</span>
+              <input
+                type="checkbox"
+                checked={snapToGrid}
+                onChange={(e) => setSnapToGrid(e.target.checked)}
+              />
+            </label>
+
+            {selected && (
+              <label className="layout-editor__field">
+                <span>{selected.label} size</span>
+                <input
+                  type="range"
+                  min={50}
+                  max={200}
+                  step={5}
+                  value={selectedScale}
+                  onChange={(e) => {
+                    const scale = Number(e.target.value) / 100
+                    if (selected.kind === 'zone') updateZone(selected.zoneId, { scale })
+                    else if (selected.buttonId)
+                      updateZoneButtons(selected.zoneId, selected.buttonId, { scale })
+                  }}
+                />
+                <em>{selectedScale}%</em>
+              </label>
+            )}
+
+            <button type="button" className="btn btn--ghost layout-editor__reset" onClick={handleReset}>
+              Reset to Defaults
+            </button>
+          </div>
         </aside>
 
         <main className="layout-editor__canvas">
@@ -622,55 +654,74 @@ export function VirtualLayoutEditor({
           </div>
         </main>
 
-        <aside className="layout-editor__sidebar layout-editor__sidebar--right">
-          <h3 className="layout-editor__sidebar-title">Element Manager</h3>
+        <aside
+          className={[
+            'layout-editor__sidebar',
+            'layout-editor__sidebar--right',
+            rightCollapsed && 'layout-editor__sidebar--collapsed',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+        >
+          <button
+            type="button"
+            className="layout-editor__sidebar-toggle"
+            aria-label={rightCollapsed ? 'Expand Element Manager' : 'Collapse Element Manager'}
+            aria-expanded={!rightCollapsed}
+            onClick={() => setRightCollapsed((v) => !v)}
+          >
+            {rightCollapsed ? '«' : '»'}
+          </button>
+          <div className="layout-editor__sidebar-body">
+            <h3 className="layout-editor__sidebar-title">Element Manager</h3>
 
-          <details className="layout-editor__dropdown layout-editor__dropdown--block">
-            <summary className="layout-editor__dropdown-trigger">Add Control</summary>
-            <div className="layout-editor__dropdown-menu">
-              <p className="layout-editor__dropdown-hint">All standard controls are already on screen. Select one below to edit.</p>
-            </div>
-          </details>
+            <details className="layout-editor__dropdown layout-editor__dropdown--block">
+              <summary className="layout-editor__dropdown-trigger">Add Control</summary>
+              <div className="layout-editor__dropdown-menu">
+                <p className="layout-editor__dropdown-hint">All standard controls are already on screen. Select one below to edit.</p>
+              </div>
+            </details>
 
-          <ul className="layout-editor__elements">
-            {elements.map((el) => (
-              <li key={el.id}>
-                <button
-                  type="button"
-                  className={`layout-editor__element${selectedId === el.id ? ' layout-editor__element--selected' : ''}${isHidden(el.id) ? ' layout-editor__element--hidden' : ''}`}
-                  onClick={() => setSelectedId(el.id)}
-                >
-                  <span className="layout-editor__element-icon" aria-hidden="true">
-                    {el.icon}
-                  </span>
-                  <span className="layout-editor__element-label">{el.label}</span>
-                  <span className="layout-editor__element-move" aria-hidden="true">⠿</span>
-                </button>
-                <button
-                  type="button"
-                  className="layout-editor__visibility"
-                  aria-label={isHidden(el.id) ? `Show ${el.label}` : `Hide ${el.label}`}
-                  onClick={() => toggleVisibility(el.id)}
-                >
-                  {isHidden(el.id) ? '○' : '◉'}
-                </button>
-              </li>
-            ))}
-          </ul>
+            <ul className="layout-editor__elements">
+              {elements.map((el) => (
+                <li key={el.id}>
+                  <button
+                    type="button"
+                    className={`layout-editor__element${selectedId === el.id ? ' layout-editor__element--selected' : ''}${isHidden(el.id) ? ' layout-editor__element--hidden' : ''}`}
+                    onClick={() => setSelectedId(el.id)}
+                  >
+                    <span className="layout-editor__element-icon" aria-hidden="true">
+                      {el.icon}
+                    </span>
+                    <span className="layout-editor__element-label">{el.label}</span>
+                    <span className="layout-editor__element-move" aria-hidden="true">⠿</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="layout-editor__visibility"
+                    aria-label={isHidden(el.id) ? `Show ${el.label}` : `Hide ${el.label}`}
+                    onClick={() => toggleVisibility(el.id)}
+                  >
+                    {isHidden(el.id) ? '○' : '◉'}
+                  </button>
+                </li>
+              ))}
+            </ul>
 
-          {selected?.kind === 'button' && (
-            <button
-              type="button"
-              className="btn btn--text"
-              onClick={() =>
-                updateZone(selected.zoneId, {
-                  buttons: resetZoneButtons(selected.zoneId, system, dpadMode),
-                })
-              }
-            >
-              Reset {LAYOUT_ZONE_LABELS[selected.zoneId]} alignment
-            </button>
-          )}
+            {selected?.kind === 'button' && (
+              <button
+                type="button"
+                className="btn btn--text"
+                onClick={() =>
+                  updateZone(selected.zoneId, {
+                    buttons: resetZoneButtons(selected.zoneId, system, dpadMode),
+                  })
+                }
+              >
+                Reset {LAYOUT_ZONE_LABELS[selected.zoneId]} alignment
+              </button>
+            )}
+          </div>
         </aside>
       </div>
     </div>

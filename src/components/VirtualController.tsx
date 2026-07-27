@@ -108,7 +108,7 @@ export function VirtualController({
   const zonePositions = resolveLayoutZones(layout)
 
   const style = {
-    '--vp-scale': SIZE_SCALE[size] * scaleBoost,
+    '--vp-size-scale': SIZE_SCALE[size] * scaleBoost,
     '--vp-opacity': opacity,
   } as CSSProperties
 

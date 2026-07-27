@@ -1,4 +1,14 @@
 /* Base reset lives in styles/app.css via App import; keep file for Vite entry. */
 html {
   height: 100%;
+  /* Fluid root size so rem-based UI scales on narrow viewports. */
+  font-size: clamp(14px, 2.8vw, 16px);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+@media (max-width: 720px) {
+  html {
+    font-size: clamp(13px, 3.4vw, 16px);
+  }
 }

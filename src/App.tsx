@@ -268,6 +268,8 @@ export default function App() {
   const isLandscape = useLandscape()
   // Landscape: float semi-transparent controls over the game (no separate pad row).
   const padOverlay = settings.virtualControlsOverlay || isLandscape
+  const effectivePadOverlay = padOverlay || isFullscreen
+  const iosMinimalFs = isFullscreen && (cssFallback || touchDevice)
 
   const isPlaying = emu.status === 'running' || emu.status === 'paused' || emu.status === 'loading'
   const showLanding = !isPlaying
@@ -366,13 +368,23 @@ export default function App() {
         className={[
           'player',
           !isPlaying && 'player--parked',
-          isFullscreen && cssFallback && 'player--fullscreen',
+          isFullscreen && 'player--fullscreen',
         ]
           .filter(Boolean)
           .join(' ')}
         aria-hidden={!isPlaying}
       >
-        {isPlaying && (
+        {isPlaying && iosMinimalFs ? (
+          <button
+            type="button"
+            className="fs-exit-btn"
+            onClick={() => void toggleFullscreen()}
+            aria-label="Exit fullscreen"
+            title="Exit fullscreen"
+          >
+            ✕
+          </button>
+        ) : isPlaying ? (
           <div className={`toolbar ${isFullscreen ? 'toolbar--overlay' : ''}`}>
             <div className="toolbar__left">
               <span className="toolbar__brand">Retro Games</span>
@@ -470,13 +482,13 @@ export default function App() {
             </div>
             <GamepadStatus pads={pads} onOpen={() => setControllersOpen(true)} />
           </div>
-        )}
+        ) : null}
 
         <EmulatorScreen
           canvasRef={emu.canvasRef}
           system={emu.game?.system ?? null}
           status={emu.status}
-          padOverlay={padOverlay}
+          padOverlay={effectivePadOverlay}
         >
           {emu.game && isPlaying && (
             <VirtualController
@@ -485,7 +497,7 @@ export default function App() {
               onRelease={onLocalRelease}
               visible={showVirtual && emu.status !== 'loading' && !layoutEditorOpen}
               dpadMode={settings.virtualDpadMode}
-              overlay={padOverlay}
+              overlay={effectivePadOverlay}
               size={settings.virtualControlsSize}
               // Portrait: enlarge thumbs so controls fill the docked band.
               scaleBoost={isLandscape ? 1 : 1.4}

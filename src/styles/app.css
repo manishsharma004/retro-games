@@ -370,9 +370,9 @@ button {
 
 .toolbar--overlay {
   position: absolute;
-  top: 0.75rem;
-  left: 0.75rem;
-  right: 0.75rem;
+  top: max(0.75rem, env(safe-area-inset-top, 0px));
+  left: max(0.75rem, env(safe-area-inset-left, 0px));
+  right: max(0.75rem, env(safe-area-inset-right, 0px));
   z-index: 5;
   opacity: 0;
   transition: opacity 0.25s ease;
@@ -513,17 +513,24 @@ button {
 .player:-webkit-full-screen,
 .player--fullscreen {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   width: 100%;
   height: 100%;
   max-height: none;
   min-height: 0;
   z-index: 9999;
+  margin: 0;
   padding: 0;
   gap: 0;
   background: #000;
   border-radius: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
 }
 
 html.rg-faux-fullscreen,
@@ -541,10 +548,12 @@ body.rg-faux-fullscreen {
   background: #000;
   padding: 0;
   gap: 0;
-  justify-content: center;
-  flex: 1 1 auto;
+  justify-content: stretch;
+  align-items: stretch;
+  flex: 1 1 0;
   min-height: 0;
   width: 100%;
+  height: 100%;
   overflow: hidden;
 }
 
@@ -604,6 +613,42 @@ body.rg-faux-fullscreen {
   min-height: 0;
   max-width: 100%;
   max-height: 100%;
+  height: auto;
+}
+
+.player:fullscreen .play-stage--pad-overlay,
+.player:-webkit-full-screen .play-stage--pad-overlay,
+.player--fullscreen .play-stage--pad-overlay {
+  flex: 1 1 0;
+  width: 100%;
+  min-height: 0;
+  max-width: 100%;
+  max-height: 100%;
+  height: auto;
+}
+
+/* Minimal transparent exit control for iOS / touch fullscreen. */
+.fs-exit-btn {
+  position: fixed;
+  top: max(0.65rem, env(safe-area-inset-top, 0px));
+  right: max(0.65rem, env(safe-area-inset-right, 0px));
+  z-index: 10000;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.35);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  backdrop-filter: blur(4px);
+}
+
+.fs-exit-btn:active {
+  background: rgba(0, 0, 0, 0.55);
 }
 
 .play-canvas {
@@ -660,7 +705,9 @@ body.rg-faux-fullscreen {
 }
 
 .virtual-pad {
-  --vp-scale: 1;
+  --vp-size-scale: 1;
+  --vp-orient-scale: 1;
+  --vp-scale: calc(var(--vp-size-scale) * var(--vp-orient-scale));
   width: min(100%, 560px);
   /* Keep controls off the very edges, respecting device safe areas. */
   padding: 0.35rem max(1rem, env(safe-area-inset-right)) max(0.85rem, env(safe-area-inset-bottom))
@@ -1020,16 +1067,67 @@ body.rg-faux-fullscreen {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 240px 1fr 260px;
+  grid-template-columns: auto 1fr auto;
 }
 
 .layout-editor__sidebar {
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
+  width: 240px;
   padding: 1rem;
   background: #1a2030;
   border-color: rgba(120, 170, 255, 0.12);
+  overflow: auto;
+  transition: width 0.2s ease, padding 0.2s ease;
+  min-width: 0;
+}
+
+.layout-editor__sidebar--right {
+  width: 260px;
+}
+
+.layout-editor__sidebar--collapsed {
+  width: 2.75rem !important;
+  padding: 0.5rem 0.35rem;
+  overflow: hidden;
+  align-items: center;
+}
+
+.layout-editor__sidebar--collapsed .layout-editor__sidebar-body {
+  display: none;
+}
+
+.layout-editor__sidebar-toggle {
+  appearance: none;
+  flex-shrink: 0;
+  align-self: flex-start;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid rgba(120, 170, 255, 0.2);
+  border-radius: 6px;
+  background: #222a3a;
+  color: #5ce1ff;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.layout-editor__sidebar--right .layout-editor__sidebar-toggle {
+  align-self: flex-end;
+}
+
+.layout-editor__sidebar--collapsed .layout-editor__sidebar-toggle {
+  align-self: center;
+}
+
+.layout-editor__sidebar-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-width: 0;
+  flex: 1;
   overflow: auto;
 }
 
@@ -1328,17 +1426,20 @@ body.rg-faux-fullscreen {
 }
 
 @media (max-width: 960px) {
-  .layout-editor__workspace {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr auto;
-  }
-
   .layout-editor__header {
     grid-template-columns: 1fr;
   }
 
   .layout-editor__instruction {
     text-align: left;
+  }
+
+  .layout-editor__sidebar:not(.layout-editor__sidebar--collapsed) {
+    width: min(200px, 38vw);
+  }
+
+  .layout-editor__sidebar--right:not(.layout-editor__sidebar--collapsed) {
+    width: min(210px, 40vw);
   }
 }
 
@@ -1666,6 +1767,19 @@ body.rg-faux-fullscreen {
     grid-area: meta;
     flex-direction: row;
     justify-content: center;
+  }
+}
+
+/* Portrait: scale stacked controls to available vertical space. */
+@media (orientation: portrait) {
+  .virtual-pad:not(.virtual-pad--overlay) {
+    --vp-orient-scale: clamp(
+      0.72,
+      calc((100dvh - 5.5rem - min(52dvh, 75vw)) / 14rem),
+      1.12
+    );
+    width: min(100%, calc(560px * var(--vp-orient-scale)));
+    margin-inline: auto;
   }
 }
 

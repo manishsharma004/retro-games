@@ -6,6 +6,7 @@ import { GamepadStatus } from './components/GamepadStatus'
 import { PeerLobby } from './components/PeerLobby'
 import { RomLoader } from './components/RomLoader'
 import { VirtualController } from './components/VirtualController'
+import { VirtualLayoutEditor } from './components/VirtualLayoutEditor'
 import { useEmulator } from './hooks/useEmulator'
 import { useFullscreen } from './hooks/useFullscreen'
 import { useGamepadControls } from './hooks/useGamepadControls'
@@ -36,6 +37,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [peerOpen, setPeerOpen] = useState(false)
   const [controllersOpen, setControllersOpen] = useState(false)
+  const [layoutEditorOpen, setLayoutEditorOpen] = useState(false)
   const [touchDevice] = useState(() => prefersTouch())
   const [library, setLibrary] = useState<LibraryRom[]>([])
   const autoLoadedRef = useRef(false)
@@ -190,7 +192,8 @@ export default function App() {
     (emu.status === 'running' || emu.status === 'paused') &&
     !settingsOpen &&
     !peerOpen &&
-    !controllersOpen
+    !controllersOpen &&
+    !layoutEditorOpen
 
   useKeyboardControls({
     enabled: inputEnabled,
@@ -430,6 +433,16 @@ export default function App() {
               <button type="button" className="btn btn--ghost" onClick={() => setSettingsOpen(true)}>
                 Settings
               </button>
+              {showVirtual && (
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => setLayoutEditorOpen(true)}
+                  disabled={emu.status === 'loading'}
+                >
+                  Pad layout
+                </button>
+              )}
               <button type="button" className="btn btn--ghost" onClick={emu.exit}>
                 Exit
               </button>
@@ -451,11 +464,27 @@ export default function App() {
               system={emu.game.system}
               onPress={onLocalPress}
               onRelease={onLocalRelease}
-              visible={showVirtual && emu.status !== 'loading'}
+              visible={showVirtual && emu.status !== 'loading' && !layoutEditorOpen}
               dpadMode={settings.virtualDpadMode}
               overlay={padOverlay}
               size={settings.virtualControlsSize}
               opacity={settings.virtualControlsOpacity}
+              layout={settings.virtualControlsLayout}
+            />
+          )}
+          {emu.game && isPlaying && layoutEditorOpen && (
+            <VirtualLayoutEditor
+              open={layoutEditorOpen}
+              system={emu.game.system}
+              layout={settings.virtualControlsLayout}
+              dpadMode={settings.virtualDpadMode}
+              size={settings.virtualControlsSize}
+              opacity={settings.virtualControlsOpacity}
+              onSave={(nextLayout) => {
+                setSettings((prev) => ({ ...prev, virtualControlsLayout: nextLayout }))
+                setLayoutEditorOpen(false)
+              }}
+              onCancel={() => setLayoutEditorOpen(false)}
             />
           )}
         </EmulatorScreen>
@@ -480,6 +509,10 @@ export default function App() {
         onOpenControllers={() => {
           setSettingsOpen(false)
           setControllersOpen(true)
+        }}
+        onOpenLayoutEditor={() => {
+          setSettingsOpen(false)
+          setLayoutEditorOpen(true)
         }}
       />
 

@@ -43,10 +43,21 @@ function exitNativeFullscreen(): Promise<void> {
 }
 
 function clearFauxViewportStyles(el: HTMLElement) {
+  el.style.removeProperty('position')
   el.style.removeProperty('top')
   el.style.removeProperty('left')
+  el.style.removeProperty('right')
+  el.style.removeProperty('bottom')
   el.style.removeProperty('width')
   el.style.removeProperty('height')
+}
+
+/** iPhone Safari has no reliable element fullscreen; always use CSS fallback. */
+function prefersCssFullscreenFallback(): boolean {
+  if (typeof navigator === 'undefined') return false
+  const ua = navigator.userAgent
+  if (/iPhone|iPod/.test(ua)) return true
+  return !nativeFullscreenEnabled()
 }
 
 /**
@@ -56,15 +67,20 @@ function clearFauxViewportStyles(el: HTMLElement) {
  */
 function syncFauxViewport(el: HTMLElement) {
   const vv = window.visualViewport
+  el.style.position = 'fixed'
+  el.style.right = 'auto'
+  el.style.bottom = 'auto'
+
   if (!vv) {
     el.style.top = '0px'
     el.style.left = '0px'
     el.style.width = '100%'
-    el.style.height = '100%'
+    el.style.height = `${window.innerHeight}px`
     return
   }
-  el.style.top = `${vv.offsetTop}px`
-  el.style.left = `${vv.offsetLeft}px`
+
+  el.style.top = `${Math.max(0, vv.offsetTop)}px`
+  el.style.left = `${Math.max(0, vv.offsetLeft)}px`
   el.style.width = `${vv.width}px`
   el.style.height = `${vv.height}px`
 }
@@ -114,19 +130,24 @@ export function useFullscreen(targetRef: RefObject<HTMLElement | null>) {
     body.classList.add('rg-faux-fullscreen')
     html.style.overflow = 'hidden'
     body.style.overflow = 'hidden'
+
+    // Scroll to top before locking so fixed positioning aligns with the visual viewport.
+    window.scrollTo(0, 0)
     body.style.position = 'fixed'
     body.style.width = '100%'
-    body.style.top = `-${prev.scrollY}px`
+    body.style.top = '0px'
 
     const sync = () => {
       if (el) syncFauxViewport(el)
     }
     sync()
+    requestAnimationFrame(() => requestAnimationFrame(sync))
 
     const vv = window.visualViewport
     vv?.addEventListener('resize', sync)
     vv?.addEventListener('scroll', sync)
     window.addEventListener('resize', sync)
+    window.addEventListener('orientationchange', sync)
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -140,6 +161,7 @@ export function useFullscreen(targetRef: RefObject<HTMLElement | null>) {
       vv?.removeEventListener('resize', sync)
       vv?.removeEventListener('scroll', sync)
       window.removeEventListener('resize', sync)
+      window.removeEventListener('orientationchange', sync)
       document.removeEventListener('keydown', onKeyDown)
       html.classList.remove('rg-faux-fullscreen')
       body.classList.remove('rg-faux-fullscreen')
@@ -157,7 +179,7 @@ export function useFullscreen(targetRef: RefObject<HTMLElement | null>) {
     const el = targetRef.current
     if (!el || getFullscreenElement() || cssFallback) return
 
-    if (nativeFullscreenEnabled()) {
+    if (!prefersCssFullscreenFallback()) {
       try {
         await requestNativeFullscreen(el)
         return
@@ -166,6 +188,7 @@ export function useFullscreen(targetRef: RefObject<HTMLElement | null>) {
       }
     }
 
+    window.scrollTo(0, 0)
     setCssFallback(true)
     setIsFullscreen(true)
   }, [targetRef, cssFallback])

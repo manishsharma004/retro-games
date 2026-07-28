@@ -533,6 +533,17 @@ button {
   box-sizing: border-box;
 }
 
+/* CSS fallback on iOS: position/size come from visualViewport sync in useFullscreen. */
+.player--fullscreen-faux {
+  top: auto;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  width: auto;
+  height: auto;
+  max-height: none;
+}
+
 html.rg-faux-fullscreen,
 body.rg-faux-fullscreen {
   overflow: hidden !important;
@@ -1053,6 +1064,50 @@ body.rg-faux-fullscreen {
   gap: 0.4rem;
   color: #9aa8bf;
   font-size: 0.8rem;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1100px) {
+  .layout-editor__header {
+    grid-template-columns: 1fr auto;
+    grid-template-areas: 'title actions';
+    gap: 0.5rem 0.75rem;
+    padding: 0.55rem 0.75rem;
+  }
+
+  .layout-editor__header-left {
+    grid-area: title;
+    min-width: 0;
+  }
+
+  .layout-editor__instruction,
+  .layout-editor__dropdown--header {
+    display: none;
+  }
+
+  .layout-editor__header-right {
+    grid-area: actions;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.35rem;
+  }
+
+  .layout-editor__gamepad {
+    display: none;
+  }
+
+  .layout-editor__title-block {
+    min-width: 0;
+  }
+
+  .layout-editor__subtitle {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 .layout-editor__gamepad-dot {
@@ -1425,21 +1480,168 @@ body.rg-faux-fullscreen {
   color: #d8e2f2;
 }
 
-@media (max-width: 960px) {
+@media (max-width: 960px), (max-height: 520px) {
   .layout-editor__header {
-    grid-template-columns: 1fr;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas: 'title actions';
+    align-items: center;
+    gap: 0.35rem 0.5rem;
+    padding: 0.5rem 0.65rem;
   }
 
-  .layout-editor__instruction {
-    text-align: left;
+  .layout-editor__header-left {
+    grid-area: title;
+    min-width: 0;
   }
 
-  .layout-editor__sidebar:not(.layout-editor__sidebar--collapsed) {
-    width: min(200px, 38vw);
+  .layout-editor__instruction,
+  .layout-editor__gamepad,
+  .layout-editor__dropdown--header {
+    display: none;
   }
 
-  .layout-editor__sidebar--right:not(.layout-editor__sidebar--collapsed) {
-    width: min(210px, 40vw);
+  .layout-editor__title-block {
+    gap: 0;
+  }
+
+  .layout-editor__brand {
+    font-size: 0.82rem;
+  }
+
+  .layout-editor__subtitle {
+    font-size: 0.72rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .layout-editor__header-right {
+    grid-area: actions;
+    flex-wrap: nowrap;
+    gap: 0.3rem;
+  }
+
+  .layout-editor__header-right .btn {
+    padding: 0.38rem 0.55rem;
+    font-size: 0.75rem;
+  }
+
+  .layout-editor__workspace {
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+
+  .layout-editor__canvas {
+    flex: 1 1 auto;
+    min-height: 0;
+    order: 1;
+  }
+
+  .layout-editor__sidebar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 70;
+    width: 100% !important;
+    max-height: min(58vh, 22rem);
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.45);
+    padding: 0.75rem 0.85rem;
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+    transition: transform 0.22s ease;
+    transform: translateY(0);
+  }
+
+  .layout-editor__sidebar--left {
+    border-right: 0;
+  }
+
+  .layout-editor__sidebar--right {
+    border-left: 0;
+  }
+
+  .layout-editor__sidebar--collapsed {
+    transform: translateY(110%);
+    pointer-events: none;
+    width: 100% !important;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .layout-editor__sidebar-toggle {
+    display: none;
+  }
+
+  .layout-editor__sidebar-body {
+    max-height: calc(min(58vh, 22rem) - 1.5rem);
+  }
+
+  .layout-editor__field,
+  .layout-editor__toggle {
+    font-size: 0.8rem;
+  }
+
+  .layout-editor__field em {
+    align-self: flex-end;
+  }
+
+  .layout-editor__element {
+    padding: 0.65rem 0.7rem;
+  }
+
+  .layout-editor__element-label {
+    font-size: 0.8rem;
+  }
+
+  .layout-editor__resize {
+    width: 18px;
+    height: 18px;
+  }
+
+  .layout-editor__mobile-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 65;
+    border: 0;
+    padding: 0;
+    background: rgba(0, 0, 0, 0.45);
+    cursor: pointer;
+  }
+
+  .layout-editor__mobile-dock {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: max(0.55rem, env(safe-area-inset-bottom, 0px));
+    z-index: 50;
+    display: flex;
+    justify-content: center;
+    gap: 0.45rem;
+    padding: 0 0.65rem;
+    pointer-events: none;
+  }
+
+  .layout-editor__mobile-dock-btn {
+    pointer-events: auto;
+    appearance: none;
+    border: 1px solid rgba(120, 170, 255, 0.28);
+    border-radius: 999px;
+    padding: 0.45rem 0.85rem;
+    background: rgba(26, 32, 48, 0.88);
+    color: #d8e2f2;
+    font-size: 0.78rem;
+    font-weight: 600;
+    backdrop-filter: blur(6px);
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .layout-editor__mobile-dock-btn--active {
+    border-color: #5ce1ff;
+    color: #5ce1ff;
+    background: rgba(92, 225, 255, 0.14);
   }
 }
 

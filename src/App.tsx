@@ -369,6 +369,7 @@ export default function App() {
           'player',
           !isPlaying && 'player--parked',
           isFullscreen && 'player--fullscreen',
+          cssFallback && 'player--fullscreen-faux',
         ]
           .filter(Boolean)
           .join(' ')}

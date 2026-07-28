@@ -78,6 +78,23 @@ type DragMode =
 const ZONE_ORDER: VirtualLayoutZoneId[] = ['left', 'actions', 'meta', 'shoulders']
 const DRAG_THRESHOLD_PX = 5
 const SNAP_STEP = 5
+const COMPACT_LAYOUT_MQ = '(max-width: 960px), (max-height: 520px)'
+
+function useCompactLayout(): boolean {
+  const [compact, setCompact] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia(COMPACT_LAYOUT_MQ).matches : false,
+  )
+
+  useEffect(() => {
+    const mq = window.matchMedia(COMPACT_LAYOUT_MQ)
+    const onChange = () => setCompact(mq.matches)
+    onChange()
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+
+  return compact
+}
 
 function clampScale(value: number): number {
   return Math.min(2, Math.max(0.5, Math.round(value * 100) / 100))
@@ -212,6 +229,7 @@ export function VirtualLayoutEditor({
   const [actionsOpen, setActionsOpen] = useState(false)
   const [leftCollapsed, setLeftCollapsed] = useState(false)
   const [rightCollapsed, setRightCollapsed] = useState(false)
+  const isCompactLayout = useCompactLayout()
 
   const elements = useMemo(() => buildElements(system, dpadMode), [system, dpadMode])
   const selected = useMemo(() => elements.find((el) => el.id === selectedId) ?? elements[0], [elements, selectedId])
@@ -225,9 +243,27 @@ export function VirtualLayoutEditor({
     setGlobalScale(100)
     setGlobalOpacity(Math.round(opacity * 100))
     setSnapToGrid(false)
-    setLeftCollapsed(window.matchMedia('(max-width: 960px)').matches)
-    setRightCollapsed(window.matchMedia('(max-width: 960px)').matches)
+    const narrow = window.matchMedia(COMPACT_LAYOUT_MQ).matches
+    setLeftCollapsed(narrow)
+    setRightCollapsed(narrow)
   }, [open, layout, system, dpadMode, opacity])
+
+  const openToolsPanel = useCallback(() => {
+    setLeftCollapsed(false)
+    setRightCollapsed(true)
+  }, [])
+
+  const openElementsPanel = useCallback(() => {
+    setRightCollapsed(false)
+    setLeftCollapsed(true)
+  }, [])
+
+  const closePanels = useCallback(() => {
+    setLeftCollapsed(true)
+    setRightCollapsed(true)
+  }, [])
+
+  const mobilePanelOpen = isCompactLayout && (!leftCollapsed || !rightCollapsed)
 
   const measureSelection = useCallback(() => {
     const stage = stageRef.current
@@ -460,10 +496,18 @@ export function VirtualLayoutEditor({
   const subtitle = gameName ? `${systemLabel} · ${gameName}` : systemLabel
 
   return (
-    <div className="layout-editor" role="dialog" aria-label="Edit virtual controller layout">
+    <div
+      className={`layout-editor${isCompactLayout ? ' layout-editor--compact' : ''}`}
+      role="dialog"
+      aria-label="Edit virtual controller layout"
+    >
       <header className="layout-editor__header">
         <div className="layout-editor__header-left">
-          <details className="layout-editor__dropdown" open={actionsOpen} onToggle={(e) => setActionsOpen(e.currentTarget.open)}>
+          <details
+            className="layout-editor__dropdown layout-editor__dropdown--header"
+            open={actionsOpen}
+            onToggle={(e) => setActionsOpen(e.currentTarget.open)}
+          >
             <summary className="layout-editor__dropdown-trigger">Emulator Actions</summary>
             <div className="layout-editor__dropdown-menu">
               {onOpenSettings && (
@@ -502,7 +546,11 @@ export function VirtualLayoutEditor({
           <button type="button" className="btn btn--primary" onClick={handleSave}>
             Save Layout
           </button>
-          <details className="layout-editor__dropdown" open={profileOpen} onToggle={(e) => setProfileOpen(e.currentTarget.open)}>
+          <details
+            className="layout-editor__dropdown layout-editor__dropdown--header"
+            open={profileOpen}
+            onToggle={(e) => setProfileOpen(e.currentTarget.open)}
+          >
             <summary className="layout-editor__dropdown-trigger">Profile Manager</summary>
             <div className="layout-editor__dropdown-menu">
               <button type="button" onClick={() => applyPreset('default')}>Default</button>
@@ -513,6 +561,15 @@ export function VirtualLayoutEditor({
           </details>
         </div>
       </header>
+
+      {mobilePanelOpen && (
+        <button
+          type="button"
+          className="layout-editor__mobile-backdrop"
+          aria-label="Close panel"
+          onClick={closePanels}
+        />
+      )}
 
       <div className="layout-editor__workspace">
         <aside
@@ -652,6 +709,25 @@ export function VirtualLayoutEditor({
               </div>
             )}
           </div>
+
+          {isCompactLayout && (
+            <div className="layout-editor__mobile-dock" aria-label="Editor panels">
+              <button
+                type="button"
+                className={`layout-editor__mobile-dock-btn${!leftCollapsed ? ' layout-editor__mobile-dock-btn--active' : ''}`}
+                onClick={() => (leftCollapsed ? openToolsPanel() : closePanels())}
+              >
+                Tools
+              </button>
+              <button
+                type="button"
+                className={`layout-editor__mobile-dock-btn${!rightCollapsed ? ' layout-editor__mobile-dock-btn--active' : ''}`}
+                onClick={() => (rightCollapsed ? openElementsPanel() : closePanels())}
+              >
+                Elements
+              </button>
+            </div>
+          )}
         </main>
 
         <aside

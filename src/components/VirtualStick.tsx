@@ -84,17 +84,33 @@ export function VirtualStick({
     [applyDirections, setKnobOffset],
   )
 
+  const endPointer = useCallback(
+    (pointerId: number) => {
+      if (activePointer.current !== pointerId) return
+      activePointer.current = null
+      setKnobOffset(0, 0)
+      releaseAll()
+    },
+    [releaseAll, setKnobOffset],
+  )
+
   const onPointerDown = useCallback(
     (e: PointerEvent) => {
       if (disabled) return
       e.preventDefault()
       const base = baseRef.current
       if (!base) return
+
+      const prev = activePointer.current
+      if (prev !== null && prev !== e.pointerId) {
+        endPointer(prev)
+      }
+
       base.setPointerCapture(e.pointerId)
       activePointer.current = e.pointerId
       track(e)
     },
-    [disabled, track],
+    [disabled, endPointer, track],
   )
 
   const onPointerMove = useCallback(
@@ -110,12 +126,10 @@ export function VirtualStick({
   const onPointerEnd = useCallback(
     (e: PointerEvent) => {
       if (disabled) return
-      if (activePointer.current !== e.pointerId) return
-      activePointer.current = null
-      setKnobOffset(0, 0)
-      releaseAll()
+      e.preventDefault()
+      endPointer(e.pointerId)
     },
-    [disabled, releaseAll, setKnobOffset],
+    [disabled, endPointer],
   )
 
   return (
@@ -126,10 +140,12 @@ export function VirtualStick({
       role="group"
       aria-label="Analog stick"
       data-layout-button="stick"
+      onContextMenu={(e) => e.preventDefault()}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerEnd}
       onPointerCancel={onPointerEnd}
+      onLostPointerCapture={onPointerEnd}
     >
       <div ref={knobRef} className="vp-stick__knob" />
     </div>

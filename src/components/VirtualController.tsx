@@ -1,5 +1,6 @@
-import { useCallback, useRef, type CSSProperties, type PointerEvent } from 'react'
+import { useCallback, useRef, type CSSProperties } from 'react'
 import type { SystemId } from '../lib/cores'
+import { createPointerPressBindings } from '../lib/pointerPress'
 import {
   buttonStyle,
   layoutUsesCustomPositions,
@@ -70,34 +71,27 @@ export function VirtualController({
   editorGlobalScale = 1,
 }: VirtualControllerProps) {
   const active = useRef(new Set<string>())
+  const pointers = useRef(new Map<string, number>())
 
   const bind = useCallback(
-    (button: ButtonName) => ({
-      onPointerDown: (e: PointerEvent) => {
-        if (editing) return
-        e.preventDefault()
-        ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-        if (!active.current.has(button)) {
+    (button: ButtonName) =>
+      createPointerPressBindings({
+        disabled: editing,
+        isPressed: () => active.current.has(button),
+        getPointerId: () => pointers.current.get(button) ?? null,
+        setPointerId: (id) => {
+          if (id === null) pointers.current.delete(button)
+          else pointers.current.set(button, id)
+        },
+        press: () => {
           active.current.add(button)
           onPress(button)
-        }
-      },
-      onPointerUp: (e: PointerEvent) => {
-        if (editing) return
-        e.preventDefault()
-        if (active.current.has(button)) {
+        },
+        release: () => {
           active.current.delete(button)
           onRelease(button)
-        }
-      },
-      onPointerCancel: () => {
-        if (editing) return
-        if (active.current.has(button)) {
-          active.current.delete(button)
-          onRelease(button)
-        }
-      },
-    }),
+        },
+      }),
     [editing, onPress, onRelease],
   )
 

@@ -67,6 +67,15 @@ button {
   max-height: 100svh;
   min-height: 0;
   overflow: hidden;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+.app--playing .player,
+.app--playing .play-stage {
+  touch-action: none;
+  -webkit-touch-callout: none;
 }
 
 .atmosphere {
@@ -798,6 +807,7 @@ body.rg-faux-fullscreen {
   border-radius: 10px;
   font-weight: 700;
   -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
 }
 
 .vp-btn:active {
@@ -854,6 +864,7 @@ body.rg-faux-fullscreen {
   justify-self: start;
   touch-action: none;
   -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
 }
 
 .vp-stick__knob {

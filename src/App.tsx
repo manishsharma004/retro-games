@@ -14,6 +14,7 @@ import { useGamepads } from './hooks/useGamepads'
 import { useLandscape } from './hooks/useLandscape'
 import { useKeyboardControls } from './hooks/useKeyboardControls'
 import { usePeerSession } from './hooks/usePeerSession'
+import { usePreventGameTouchGestures } from './hooks/usePreventGameTouchGestures'
 import {
   loadControllerBindings,
   saveControllerBindings,
@@ -273,6 +274,8 @@ export default function App() {
 
   const isPlaying = emu.status === 'running' || emu.status === 'paused' || emu.status === 'loading'
   const showLanding = !isPlaying
+
+  usePreventGameTouchGestures(playerRef, isPlaying)
 
   useEffect(() => {
     if (!isPlaying && isFullscreen) {

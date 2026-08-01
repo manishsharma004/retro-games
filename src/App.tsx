@@ -50,7 +50,8 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   const [touchDevice] = useState(() => prefersTouch())
   const [library, setLibrary] = useState<LibraryRom[]>([])
   const autoLoadedRef = useRef(false)
-  const skipAutoLoadRef = useRef(false)
+  const skipAutoLoadRef = useRef(Boolean(initialCoopJoin))
+  const coopJoinStartedRef = useRef(false)
   const playerRef = useRef<HTMLDivElement>(null)
   const {
     isFullscreen,
@@ -180,10 +181,12 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   })
 
   useEffect(() => {
-    if (initialCoopJoin) {
-      void peer.joinWithRoomCode(initialCoopJoin, 'coop')
-    }
-  }, [initialCoopJoin, peer])
+    if (!initialCoopJoin || coopJoinStartedRef.current) return
+    coopJoinStartedRef.current = true
+    skipAutoLoadRef.current = true
+    autoLoadedRef.current = true
+    void peer.joinWithRoomCode(initialCoopJoin, 'coop')
+  }, [initialCoopJoin, peer.joinWithRoomCode])
 
   useEffect(() => {
     if (isGuest) {

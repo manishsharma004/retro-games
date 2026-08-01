@@ -8,7 +8,7 @@ export {
   ICE_CONNECT_TIMEOUT_MS,
   type ConnectivityTier,
 } from './connectivity'
-export { buildJoinUrl, generateRoomCode, parseJoinLocation } from './joinUrl'
+export { buildJoinUrl, generateRoomCode, normalizeRoomCode, parseJoinLocation } from './joinUrl'
 export {
   SignalingAdapterChain,
   formatSignalingPath,

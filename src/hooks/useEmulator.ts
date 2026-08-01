@@ -317,6 +317,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
   }, [])
 
   const resume = useCallback(() => {
+    pressCountsRef.current.clear()
     nostalgistRef.current?.resume()
     setStatus('running')
   }, [])
@@ -418,13 +419,15 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
 
   const pressDown = useCallback(
     (button: string, player = 1) => {
+      const emu = nostalgistRef.current
+      if (!emu) return
       const mapped = mapButton(button)
       const key = pressKey(player, mapped)
       const next = (pressCountsRef.current.get(key) ?? 0) + 1
       pressCountsRef.current.set(key, next)
       if (next === 1) {
-        if (player === 1) nostalgistRef.current?.pressDown(mapped)
-        else nostalgistRef.current?.pressDown({ button: mapped, player })
+        if (player === 1) emu.pressDown(mapped)
+        else emu.pressDown({ button: mapped, player })
       }
     },
     [mapButton],
@@ -432,13 +435,15 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
 
   const pressUp = useCallback(
     (button: string, player = 1) => {
+      const emu = nostalgistRef.current
+      if (!emu) return
       const mapped = mapButton(button)
       const key = pressKey(player, mapped)
       const next = Math.max(0, (pressCountsRef.current.get(key) ?? 0) - 1)
       pressCountsRef.current.set(key, next)
       if (next === 0) {
-        if (player === 1) nostalgistRef.current?.pressUp(mapped)
-        else nostalgistRef.current?.pressUp({ button: mapped, player })
+        if (player === 1) emu.pressUp(mapped)
+        else emu.pressUp({ button: mapped, player })
       }
     },
     [mapButton],

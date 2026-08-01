@@ -144,14 +144,14 @@ export function RemotePlayGuestView({
   }, [peerPlaying, remoteGuest.hasVideo, isFullscreen, autoFullscreen, touchDevice, enterFullscreen])
 
   const onStagePointerUp = useCallback(() => {
-    if (!touchDevice) return
+    if (!touchDevice || isFullscreen) return
     const now = Date.now()
     if (now - lastTapAtRef.current < 320) {
-      void toggleFullscreen()
       setFsPromptOpen(false)
+      void enterFullscreen()
     }
     lastTapAtRef.current = now
-  }, [touchDevice, toggleFullscreen])
+  }, [touchDevice, isFullscreen, enterFullscreen])
 
   const streamDetail =
     peer.latencyProfile.streamFps < 60 ? `${peer.latencyProfile.streamFps} FPS stream` : null
@@ -332,7 +332,7 @@ export function RemotePlayGuestView({
             {fsPromptOpen && !isFullscreen && remoteGuest.hasVideo && (
               <div className="play-overlay play-overlay--dim remote-guest__fs-prompt">
                 <p className="play-overlay__title">Fullscreen available</p>
-                <p>Double-tap the game or use the corner button for fullscreen.</p>
+                <p>Double-tap the game or use the corner button to enter fullscreen.</p>
                 <div className="remote-guest__fs-prompt-actions">
                   <button
                     type="button"

@@ -131,7 +131,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   const [localSignal, setLocalSignal] = useState('')
   const [roomCode, setRoomCode] = useState<string | null>(null)
   const [joinUrl, setJoinUrl] = useState<string | null>(null)
-  const [signalingPath, setSignalingPath] = useState<SignalingAdapterName>('manual')
+  const [signalingPath, setSignalingPath] = useState<SignalingAdapterName>('peerjs')
   const [useManualSignaling, setUseManualSignaling] = useState(false)
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
   const [transfer, setTransfer] = useState<PeerTransferStatus>({

@@ -43,9 +43,9 @@ Three session modes share one peer stack under `src/lib/peer/` and `src/hooks/mu
 | `remote` | No (video stream) | Remote fast-action — host streams canvas |
 | `coop` | Yes (dual emulator) | Turn-based / metered — low-bandwidth state sync |
 
-**Signaling fallback chain:** Firebase (if `VITE_FIREBASE_*` env) → PeerJS cloud → BroadcastChannel/localStorage → manual SDP paste (`RG1.` compress).
+**Signaling fallback chain (free by default):** PeerJS cloud (`0.peerjs.com`, no API key) → same-browser BroadcastChannel → optional Firebase (`VITE_FIREBASE_*`) → manual SDP paste.
 
-**ICE fallback:** Google/Mozilla STUN → optional TURN (`VITE_TURN_URL`, `VITE_TURN_USERNAME`, `VITE_TURN_CREDENTIAL`).
+**ICE (free by default):** Google/Mozilla STUN + [Open Relay](https://www.metered.ca/tools/openrelay/) TURN (`openrelay.metered.ca`). Optional custom TURN via `VITE_TURN_*` env vars (added on top).
 
 **Join URL:** `?join=1&room=CODE&mode=local|remote|coop` (see `buildJoinUrl` in `src/lib/peer/joinUrl.ts`). Co-op guests can use `?coop=CODE` on the main app.
 

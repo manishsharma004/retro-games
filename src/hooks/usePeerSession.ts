@@ -55,7 +55,7 @@ export interface PeerBootstrapPayload {
 interface UsePeerSessionOptions {
   settings: EmulatorSettings
   sessionMode?: SessionMode
-  onRemoteInput?: (seat: PeerSeat, button: string, down: boolean) => void
+  onRemoteInput?: (seat: PeerSeat, button: string, down: boolean, executeAt?: number) => void
   onBootstrap?: (payload: PeerBootstrapPayload) => void | Promise<void>
   onGo?: (resumeAt?: number) => void
   onResyncState?: (state: Uint8Array, compressed?: boolean) => void | Promise<void>
@@ -111,7 +111,7 @@ export interface UsePeerSessionResult {
   }) => Promise<void>
   sendReady: () => void
   sendGo: () => void
-  sendInput: (button: string, down: boolean) => void
+  sendInput: (button: string, down: boolean, executeAt?: number) => void
   sendPing: (t: number) => void
   sendResyncState: (state: Uint8Array, compressed?: boolean) => Promise<void>
   sendResyncDone: (resumeAt?: number) => void
@@ -388,7 +388,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           }
           updatePhase('transferring')
         } else if (msg.type === 'input') {
-          optionsRef.current.onRemoteInput?.(msg.seat, msg.button, msg.down)
+          optionsRef.current.onRemoteInput?.(msg.seat, msg.button, msg.down, msg.t)
         } else if (msg.type === 'rumble') {
           optionsRef.current.onRumble?.(msg.seat, msg.pattern)
         } else if (msg.type === 'ready') {
@@ -668,13 +668,13 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     optionsRef.current.onGo?.(at)
   }, [updatePhase])
 
-  const sendInput = useCallback((button: string, down: boolean) => {
+  const sendInput = useCallback((button: string, down: boolean, executeAt?: number) => {
     const conn = connRef.current
     const s = seatRef.current
     if (!conn?.connected || !s) return
     if (phaseRef.current !== 'playing' && phaseRef.current !== 'linked') return
     try {
-      conn.sendControl({ type: 'input', seat: s, button, down, t: Date.now() })
+      conn.sendControl({ type: 'input', seat: s, button, down, t: executeAt ?? Date.now() })
     } catch {
       // ignore
     }

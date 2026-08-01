@@ -577,31 +577,20 @@ body.rg-faux-fullscreen {
   overflow: hidden;
 }
 
-/* Docked fullscreen: clear the absolute overlay toolbar so the stage isn't covered. */
+/* Fullscreen: no docked toolbar padding — corner HUD is minimal. */
 .player:fullscreen .play-shell--docked,
 .player:-webkit-full-screen .play-shell--docked,
 .player--fullscreen .play-shell--docked {
   gap: 0.25rem;
-  justify-content: flex-start;
-  padding-top: max(3.1rem, calc(env(safe-area-inset-top, 0px) + 2.6rem));
+  justify-content: center;
+  padding-top: env(safe-area-inset-top, 0px);
 }
 
 .player:fullscreen .play-shell--docked .play-stage,
 .player:-webkit-full-screen .play-shell--docked .play-stage,
 .player--fullscreen .play-shell--docked .play-stage {
-  width: min(100%, calc(38svh * 4 / 3));
-  max-height: 38svh;
-}
-
-.player:fullscreen .toolbar--overlay,
-.player:-webkit-full-screen .toolbar--overlay,
-.player--fullscreen .toolbar--overlay {
-  top: max(0.35rem, env(safe-area-inset-top, 0px));
-  left: 0.35rem;
-  right: 0.35rem;
-  max-height: min(28vh, 9rem);
-  overflow: auto;
-  -webkit-overflow-scrolling: touch;
+  width: min(100%, calc((100dvh - 2rem) * 4 / 3));
+  max-height: calc(100dvh - 2rem);
 }
 
 .play-stage {
@@ -647,7 +636,50 @@ body.rg-faux-fullscreen {
   height: auto;
 }
 
-/* Minimal transparent exit control for iOS / touch fullscreen. */
+/* Fullscreen corner HUD: latency + emulator FPS. */
+.play-hud {
+  position: fixed;
+  z-index: 10000;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  padding: 0.2rem 0.45rem;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  pointer-events: none;
+}
+
+.play-hud--corner {
+  top: max(0.65rem, env(safe-area-inset-top, 0px));
+  left: max(0.65rem, env(safe-area-inset-left, 0px));
+}
+
+.play-hud--excellent {
+  color: #7dffb0;
+}
+
+.play-hud--good {
+  color: #9ee8b8;
+}
+
+.play-hud--fair {
+  color: #f0d878;
+}
+
+.play-hud--poor {
+  color: #f0a060;
+}
+
+.play-hud--bad {
+  color: #f08080;
+}
+
+.play-hud--unknown {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+/* Minimal transparent exit control for fullscreen. */
 .fs-exit-btn {
   position: fixed;
   top: max(0.65rem, env(safe-area-inset-top, 0px));

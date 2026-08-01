@@ -88,7 +88,8 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
 
   const handleResyncStart = useCallback(() => {
     if (!enabled || isHost) return
-    wasRunningBeforeResyncRef.current = emu.status === 'running'
+    wasRunningBeforeResyncRef.current = emu.isRunning()
+    emu.releaseAllInputs()
     if (wasRunningBeforeResyncRef.current) {
       emu.pause()
     }

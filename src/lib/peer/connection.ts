@@ -543,12 +543,58 @@ export class PeerConnection {
     this.watchForConnect(ICE_LOCAL_RETRY_MS)
   }
 
-  /** Attach canvas/audio stream for remote mode (host side). */
-  addMediaStream(stream: MediaStream): void {
+  /** Attach canvas/audio stream for remote mode (host side).
+   * Returns true when a new track was added and SDP renegotiation is required. */
+  addMediaStream(stream: MediaStream): boolean {
     const pc = this.ensurePc()
+    let addedTrack = false
     for (const track of stream.getTracks()) {
-      pc.addTrack(track, stream)
+      const sender = pc.getSenders().find((s) => s.track?.kind === track.kind)
+      if (sender) {
+        void sender.replaceTrack(track)
+      } else {
+        pc.addTrack(track, stream)
+        addedTrack = true
+      }
     }
+    return (
+      addedTrack &&
+      this.offererAnswerApplied &&
+      (pc.connectionState === 'connected' || pc.signalingState === 'stable')
+    )
+  }
+
+  /** Host: offer new SDP after attaching a video track post-connect. */
+  async createMediaRenegotiationOffer(): Promise<string> {
+    const pc = this.pc
+    if (!pc) throw new Error('No peer connection')
+    const offer = await pc.createOffer()
+    await pc.setLocalDescription(offer)
+    await waitForIceGathering(pc)
+    const local = pc.localDescription
+    if (!local?.sdp) throw new Error('Failed to create media renegotiation offer')
+    return compressSignal(local.sdp)
+  }
+
+  /** Guest: answer a media renegotiation offer from the host. */
+  async acceptMediaRenegotiationOffer(encoded: string): Promise<string> {
+    const pc = this.pc
+    if (!pc) throw new Error('No peer connection')
+    const sdp = decompressSignal(encoded)
+    await pc.setRemoteDescription({ type: 'offer', sdp })
+    const answer = await pc.createAnswer()
+    await pc.setLocalDescription(answer)
+    await waitForIceGathering(pc)
+    const local = pc.localDescription
+    if (!local?.sdp) throw new Error('Failed to create media renegotiation answer')
+    return compressSignal(local.sdp)
+  }
+
+  async acceptMediaRenegotiationAnswer(encoded: string): Promise<void> {
+    const pc = this.pc
+    if (!pc) throw new Error('No peer connection')
+    const sdp = decompressSignal(encoded)
+    await pc.setRemoteDescription({ type: 'answer', sdp })
   }
 
   getPeerConnection(): RTCPeerConnection | null {

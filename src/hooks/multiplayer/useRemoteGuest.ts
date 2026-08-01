@@ -10,14 +10,32 @@ export interface UseRemoteGuestOptions extends ModeHookBase {
 export function useRemoteGuest({ enabled, peer }: UseRemoteGuestOptions) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [needsTap, setNeedsTap] = useState(false)
+  const [hasVideo, setHasVideo] = useState(false)
 
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled) {
+      setHasVideo(false)
+      return
+    }
+
     const stream = peer.remoteStream
     const video = videoRef.current
     if (!stream || !video) return
-    video.srcObject = stream
-    void video.play().catch(() => setNeedsTap(true))
+
+    const playStream = () => {
+      const active = peer.remoteStream
+      if (!active || !videoRef.current) return
+      if (videoRef.current.srcObject !== active) {
+        videoRef.current.srcObject = active
+      }
+      const hasActiveTrack = active.getVideoTracks().some((t) => t.readyState === 'live')
+      setHasVideo(hasActiveTrack)
+      void videoRef.current.play().catch(() => setNeedsTap(true))
+    }
+
+    playStream()
+    stream.addEventListener('addtrack', playStream)
+    return () => stream.removeEventListener('addtrack', playStream)
   }, [enabled, peer.remoteStream])
 
   const unmute = useCallback(() => {
@@ -30,6 +48,7 @@ export function useRemoteGuest({ enabled, peer }: UseRemoteGuestOptions) {
   return {
     videoRef,
     needsTap,
+    hasVideo,
     unmute,
     latencyMs: peer.latencyMs,
     latencyProfile: peer.latencyProfile,

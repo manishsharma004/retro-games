@@ -37,6 +37,8 @@ export {
   formatLatency,
   getCoopInputDelayMs,
   getLatencyProfile,
+  LATENCY_PING_INTERVAL_MS,
+  LATENCY_STALE_MS,
   smoothLatency,
   type LatencyProfile,
   type LatencyTier,

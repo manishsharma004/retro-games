@@ -3,6 +3,8 @@ import {
   PeerConnection,
   formatConnectionPath,
   getLatencyProfile,
+  LATENCY_PING_INTERVAL_MS,
+  LATENCY_STALE_MS,
   pickSyncSettings,
   smoothLatency,
   COOP_GO_DELAY_MS,
@@ -173,6 +175,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   const [error, setError] = useState<string | null>(null)
   const [remoteReady, setRemoteReady] = useState(false)
   const [latencyMs, setLatencyMs] = useState<number | null>(null)
+  const lastPongAtRef = useRef<number | null>(null)
   const [remoteSeat, setRemoteSeat] = useState<PeerSeat | null>(null)
 
   const latencyProfile = useMemo(
@@ -411,6 +414,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           }
         } else if (msg.type === 'pong') {
           const sample = Date.now() - msg.t
+          lastPongAtRef.current = Date.now()
           setLatencyMs((prev) => smoothLatency(prev, sample))
           optionsRef.current.onLatency?.(sample)
         } else if (msg.type === 'ice-reoffer') {
@@ -690,11 +694,21 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
 
   useEffect(() => {
     if (connectionState !== 'connected') return
-    const ping = () => sendPing(Date.now())
+    const ping = () => {
+      const now = Date.now()
+      if (
+        lastPongAtRef.current !== null &&
+        now - lastPongAtRef.current > LATENCY_STALE_MS
+      ) {
+        lastPongAtRef.current = null
+        setLatencyMs(null)
+      }
+      sendPing(now)
+    }
     ping()
-    const id = window.setInterval(ping, latencyProfile.pingIntervalMs)
+    const id = window.setInterval(ping, LATENCY_PING_INTERVAL_MS)
     return () => window.clearInterval(id)
-  }, [connectionState, latencyProfile.pingIntervalMs, sendPing])
+  }, [connectionState, sendPing])
 
   const sendResyncState = useCallback(async (state: Uint8Array, compressed = false) => {
     const conn = connRef.current
@@ -754,6 +768,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     setTransfer({ kind: null, received: 0, total: 0 })
     setConnectionState('idle')
     setRemoteReady(false)
+    lastPongAtRef.current = null
     setLatencyMs(null)
   }, [updatePhase])
 

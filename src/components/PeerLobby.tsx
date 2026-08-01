@@ -37,6 +37,8 @@ interface PeerLobbyProps {
   remoteSeat?: PeerSeat | null
   onPickSeat?: (seat: 1 | 2) => void
   isSeatAvailable?: (seat: 1 | 2) => boolean
+  onSyncGameState?: () => void | Promise<void>
+  stateSyncBusy?: boolean
   onOpenControllers?: () => void
 }
 
@@ -72,6 +74,8 @@ export function PeerLobby({
   remoteSeat = null,
   onPickSeat,
   isSeatAvailable,
+  onSyncGameState,
+  stateSyncBusy = false,
   onOpenControllers,
 }: PeerLobbyProps) {
   const [pasteValue, setPasteValue] = useState('')
@@ -515,10 +519,42 @@ export function PeerLobby({
               </div>
             )}
             {phase === 'playing' && showCoopFlow && (
-              <p className="peer-lobby__hint">
-                Input sync active — P{seat} on this device. Games may drift without ongoing
-                state sync.
-              </p>
+              <>
+                <p className="peer-lobby__hint">
+                  Input sync active — P{seat} on this device. Emulators may drift over time; use
+                  manual state sync when needed.
+                </p>
+                {onSyncGameState && (
+                  <div className="peer-lobby__row">
+                    <button
+                      type="button"
+                      className="btn btn--ghost"
+                      disabled={busy || stateSyncBusy || !emuReady}
+                      onClick={() =>
+                        void withBusy(async () => {
+                          await onSyncGameState()
+                          setStatusNote(
+                            role === 'host'
+                              ? 'Save state sent to peer'
+                              : 'Requested save state from host',
+                          )
+                        })
+                      }
+                    >
+                      {stateSyncBusy
+                        ? 'Syncing game state…'
+                        : role === 'host'
+                          ? 'Send game state'
+                          : 'Fetch game state'}
+                    </button>
+                    {transfer.kind === 'state' && transfer.total > 0 && (
+                      <p className="peer-lobby__hint">
+                        Transferring state… {transferPct}%
+                      </p>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}

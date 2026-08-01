@@ -170,22 +170,30 @@ export function JoinPage({ initialRoom, initialMode }: JoinPageProps) {
             </button>
           </div>
         ) : (
-          <>
-            <video
-              ref={remoteGuest.videoRef}
-              className="join-page__video"
-              autoPlay
-              playsInline
-              muted
-            />
-            {!remoteGuest.hasVideo && peer.connectionState === 'connected' && (
-              <p className="join-page__hint">Waiting for host video stream…</p>
-            )}
-            {remoteGuest.needsTap && (
-              <button type="button" className="btn btn--primary join-page__unmute" onClick={remoteGuest.unmute}>
-                Tap to start video
-              </button>
-            )}
+          <div className="join-page__stream-body">
+            <div className="join-page__stage">
+              <video
+                ref={remoteGuest.videoRef}
+                className="join-page__video"
+                autoPlay
+                playsInline
+                muted
+              />
+              {!remoteGuest.hasVideo && peer.connectionState === 'connected' && (
+                <p className="join-page__hint join-page__stage-hint">
+                  Waiting for host video stream…
+                </p>
+              )}
+              {remoteGuest.needsTap && (
+                <button
+                  type="button"
+                  className="btn btn--primary join-page__unmute"
+                  onClick={remoteGuest.unmute}
+                >
+                  Tap to start video
+                </button>
+              )}
+            </div>
             {peer.phase === 'playing' && (
               <VirtualController
                 system="nes"
@@ -200,7 +208,7 @@ export function JoinPage({ initialRoom, initialMode }: JoinPageProps) {
                 layout={DEFAULT_LAYOUT}
               />
             )}
-          </>
+          </div>
         )}
       </div>
     )

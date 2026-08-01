@@ -33,9 +33,24 @@ export function useRemoteGuest({ enabled, peer }: UseRemoteGuestOptions) {
       void videoRef.current.play().catch(() => setNeedsTap(true))
     }
 
+    const relayout = () => {
+      const video = videoRef.current
+      if (!video) return
+      // Mobile browsers may keep intrinsic canvas capture dimensions until forced.
+      video.style.width = '100%'
+      video.style.height = '100%'
+    }
+
     playStream()
+    relayout()
     stream.addEventListener('addtrack', playStream)
-    return () => stream.removeEventListener('addtrack', playStream)
+    video.addEventListener('loadedmetadata', relayout)
+    video.addEventListener('resize', relayout)
+    return () => {
+      stream.removeEventListener('addtrack', playStream)
+      video.removeEventListener('loadedmetadata', relayout)
+      video.removeEventListener('resize', relayout)
+    }
   }, [enabled, peer.remoteStream])
 
   const unmute = useCallback(() => {

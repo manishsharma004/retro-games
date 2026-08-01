@@ -407,8 +407,14 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       },
       onTransferComplete: ({ kind, data }) => {
         if (bootstrapDoneRef.current && kind === 'state') {
-          void optionsRef.current.onResyncState?.(data, resyncCompressedRef.current)
+          const compressed = resyncCompressedRef.current
           resyncCompressedRef.current = false
+          setTransfer({ kind: null, received: 0, total: 0 })
+          void Promise.resolve(optionsRef.current.onResyncState?.(data, compressed)).catch(
+            (err) => {
+              setError(err instanceof Error ? err.message : 'Failed to import game state')
+            },
+          )
           return
         }
         if (kind === 'rom') romBufRef.current = data
@@ -425,6 +431,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         ) {
           bootstrapDoneRef.current = true
           updatePhase('ready-wait')
+          setTransfer({ kind: null, received: 0, total: 0 })
           void optionsRef.current.onBootstrap?.({
             name: meta.name,
             system: meta.system,

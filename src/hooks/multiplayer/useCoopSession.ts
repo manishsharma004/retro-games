@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { UsePeerSessionResult } from '../usePeerSession'
 import type { UseEmulatorResult } from '../useEmulator'
 import { compressStateBlob, decompressStateBlob } from '../../lib/peer'
@@ -19,12 +19,8 @@ export interface UseCoopSessionOptions extends ModeHookBase {
 export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOptions) {
   const [syncPending, setSyncPending] = useState(false)
   const [pushing, setPushing] = useState(false)
-
-  useEffect(() => {
-    if (peer.transfer.kind === 'state') {
-      setSyncPending(false)
-    }
-  }, [peer.transfer.kind])
+  const [importing, setImporting] = useState(false)
+  const wasRunningBeforeResyncRef = useRef(false)
 
   useEffect(() => {
     if (!syncPending) return
@@ -79,7 +75,7 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
     } finally {
       setPushing(false)
     }
-  }, [enabled, isHost, emu, peer])
+  }, [enabled, isHost, emu, peer, pushing])
 
   const handleResyncRequest = useCallback(async () => {
     if (!enabled || !isHost) return
@@ -90,40 +86,55 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
     }
   }, [enabled, isHost, pushGameState])
 
+  const handleResyncStart = useCallback(() => {
+    if (!enabled || isHost) return
+    wasRunningBeforeResyncRef.current = emu.status === 'running'
+    if (wasRunningBeforeResyncRef.current) {
+      emu.pause()
+    }
+  }, [enabled, isHost, emu])
+
   const handleResyncState = useCallback(
     async (data: Uint8Array, compressed = false) => {
       if (!enabled) return
       setSyncPending(false)
-      const raw = decompressStateBlob(data, compressed)
-      const blob = new Blob([
-        raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer,
-      ])
-      await emu.importStateBlob(blob)
+      setImporting(true)
+      try {
+        const raw = decompressStateBlob(data, compressed)
+        const blob = new Blob([
+          raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer,
+        ])
+        await emu.importStateBlob(blob)
+        if (!isHost && wasRunningBeforeResyncRef.current && peer.phase === 'playing') {
+          emu.resume()
+        }
+      } finally {
+        wasRunningBeforeResyncRef.current = false
+        setImporting(false)
+      }
     },
-    [enabled, emu],
+    [enabled, emu, isHost, peer.phase],
   )
 
   const syncGameState = useCallback(async () => {
     if (!enabled) return
     if (isHost) {
-      try {
-        await pushGameState()
-      } catch (err) {
-        console.error(err)
-        throw err
-      }
+      await pushGameState()
     } else {
       setSyncPending(true)
       peer.requestResync()
     }
   }, [enabled, isHost, peer, pushGameState])
 
+  const stateSyncBusy = pushing || syncPending || importing
+
   return {
     shareGame,
     syncGameState,
     handleResyncRequest,
+    handleResyncStart,
     handleResyncState,
     syncPending,
-    stateSyncBusy: peer.transfer.kind === 'state' || pushing || syncPending,
+    stateSyncBusy,
   }
 }

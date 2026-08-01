@@ -154,14 +154,8 @@ export default function App({ initialCoopJoin = null }: AppProps) {
       void coopRef.current?.handleResyncState(state, compressed)
     },
     onResyncStart: () => {
-      if (sessionMode !== 'coop' || peerRef.current.role !== 'guest') return
-      emu.pause()
-    },
-    onResyncDone: () => {
-      if (sessionMode !== 'coop' || peerRef.current.role !== 'guest') return
-      if (peerRef.current.phase === 'playing' && emu.status === 'paused') {
-        emu.resume()
-      }
+      if (sessionMode !== 'coop') return
+      coopRef.current?.handleResyncStart()
     },
   })
 

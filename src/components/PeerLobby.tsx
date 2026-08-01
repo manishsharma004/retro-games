@@ -549,7 +549,7 @@ export function PeerLobby({
                     </button>
                     {transfer.kind === 'state' && transfer.total > 0 && (
                       <p className="peer-lobby__hint">
-                        Transferring state… {transferPct}%
+                        Receiving state… {transferPct}%
                       </p>
                     )}
                   </div>

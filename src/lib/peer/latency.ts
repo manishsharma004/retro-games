@@ -1,6 +1,12 @@
 import type { ConnectionPath } from './connectivity'
 import type { SessionMode } from './protocol'
 
+/** How often each peer probes RTT while connected (5–10 s target). */
+export const LATENCY_PING_INTERVAL_MS = 7000
+
+/** After this long without a pong, latency is cleared and re-measured. */
+export const LATENCY_STALE_MS = LATENCY_PING_INTERVAL_MS * 3
+
 export type LatencyTier = 'excellent' | 'good' | 'fair' | 'poor' | 'bad' | 'unknown'
 
 export interface LatencyProfile {
@@ -60,7 +66,7 @@ export function getLatencyProfile(
 
   const base: LatencyProfile = {
     tier,
-    pingIntervalMs: 3000,
+    pingIntervalMs: LATENCY_PING_INTERVAL_MS,
     streamFps: 60,
     label: tier === 'unknown' ? 'Measuring…' : formatLatency(ms),
     advice: null,
@@ -77,7 +83,6 @@ export function getLatencyProfile(
     case 'fair':
       return {
         ...base,
-        pingIntervalMs: 2000,
         streamFps: 45,
         advice:
           mode === 'coop'
@@ -93,7 +98,6 @@ export function getLatencyProfile(
     case 'poor':
       return {
         ...base,
-        pingIntervalMs: 2000,
         streamFps: 30,
         advice:
           mode === 'coop'
@@ -109,7 +113,6 @@ export function getLatencyProfile(
     case 'bad':
       return {
         ...base,
-        pingIntervalMs: 5000,
         streamFps: 24,
         advice:
           path === 'relay'
@@ -125,7 +128,6 @@ export function getLatencyProfile(
     default:
       return {
         ...base,
-        pingIntervalMs: 2500,
         label: 'Measuring…',
         coopInputDelayMs: getCoopInputDelayMs(ms),
       }

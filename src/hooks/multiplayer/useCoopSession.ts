@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { UsePeerSessionResult } from '../usePeerSession'
 import type { UseEmulatorResult } from '../useEmulator'
-import { compressStateBlob, decompressStateBlob } from '../../lib/peer'
+import { compressStateBlob, COOP_RESYNC_RESUME_DELAY_MS, decompressStateBlob } from '../../lib/peer'
 import { romUrl } from '../../lib/library'
 import type { ModeHookBase } from './types'
 
@@ -22,7 +22,9 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
   const [importing, setImporting] = useState(false)
   const [, setSyncTick] = useState(0)
   const wasRunningBeforeResyncRef = useRef(false)
+  const resyncActiveRef = useRef(false)
   const lastStateSyncAtRef = useRef(Date.now())
+  const autoSyncBusyRef = useRef(false)
 
   useEffect(() => {
     if (!syncPending) return
@@ -39,27 +41,57 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
 
   const pauseForResync = useCallback(() => {
     if (!enabled) return
-    wasRunningBeforeResyncRef.current = emu.isRunning()
+    if (!resyncActiveRef.current) {
+      wasRunningBeforeResyncRef.current = emu.isRunning()
+      resyncActiveRef.current = true
+    }
     emu.releaseAllInputs()
-    if (wasRunningBeforeResyncRef.current) {
+    if (emu.isRunning()) {
       emu.pause()
     }
   }, [enabled, emu])
 
-  const resumeAfterResync = useCallback(() => {
-    if (!enabled) return
-    if (wasRunningBeforeResyncRef.current && peer.phase === 'playing') {
-      emu.resume()
-    }
-    wasRunningBeforeResyncRef.current = false
-    setSyncPending(false)
-    setImporting(false)
-  }, [enabled, emu, peer.phase])
+  const resumeAfterResync = useCallback(
+    (resumeAt?: number) => {
+      if (!enabled) return
+
+      const shouldResume =
+        wasRunningBeforeResyncRef.current ||
+        (resyncActiveRef.current && peer.phase === 'playing')
+
+      const run = () => {
+        if (shouldResume && peer.phase === 'playing') {
+          emu.resumeAfterStateLoad()
+        }
+        wasRunningBeforeResyncRef.current = false
+        resyncActiveRef.current = false
+        setSyncPending(false)
+        setImporting(false)
+      }
+
+      if (!resumeAt) {
+        run()
+        return
+      }
+      const delay = resumeAt - Date.now()
+      if (delay <= 0) run()
+      else window.setTimeout(run, delay)
+    },
+    [enabled, emu, peer.phase],
+  )
+
+  const finishResync = useCallback(
+    (resumeAt?: number) => {
+      const at = resumeAt ?? Date.now() + COOP_RESYNC_RESUME_DELAY_MS
+      peer.sendResyncDone(at)
+      resumeAfterResync(at)
+    },
+    [peer, resumeAfterResync],
+  )
 
   const abortResync = useCallback(() => {
-    peer.sendResyncDone()
-    resumeAfterResync()
-  }, [peer, resumeAfterResync])
+    finishResync()
+  }, [finishResync])
 
   const shareGame = useCallback(async () => {
     if (!enabled || !isHost || !emu.game) throw new Error('Host must have a game loaded')
@@ -126,13 +158,17 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
     pauseForResync()
   }, [pauseForResync])
 
-  const handleResyncDone = useCallback(() => {
-    resumeAfterResync()
-  }, [resumeAfterResync])
+  const handleResyncDone = useCallback(
+    (resumeAt?: number) => {
+      resumeAfterResync(resumeAt)
+    },
+    [resumeAfterResync],
+  )
 
   const handleResyncState = useCallback(
     async (data: Uint8Array, compressed = false) => {
       if (!enabled) return
+      pauseForResync()
       setImporting(true)
       try {
         const raw = decompressStateBlob(data, compressed)
@@ -140,8 +176,7 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
           raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer,
         ])
         await emu.importStateBlob(blob, { keepPaused: true })
-        peer.sendResyncDone()
-        resumeAfterResync()
+        finishResync()
         lastStateSyncAtRef.current = Date.now()
       } catch (err) {
         console.error(err)
@@ -149,7 +184,7 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
         throw err
       }
     },
-    [enabled, emu, peer, resumeAfterResync, abortResync],
+    [enabled, emu, pauseForResync, finishResync, abortResync],
   )
 
   const syncGameState = useCallback(async () => {
@@ -161,6 +196,33 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
       peer.requestResync()
     }
   }, [enabled, isHost, peer, pushGameState])
+
+  useEffect(() => {
+    if (!enabled || !isHost || peer.phase !== 'playing') return
+    const intervalMs = peer.latencyProfile.coopAutoSyncIntervalMs
+    if (!intervalMs) return
+
+    const id = window.setInterval(() => {
+      if (autoSyncBusyRef.current || pushing || importing || syncPending) return
+      autoSyncBusyRef.current = true
+      void pushGameState()
+        .catch(() => {})
+        .finally(() => {
+          autoSyncBusyRef.current = false
+        })
+    }, intervalMs)
+
+    return () => window.clearInterval(id)
+  }, [
+    enabled,
+    isHost,
+    peer.phase,
+    peer.latencyProfile.coopAutoSyncIntervalMs,
+    pushing,
+    importing,
+    syncPending,
+    pushGameState,
+  ])
 
   const stateSyncBusy = pushing || syncPending || importing
 

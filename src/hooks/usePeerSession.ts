@@ -6,6 +6,7 @@ import {
   pickSyncSettings,
   smoothLatency,
   COOP_GO_DELAY_MS,
+  COOP_RESYNC_RESUME_DELAY_MS,
   type ConnectionPath,
   type IceTier,
   type LatencyProfile,
@@ -60,7 +61,7 @@ interface UsePeerSessionOptions {
   onResyncState?: (state: Uint8Array, compressed?: boolean) => void | Promise<void>
   onResyncRequest?: () => void
   onResyncStart?: () => void
-  onResyncDone?: () => void
+  onResyncDone?: (resumeAt?: number) => void
   onPeerError?: (message: string) => void
   onLinked?: () => void
   onRemoteStream?: (stream: MediaStream) => void
@@ -113,7 +114,7 @@ export interface UsePeerSessionResult {
   sendInput: (button: string, down: boolean) => void
   sendPing: (t: number) => void
   sendResyncState: (state: Uint8Array, compressed?: boolean) => Promise<void>
-  sendResyncDone: () => void
+  sendResyncDone: (resumeAt?: number) => void
   requestResync: () => void
   attachMediaStream: (stream: MediaStream) => Promise<void>
   getConnection: () => PeerConnection | null
@@ -401,7 +402,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         } else if (msg.type === 'resync-start') {
           optionsRef.current.onResyncStart?.()
         } else if (msg.type === 'resync-done') {
-          optionsRef.current.onResyncDone?.()
+          optionsRef.current.onResyncDone?.('at' in msg ? msg.at : undefined)
         } else if (msg.type === 'ping') {
           try {
             conn.sendControl({ type: 'pong', t: msg.t })
@@ -706,9 +707,10 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     connRef.current?.sendControl({ type: 'resync-request' })
   }, [])
 
-  const sendResyncDone = useCallback(() => {
+  const sendResyncDone = useCallback((resumeAt?: number) => {
     try {
-      connRef.current?.sendControl({ type: 'resync-done' })
+      const at = resumeAt ?? Date.now() + COOP_RESYNC_RESUME_DELAY_MS
+      connRef.current?.sendControl({ type: 'resync-done', at })
     } catch {
       // ignore
     }

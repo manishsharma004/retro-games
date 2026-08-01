@@ -9,6 +9,7 @@ import { PeerLobby } from './components/PeerLobby'
 import { RomLoader } from './components/RomLoader'
 import { VirtualController } from './components/VirtualController'
 import { VirtualLayoutEditor } from './components/VirtualLayoutEditor'
+import { useCoopInputDelay } from './hooks/useCoopInputDelay'
 import { useCoopSession } from './hooks/multiplayer/useCoopSession'
 import { useLocalHost } from './hooks/multiplayer/useLocalHost'
 import { useRemoteHost } from './hooks/multiplayer/useRemoteHost'
@@ -21,7 +22,7 @@ import { useLandscape } from './hooks/useLandscape'
 import { useKeyboardControls } from './hooks/useKeyboardControls'
 import { usePeerSession } from './hooks/usePeerSession'
 import { usePreventGameTouchGestures } from './hooks/usePreventGameTouchGestures'
-import type { SessionMode } from './lib/peer/protocol'
+import type { PeerSeat, SessionMode } from './lib/peer/protocol'
 import {
   loadControllerBindings,
   saveControllerBindings,
@@ -126,15 +127,19 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   }, [emu])
 
   const coopRef = useRef<ReturnType<typeof useCoopSession> | null>(null)
+  const coopInputDelayRef = useRef<((seat: PeerSeat, button: string, down: boolean) => void) | null>(
+    null,
+  )
 
   const peer = usePeerSession({
     settings,
     sessionMode,
     onRemoteInput: (seat, button, down) => {
-      // Co-op: each device applies the other player's inputs locally; own seat is local.
       if (sessionMode === 'coop') {
         const local = peerRef.current.getSeat()
         if (local !== null && seat === local) return
+        coopInputDelayRef.current?.(seat, button, down)
+        return
       }
       if (down) emu.remotePressDown(button, seat)
       else emu.remotePressUp(button, seat)
@@ -170,9 +175,9 @@ export default function App({ initialCoopJoin = null }: AppProps) {
       if (sessionMode !== 'coop') return
       coopRef.current?.handleResyncStart()
     },
-    onResyncDone: () => {
+    onResyncDone: (resumeAt) => {
       if (sessionMode !== 'coop') return
-      coopRef.current?.handleResyncDone()
+      coopRef.current?.handleResyncDone(resumeAt)
     },
   })
 
@@ -229,6 +234,20 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   const localSeat = resolveLocalSeat()
   const peerPlaying = peer.phase === 'playing'
   const peerActive = peer.role !== null && peer.phase !== 'idle' && peer.phase !== 'error'
+
+  const { applyRemoteInput } = useCoopInputDelay({
+    enabled: sessionMode === 'coop' && peerPlaying,
+    delayMs: peer.latencyProfile.coopInputDelayMs,
+    localSeat: localSeat === 1 || localSeat === 2 ? localSeat : null,
+    handlers: {
+      pressDown: emu.remotePressDown,
+      pressUp: emu.remotePressUp,
+    },
+  })
+
+  useEffect(() => {
+    coopInputDelayRef.current = sessionMode === 'coop' ? applyRemoteInput : null
+  }, [sessionMode, applyRemoteInput])
 
   const onLocalPress = useCallback(
     (button: string) => {

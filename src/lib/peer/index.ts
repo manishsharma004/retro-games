@@ -24,6 +24,7 @@ export { compressStateBlob, decompressStateBlob, maybeDecompressStateBlob } from
 export {
   pickSyncSettings,
   COOP_GO_DELAY_MS,
+  COOP_RESYNC_RESUME_DELAY_MS,
   type ControlMessage,
   type PeerRole,
   type PeerSeat,
@@ -34,6 +35,7 @@ export { copySignalString, shareSignalString } from './share'
 export {
   classifyLatency,
   formatLatency,
+  getCoopInputDelayMs,
   getLatencyProfile,
   smoothLatency,
   type LatencyProfile,

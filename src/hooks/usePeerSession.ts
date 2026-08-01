@@ -55,6 +55,8 @@ interface UsePeerSessionOptions {
   onGo?: () => void
   onResyncState?: (state: Uint8Array, compressed?: boolean) => void | Promise<void>
   onResyncRequest?: () => void
+  onResyncStart?: () => void
+  onResyncDone?: () => void
   onPeerError?: (message: string) => void
   onLinked?: () => void
   onRemoteStream?: (stream: MediaStream) => void
@@ -381,6 +383,10 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           optionsRef.current.onGo?.()
         } else if (msg.type === 'resync-request') {
           optionsRef.current.onResyncRequest?.()
+        } else if (msg.type === 'resync-start') {
+          optionsRef.current.onResyncStart?.()
+        } else if (msg.type === 'resync-done') {
+          optionsRef.current.onResyncDone?.()
         } else if (msg.type === 'ping') {
           try {
             conn.sendControl({ type: 'pong', t: msg.t })

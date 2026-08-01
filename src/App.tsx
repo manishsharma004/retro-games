@@ -145,6 +145,24 @@ export default function App({ initialCoopJoin = null }: AppProps) {
         }
       }
     },
+    onResyncRequest: () => {
+      if (sessionMode !== 'coop') return
+      void coopRef.current?.handleResyncRequest()
+    },
+    onResyncState: (state, compressed) => {
+      if (sessionMode !== 'coop') return
+      void coopRef.current?.handleResyncState(state, compressed)
+    },
+    onResyncStart: () => {
+      if (sessionMode !== 'coop' || peerRef.current.role !== 'guest') return
+      emu.pause()
+    },
+    onResyncDone: () => {
+      if (sessionMode !== 'coop' || peerRef.current.role !== 'guest') return
+      if (peerRef.current.phase === 'playing' && emu.status === 'paused') {
+        emu.resume()
+      }
+    },
   })
 
   const peerRef = useRef(peer)
@@ -428,6 +446,17 @@ export default function App({ initialCoopJoin = null }: AppProps) {
               <button type="button" className="btn btn--ghost" onClick={() => setPeerOpen(true)}>
                 2P
               </button>
+              {sessionMode === 'coop' && peerPlaying && (
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  disabled={coop.stateSyncBusy || emu.status === 'loading'}
+                  onClick={() => void coop.syncGameState().catch(() => {})}
+                  title={isHost ? 'Send save state to peer' : 'Fetch save state from host'}
+                >
+                  {coop.stateSyncBusy ? 'Syncing…' : 'Sync state'}
+                </button>
+              )}
               {emu.status === 'paused' ? (
                 <button
                   type="button"
@@ -662,6 +691,12 @@ export default function App({ initialCoopJoin = null }: AppProps) {
         remoteSeat={peer.remoteSeat}
         onPickSeat={peer.pickSeat}
         isSeatAvailable={peer.isSeatAvailable}
+        onSyncGameState={
+          sessionMode === 'coop' && peerPlaying
+            ? () => coop.syncGameState()
+            : undefined
+        }
+        stateSyncBusy={coop.stateSyncBusy}
         onOpenControllers={() => {
           setPeerOpen(false)
           setControllersOpen(true)

@@ -1,8 +1,14 @@
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { JoinPage, resolveJoinRoute } from './pages/JoinPage.tsx'
 
-// No React StrictMode: it remounts effects in dev, which exits the running
-// Nostalgist/RetroArch WASM instance after launch (pending already cleared) and
-// leaves a black canvas plus memory-access OOB from a half-torn-down core.
-createRoot(document.getElementById('root')!).render(<App />)
+const join = resolveJoinRoute()
+
+const root = createRoot(document.getElementById('root')!)
+
+if (join && join.mode !== 'coop') {
+  root.render(<JoinPage initialRoom={join.room} initialMode={join.mode} />)
+} else {
+  root.render(<App initialCoopJoin={join?.mode === 'coop' ? join.room : null} />)
+}

@@ -17,7 +17,8 @@ function vibrate(pattern: number | number[]) {
 }
 
 /** Guest local mode: virtual pad only, no emulator. */
-export function useLocalGuest({ enabled, peer, seat = 2 }: UseLocalGuestOptions) {
+export function useLocalGuest({ enabled, peer }: UseLocalGuestOptions) {
+  const seat = peer.seat ?? 2
   const onPress = useCallback(
     (button: string) => {
       if (!enabled) return

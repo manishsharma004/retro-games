@@ -1,4 +1,4 @@
-export type VirtualLayoutZoneId = 'left' | 'meta' | 'actions' | 'shoulders'
+export type VirtualLayoutZoneId = 'left' | 'stick' | 'meta' | 'actions' | 'shoulders'
 
 export type VirtualLayoutButtonId =
   | 'up'
@@ -31,8 +31,14 @@ export interface VirtualLayoutZone {
   x: number
   /** Vertical position as % of the pad container (0 = top edge). */
   y: number
-  /** Overall scale for the entire zone (0.5–2). */
+  /** Uniform scale fallback when scaleX/scaleY are not set (0.5–2). */
   scale?: number
+  /** Horizontal scale for the zone (0.5–2). */
+  scaleX?: number
+  /** Vertical scale for the zone (0.5–2). */
+  scaleY?: number
+  /** Rotation in degrees (-180–180). */
+  rotation?: number
   buttons?: Partial<Record<VirtualLayoutButtonId, VirtualLayoutButton>>
 }
 
@@ -42,7 +48,8 @@ export interface VirtualControlsLayout {
 }
 
 export const LAYOUT_ZONE_LABELS: Record<VirtualLayoutZoneId, string> = {
-  left: 'D-pad / Stick',
+  left: 'D-pad',
+  stick: 'Analog stick',
   meta: 'Start / Select',
   actions: 'Action buttons',
   shoulders: 'L / R',
@@ -97,6 +104,8 @@ const DEFAULT_ZONE_BUTTONS: Record<VirtualLayoutZoneId, Partial<Record<VirtualLa
     left: { x: 17, y: 50, scale: 1 },
     right: { x: 83, y: 50, scale: 1 },
     down: { x: 50, y: 83, scale: 1 },
+  },
+  stick: {
     stick: { x: 50, y: 50, scale: 1 },
   },
   meta: {
@@ -118,19 +127,96 @@ const DEFAULT_ZONE_BUTTONS: Record<VirtualLayoutZoneId, Partial<Record<VirtualLa
 const NES_ACTION_BUTTONS: VirtualLayoutButtonId[] = ['b', 'a']
 const SNES_ACTION_BUTTONS: VirtualLayoutButtonId[] = ['y', 'x', 'b', 'a']
 const DPAD_BUTTONS: VirtualLayoutButtonId[] = ['up', 'left', 'right', 'down']
+export const LEFT_DPAD_BUTTONS = DPAD_BUTTONS
 const STICK_BUTTONS: VirtualLayoutButtonId[] = ['stick']
 const META_BUTTONS: VirtualLayoutButtonId[] = ['select', 'start']
 const SHOULDER_BUTTONS: VirtualLayoutButtonId[] = ['l', 'r']
 const EMPTY_BUTTONS: VirtualLayoutButtonId[] = []
 
+const CORE_ZONE_IDS: VirtualLayoutZoneId[] = ['left', 'actions', 'meta', 'shoulders']
+
+export function leftZoneHasDpad(
+  zone: VirtualLayoutZone | undefined,
+  dpadMode: 'dpad' | 'stick',
+): boolean {
+  if (zoneUsesCustomButtons(zone)) {
+    return DPAD_BUTTONS.some((id) => Boolean(zone?.buttons?.[id]))
+  }
+  return dpadMode === 'dpad'
+}
+
+export function stickZoneActive(
+  zones: VirtualControlsLayout['zones'] | undefined,
+  dpadMode: 'dpad' | 'stick',
+): boolean {
+  if (zones?.stick) return true
+  if (zones?.left?.buttons?.stick) return true
+  return dpadMode === 'stick'
+}
+
+export function addLeftDpadButtons(zone: VirtualLayoutZone): VirtualLayoutZone {
+  const buttons = { ...zone.buttons }
+  for (const id of DPAD_BUTTONS) {
+    buttons[id] = buttons[id] ?? { ...DEFAULT_ZONE_BUTTONS.left[id]! }
+  }
+  return { ...zone, buttons }
+}
+
+export function createStickZone(near?: VirtualLayoutZone): VirtualLayoutZone {
+  return {
+    x: Math.min(100, (near?.x ?? 16) + 16),
+    y: near?.y ?? 78,
+    buttons: { stick: { ...DEFAULT_ZONE_BUTTONS.stick.stick! } },
+  }
+}
+
+function migrateStickFromLeftZone(zones: VirtualControlsLayout['zones']): VirtualControlsLayout['zones'] {
+  const left = zones.left
+  if (!left?.buttons?.stick) return zones
+
+  const { stick, ...rest } = left.buttons
+  const nextLeftButtons = Object.keys(rest).length > 0 ? rest : undefined
+  const next: VirtualControlsLayout['zones'] = {
+    ...zones,
+    left: nextLeftButtons ? { ...left, buttons: nextLeftButtons } : { ...left, buttons: undefined },
+  }
+
+  if (!next.stick) {
+    next.stick = {
+      x: Math.min(100, left.x + 16),
+      y: left.y,
+      scale: left.scale,
+      scaleX: left.scaleX,
+      scaleY: left.scaleY,
+      rotation: left.rotation,
+      buttons: { stick: { ...stick! } },
+    }
+  } else if (!next.stick.buttons?.stick) {
+    next.stick = {
+      ...next.stick,
+      buttons: { ...next.stick.buttons, stick: { ...stick! } },
+    }
+  }
+
+  if (!nextLeftButtons) {
+    const { buttons: _removed, ...leftWithoutButtons } = next.left!
+    next.left = leftWithoutButtons
+  }
+
+  return next
+}
+
 export function buttonsForZone(
   zoneId: VirtualLayoutZoneId,
   system: 'nes' | 'snes',
   dpadMode: 'dpad' | 'stick',
+  zone?: VirtualLayoutZone,
 ): VirtualLayoutButtonId[] {
   switch (zoneId) {
     case 'left':
-      return dpadMode === 'stick' ? STICK_BUTTONS : DPAD_BUTTONS
+      return leftZoneHasDpad(zone, dpadMode) ? DPAD_BUTTONS : []
+    case 'stick':
+      return STICK_BUTTONS
     case 'meta':
       return META_BUTTONS
     case 'actions':
@@ -162,12 +248,22 @@ function sanitizeButton(button: unknown): VirtualLayoutButton | undefined {
   return { x: clampPercent(x), y: clampPercent(y), scale: clampScale(nextScale) }
 }
 
+function clampRotation(value: number): number {
+  let next = Math.round(value)
+  while (next > 180) next -= 360
+  while (next < -180) next += 360
+  return next
+}
+
 function sanitizeZone(zone: unknown): VirtualLayoutZone | undefined {
   if (!zone || typeof zone !== 'object') return undefined
-  const { x, y, scale, buttons } = zone as {
+  const { x, y, scale, scaleX, scaleY, rotation, buttons } = zone as {
     x?: unknown
     y?: unknown
     scale?: unknown
+    scaleX?: unknown
+    scaleY?: unknown
+    rotation?: unknown
     buttons?: unknown
   }
   if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) {
@@ -177,6 +273,15 @@ function sanitizeZone(zone: unknown): VirtualLayoutZone | undefined {
   const next: VirtualLayoutZone = { x: clampPercent(x), y: clampPercent(y) }
   if (typeof scale === 'number' && Number.isFinite(scale)) {
     next.scale = clampScale(scale)
+  }
+  if (typeof scaleX === 'number' && Number.isFinite(scaleX)) {
+    next.scaleX = clampScale(scaleX)
+  }
+  if (typeof scaleY === 'number' && Number.isFinite(scaleY)) {
+    next.scaleY = clampScale(scaleY)
+  }
+  if (typeof rotation === 'number' && Number.isFinite(rotation)) {
+    next.rotation = clampRotation(rotation)
   }
   if (buttons && typeof buttons === 'object') {
     const sanitizedButtons: Partial<Record<VirtualLayoutButtonId, VirtualLayoutButton>> = {}
@@ -209,12 +314,15 @@ export function sanitizeLayout(raw: unknown): VirtualControlsLayout {
       : PRESET_ZONES[nextPreset]
 
   const sanitized: VirtualControlsLayout['zones'] = {}
-  for (const id of Object.keys(DEFAULT_CUSTOM_ZONES) as VirtualLayoutZoneId[]) {
+  for (const id of CORE_ZONE_IDS) {
     const zone = sanitizeZone(sourceZones?.[id]) ?? DEFAULT_CUSTOM_ZONES[id]
     if (zone) sanitized[id] = zone
   }
 
-  return { preset: nextPreset, zones: sanitized }
+  const stickZone = sanitizeZone(sourceZones?.stick)
+  if (stickZone) sanitized.stick = stickZone
+
+  return { preset: nextPreset, zones: migrateStickFromLeftZone(sanitized) }
 }
 
 export function resolveLayoutZones(layout: VirtualControlsLayout): VirtualControlsLayout['zones'] | null {
@@ -231,13 +339,12 @@ export function resolveZoneButtons(
   system: 'nes' | 'snes',
   dpadMode: 'dpad' | 'stick',
 ): Partial<Record<VirtualLayoutButtonId, VirtualLayoutButton>> {
-  const defaults = defaultButtonsForZone(zoneId, system, dpadMode)
-  const activeIds = buttonsForZone(zoneId, system, dpadMode)
+  const activeIds = buttonsForZone(zoneId, system, dpadMode, zone)
   const resolved: Partial<Record<VirtualLayoutButtonId, VirtualLayoutButton>> = {}
 
   for (const id of activeIds) {
     const custom = zone?.buttons?.[id]
-    const fallback = defaults[id]
+    const fallback = DEFAULT_ZONE_BUTTONS[zoneId][id]
     if (custom) {
       resolved[id] = custom
     } else if (fallback) {
@@ -256,12 +363,44 @@ export function layoutUsesCustomPositions(layout: VirtualControlsLayout): boolea
   return layout.preset !== 'default'
 }
 
-export function zoneStyle(zone: VirtualLayoutZone): { left: string; top: string; transform: string } {
-  const scale = zone.scale ?? 1
+export function resolveZoneScale(zone: VirtualLayoutZone | undefined): number {
+  return zone?.scale ?? 1
+}
+
+export function resolveZoneScaleX(zone: VirtualLayoutZone | undefined): number {
+  return zone?.scaleX ?? zone?.scale ?? 1
+}
+
+export function resolveZoneScaleY(zone: VirtualLayoutZone | undefined): number {
+  return zone?.scaleY ?? zone?.scale ?? 1
+}
+
+export function resolveZoneRotation(zone: VirtualLayoutZone | undefined): number {
+  return zone?.rotation ?? 0
+}
+
+export function zoneTransform(zone: VirtualLayoutZone): string {
+  const rotation = resolveZoneRotation(zone)
+  const rotatePart = rotation ? ` rotate(${rotation}deg)` : ''
+  return `translate(-50%, -50%)${rotatePart}`
+}
+
+export function zoneStyle(
+  zone: VirtualLayoutZone,
+  globalScale = 1,
+): {
+  left: string
+  top: string
+  transform: string
+  '--zone-scale-x': number
+  '--zone-scale-y': number
+} {
   return {
     left: `${zone.x}%`,
     top: `${zone.y}%`,
-    transform: `translate(-50%, -50%) scale(${scale})`,
+    transform: zoneTransform(zone),
+    '--zone-scale-x': resolveZoneScaleX(zone) * globalScale,
+    '--zone-scale-y': resolveZoneScaleY(zone) * globalScale,
   }
 }
 
@@ -295,12 +434,11 @@ export function defaultButtonsForZone(
   system: 'nes' | 'snes',
   dpadMode: 'dpad' | 'stick',
 ): Partial<Record<VirtualLayoutButtonId, VirtualLayoutButton>> {
-  const defaults = DEFAULT_ZONE_BUTTONS[zoneId]
   const activeIds = buttonsForZone(zoneId, system, dpadMode)
   const resolved: Partial<Record<VirtualLayoutButtonId, VirtualLayoutButton>> = {}
 
   for (const id of activeIds) {
-    const fallback = defaults[id]
+    const fallback = DEFAULT_ZONE_BUTTONS[zoneId][id]
     if (fallback) resolved[id] = { ...fallback }
   }
 
@@ -329,9 +467,10 @@ export function ensureAllZoneButtons(
   system: 'nes' | 'snes',
   dpadMode: 'dpad' | 'stick',
 ): VirtualControlsLayout['zones'] {
-  let next = { ...zones }
-  for (const zoneId of Object.keys(DEFAULT_CUSTOM_ZONES) as VirtualLayoutZoneId[]) {
-    if (buttonsForZone(zoneId, system, dpadMode).length === 0) continue
+  let next = migrateStickFromLeftZone({ ...zones })
+
+  for (const zoneId of CORE_ZONE_IDS) {
+    if (buttonsForZone(zoneId, system, dpadMode, next[zoneId]).length === 0) continue
     const zone = next[zoneId] ?? DEFAULT_CUSTOM_ZONES[zoneId]!
     if (!zoneUsesCustomButtons(zone)) {
       next = {
@@ -343,6 +482,22 @@ export function ensureAllZoneButtons(
       }
     }
   }
+
+  if (stickZoneActive(next, dpadMode)) {
+    const zone = next.stick ?? createStickZone(next.left)
+    if (!zoneUsesCustomButtons(zone)) {
+      next = {
+        ...next,
+        stick: {
+          ...zone,
+          buttons: defaultButtonsForZone('stick', system, dpadMode),
+        },
+      }
+    } else if (!next.stick) {
+      next = { ...next, stick: zone }
+    }
+  }
+
   return next
 }
 
@@ -352,8 +507,4 @@ export function resetZoneButtons(
   dpadMode: 'dpad' | 'stick',
 ): Partial<Record<VirtualLayoutButtonId, VirtualLayoutButton>> {
   return defaultButtonsForZone(zoneId, system, dpadMode)
-}
-
-export function resolveZoneScale(zone: VirtualLayoutZone | undefined): number {
-  return zone?.scale ?? 1
 }

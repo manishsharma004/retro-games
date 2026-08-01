@@ -983,7 +983,7 @@ body.rg-faux-fullscreen {
 .virtual-pad--custom-layout .virtual-pad__shoulders.vp-zone {
   display: flex;
   justify-content: space-between;
-  width: min(72%, 22rem);
+  width: min(72%, calc(22rem * var(--zone-scale-x, 1)));
   gap: 1rem;
   z-index: 2;
 }
@@ -1006,10 +1006,37 @@ body.rg-faux-fullscreen {
   pointer-events: none;
 }
 
+.virtual-pad--editing .vp-zone,
+.virtual-pad--editing .vp-btn,
+.virtual-pad--editing .vp-stick {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
 .virtual-pad--editing .vp-zone {
-  outline: 2px dashed rgba(61, 255, 154, 0.55);
-  outline-offset: 6px;
+  isolation: isolate;
+}
+
+.virtual-pad--editing .vp-zone::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border: 2px dashed rgba(61, 255, 154, 0.55);
   border-radius: 12px;
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 0;
+}
+
+.virtual-pad--editing .vp-zone > .vp-dpad,
+.virtual-pad--editing .vp-zone > .vp-stick {
+  position: relative;
+  z-index: 1;
+}
+
+.virtual-pad--editing .vp-zone > .vp-btn,
+.virtual-pad--editing .vp-zone--custom-buttons > .vp-btn {
+  z-index: 1;
 }
 
 .layout-editor {
@@ -1213,6 +1240,24 @@ body.rg-faux-fullscreen {
   color: #5ce1ff;
 }
 
+.layout-editor__history {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+}
+
+.layout-editor__history-btn {
+  flex: 1;
+  min-width: 0;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.78rem;
+}
+
+.layout-editor__history-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .layout-editor__field,
 .layout-editor__toggle {
   display: flex;
@@ -1297,6 +1342,10 @@ body.rg-faux-fullscreen {
   touch-action: none;
 }
 
+.layout-editor__selection--zone {
+  transform-origin: center center;
+}
+
 .layout-editor__selection:active {
   cursor: grabbing;
 }
@@ -1345,6 +1394,72 @@ body.rg-faux-fullscreen {
   bottom: -6px;
   right: -6px;
   cursor: nwse-resize;
+}
+
+.layout-editor__resize--n,
+.layout-editor__resize--s {
+  left: 50%;
+  width: 14px;
+  height: 10px;
+  margin-left: -7px;
+  border-radius: 999px;
+  cursor: ns-resize;
+}
+
+.layout-editor__resize--n {
+  top: -5px;
+}
+
+.layout-editor__resize--s {
+  bottom: -5px;
+}
+
+.layout-editor__resize--e,
+.layout-editor__resize--w {
+  top: 50%;
+  width: 10px;
+  height: 14px;
+  margin-top: -7px;
+  border-radius: 999px;
+  cursor: ew-resize;
+}
+
+.layout-editor__resize--e {
+  right: -5px;
+}
+
+.layout-editor__resize--w {
+  left: -5px;
+}
+
+.layout-editor__rotate {
+  position: absolute;
+  top: -2.2rem;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  border: 2px solid #5ce1ff;
+  border-radius: 50%;
+  background: #1a2030;
+  padding: 0;
+  cursor: grab;
+  touch-action: none;
+}
+
+.layout-editor__rotate::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 2px;
+  height: 0.85rem;
+  margin-left: -1px;
+  background: #5ce1ff;
+}
+
+.layout-editor__rotate:active {
+  cursor: grabbing;
 }
 
 .layout-editor__dropdown {
@@ -1662,27 +1777,61 @@ body.rg-faux-fullscreen {
 }
 
 .vp-zone--left.vp-zone--custom-buttons {
-  width: calc(8.2rem * var(--vp-scale));
-  height: calc(8.2rem * var(--vp-scale));
+  width: calc(8.2rem * var(--vp-scale) * var(--zone-scale-x, 1));
+  height: calc(8.2rem * var(--vp-scale) * var(--zone-scale-y, 1));
+}
+
+.vp-zone--left.vp-zone:not(.vp-zone--custom-buttons) {
+  width: calc(8.2rem * var(--vp-scale) * var(--zone-scale-x, 1));
+  height: calc(8.2rem * var(--vp-scale) * var(--zone-scale-y, 1));
+}
+
+.vp-zone--stick.vp-zone--custom-buttons {
+  width: calc(8rem * var(--vp-scale) * var(--zone-scale-x, 1));
+  height: calc(8rem * var(--vp-scale) * var(--zone-scale-y, 1));
+}
+
+.vp-zone--stick.vp-zone:not(.vp-zone--custom-buttons) {
+  width: calc(8rem * var(--vp-scale) * var(--zone-scale-x, 1));
+  height: calc(8rem * var(--vp-scale) * var(--zone-scale-y, 1));
+}
+
+.vp-zone--stick .vp-stick:not(.vp-stick--custom) {
+  width: 100%;
+  height: 100%;
 }
 
 .vp-meta.vp-zone--custom-buttons {
-  width: calc(5.2rem * var(--vp-scale));
-  height: calc(6.4rem * var(--vp-scale));
+  width: calc(5.2rem * var(--vp-scale) * var(--zone-scale-x, 1));
+  height: calc(6.4rem * var(--vp-scale) * var(--zone-scale-y, 1));
+}
+
+.vp-meta.vp-zone:not(.vp-zone--custom-buttons) {
+  width: calc(5.2rem * var(--vp-scale) * var(--zone-scale-x, 1));
+  height: calc(6.4rem * var(--vp-scale) * var(--zone-scale-y, 1));
 }
 
 .vp-actions.vp-zone--custom-buttons {
-  width: calc(6.8rem * var(--vp-scale));
-  height: calc(6.8rem * var(--vp-scale));
+  width: calc(6.8rem * var(--vp-scale) * var(--zone-scale-x, 1));
+  height: calc(6.8rem * var(--vp-scale) * var(--zone-scale-y, 1));
+}
+
+.vp-actions.vp-zone:not(.vp-zone--custom-buttons) {
+  width: calc(6.8rem * var(--vp-scale) * var(--zone-scale-x, 1));
+  height: calc(6.8rem * var(--vp-scale) * var(--zone-scale-y, 1));
 }
 
 .vp-actions--nes.vp-zone--custom-buttons {
-  height: calc(3.4rem * var(--vp-scale));
+  height: calc(3.4rem * var(--vp-scale) * var(--zone-scale-y, 1));
+}
+
+.vp-actions--nes.vp-zone:not(.vp-zone--custom-buttons) {
+  height: calc(3.4rem * var(--vp-scale) * var(--zone-scale-y, 1));
 }
 
 .virtual-pad__shoulders.vp-zone--custom-buttons {
-  width: min(72%, 22rem);
-  height: calc(2.8rem * var(--vp-scale));
+  width: min(72%, calc(22rem * var(--zone-scale-x, 1)));
+  height: calc(2.8rem * var(--vp-scale) * var(--zone-scale-y, 1));
 }
 
 .vp-dpad--custom {

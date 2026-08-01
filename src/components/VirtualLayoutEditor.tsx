@@ -20,7 +20,14 @@ import {
   presetLayout,
   resetZoneButtons,
   resolveZoneButtons,
-  resolveZoneScale,
+  resolveZoneRotation,
+  resolveZoneScaleX,
+  resolveZoneScaleY,
+  leftZoneHasDpad,
+  stickZoneActive,
+  addLeftDpadButtons,
+  createStickZone,
+  LEFT_DPAD_BUTTONS,
   type VirtualControlsLayout,
   type VirtualLayoutButton,
   type VirtualLayoutButtonId,
@@ -61,12 +68,21 @@ interface Rect {
   top: number
   width: number
   height: number
+  rotation?: number
 }
+
+type ResizeAxis = 'uniform' | 'x' | 'y'
 
 type DragMode =
   | { type: 'move-zone'; zoneId: VirtualLayoutZoneId }
   | { type: 'move-button'; zoneId: VirtualLayoutZoneId; buttonId: VirtualLayoutButtonId }
-  | { type: 'resize-zone'; zoneId: VirtualLayoutZoneId; startScale: number; startDist: number }
+  | {
+      type: 'resize-zone'
+      zoneId: VirtualLayoutZoneId
+      axis: ResizeAxis
+      startScaleX: number
+      startScaleY: number
+    }
   | {
       type: 'resize-button'
       zoneId: VirtualLayoutZoneId
@@ -74,11 +90,45 @@ type DragMode =
       startScale: number
       startDist: number
     }
+  | {
+      type: 'rotate-zone'
+      zoneId: VirtualLayoutZoneId
+      startRotation: number
+      startAngle: number
+      centerX: number
+      centerY: number
+    }
 
-const ZONE_ORDER: VirtualLayoutZoneId[] = ['left', 'actions', 'meta', 'shoulders']
+const ZONE_ORDER: VirtualLayoutZoneId[] = ['left', 'stick', 'actions', 'meta', 'shoulders']
 const DRAG_THRESHOLD_PX = 5
 const SNAP_STEP = 5
+const MAX_EDITOR_HISTORY = 50
 const COMPACT_LAYOUT_MQ = '(max-width: 960px), (max-height: 520px)'
+
+interface EditorSnapshot {
+  zones: VirtualControlsLayout['zones']
+  hiddenIds: string[]
+  globalScale: number
+  globalOpacity: number
+}
+
+function cloneZones(zones: VirtualControlsLayout['zones']): VirtualControlsLayout['zones'] {
+  return structuredClone(zones)
+}
+
+function createSnapshot(
+  zones: VirtualControlsLayout['zones'],
+  hiddenIds: Set<string>,
+  globalScale: number,
+  globalOpacity: number,
+): EditorSnapshot {
+  return {
+    zones: cloneZones(zones),
+    hiddenIds: Array.from(hiddenIds),
+    globalScale,
+    globalOpacity,
+  }
+}
 
 function useCompactLayout(): boolean {
   const [compact, setCompact] = useState(() =>
@@ -98,6 +148,13 @@ function useCompactLayout(): boolean {
 
 function clampScale(value: number): number {
   return Math.min(2, Math.max(0.5, Math.round(value * 100) / 100))
+}
+
+function clampRotation(value: number): number {
+  let next = Math.round(value)
+  while (next > 180) next -= 360
+  while (next < -180) next += 360
+  return next
 }
 
 function elementId(zoneId: VirtualLayoutZoneId, buttonId?: VirtualLayoutButtonId): string {
@@ -131,20 +188,27 @@ function ensureZone(
   return zones[zoneId] ?? getEditableZones({ preset: 'custom', zones })[zoneId]!
 }
 
-function buildElements(system: SystemId, dpadMode: 'dpad' | 'stick'): EditorElement[] {
+function buildElements(
+  system: SystemId,
+  dpadMode: 'dpad' | 'stick',
+  zones: VirtualControlsLayout['zones'],
+): EditorElement[] {
   const items: EditorElement[] = []
   const showShoulders = system === 'snes'
+  const leftZone = zones.left
+  const hasDpad = leftZoneHasDpad(leftZone, dpadMode)
+  const hasStick = stickZoneActive(zones, dpadMode)
 
-  items.push({
-    id: elementId('left'),
-    kind: 'zone',
-    zoneId: 'left',
-    label: dpadMode === 'stick' ? 'Stick' : 'D-pad',
-    icon: dpadMode === 'stick' ? '◎' : '✥',
-  })
+  if (hasDpad) {
+    items.push({
+      id: elementId('left'),
+      kind: 'zone',
+      zoneId: 'left',
+      label: 'D-pad',
+      icon: '✥',
+    })
 
-  if (dpadMode === 'dpad') {
-    for (const buttonId of buttonsForZone('left', system, dpadMode)) {
+    for (const buttonId of LEFT_DPAD_BUTTONS) {
       items.push({
         id: elementId('left', buttonId),
         kind: 'button',
@@ -156,9 +220,29 @@ function buildElements(system: SystemId, dpadMode: 'dpad' | 'stick'): EditorElem
     }
   }
 
+  if (hasStick) {
+    items.push({
+      id: elementId('stick'),
+      kind: 'zone',
+      zoneId: 'stick',
+      label: LAYOUT_ZONE_LABELS.stick,
+      icon: '◎',
+    })
+
+    items.push({
+      id: elementId('stick', 'stick'),
+      kind: 'button',
+      zoneId: 'stick',
+      buttonId: 'stick',
+      label: BUTTON_LABELS.stick,
+      icon: '◎',
+    })
+  }
+
   for (const zoneId of ['actions', 'meta', 'shoulders'] as VirtualLayoutZoneId[]) {
     if (zoneId === 'shoulders' && !showShoulders) continue
-    const buttons = buttonsForZone(zoneId, system, dpadMode)
+    const zone = zones[zoneId]
+    const buttons = buttonsForZone(zoneId, system, dpadMode, zone)
     if (buttons.length === 0) continue
 
     items.push({
@@ -231,7 +315,66 @@ export function VirtualLayoutEditor({
   const [rightCollapsed, setRightCollapsed] = useState(false)
   const isCompactLayout = useCompactLayout()
 
-  const elements = useMemo(() => buildElements(system, dpadMode), [system, dpadMode])
+  const stateRef = useRef({ draftZones, hiddenIds, globalScale, globalOpacity })
+  const pastRef = useRef<EditorSnapshot[]>([])
+  const futureRef = useRef<EditorSnapshot[]>([])
+  const historyDragSnapshotRef = useRef<EditorSnapshot | null>(null)
+  const [historyVersion, setHistoryVersion] = useState(0)
+
+  useEffect(() => {
+    stateRef.current = { draftZones, hiddenIds, globalScale, globalOpacity }
+  }, [draftZones, hiddenIds, globalScale, globalOpacity])
+
+  const captureSnapshot = useCallback((): EditorSnapshot => {
+    const { draftZones: zones, hiddenIds: hidden, globalScale: scale, globalOpacity: op } =
+      stateRef.current
+    return createSnapshot(zones, hidden, scale, op)
+  }, [])
+
+  const applySnapshot = useCallback((snap: EditorSnapshot) => {
+    setDraftZones(cloneZones(snap.zones))
+    setHiddenIds(new Set(snap.hiddenIds))
+    setGlobalScale(snap.globalScale)
+    setGlobalOpacity(snap.globalOpacity)
+  }, [])
+
+  const pushHistory = useCallback(() => {
+    pastRef.current.push(captureSnapshot())
+    if (pastRef.current.length > MAX_EDITOR_HISTORY) pastRef.current.shift()
+    futureRef.current = []
+    setHistoryVersion((v) => v + 1)
+  }, [captureSnapshot])
+
+  const undo = useCallback(() => {
+    const past = pastRef.current
+    if (past.length === 0) return
+    futureRef.current.push(captureSnapshot())
+    const prev = past.pop()!
+    applySnapshot(prev)
+    setHistoryVersion((v) => v + 1)
+  }, [applySnapshot, captureSnapshot])
+
+  const redo = useCallback(() => {
+    const future = futureRef.current
+    if (future.length === 0) return
+    pastRef.current.push(captureSnapshot())
+    const next = future.pop()!
+    applySnapshot(next)
+    setHistoryVersion((v) => v + 1)
+  }, [applySnapshot, captureSnapshot])
+
+  const beginDragHistory = useCallback(() => {
+    historyDragSnapshotRef.current = captureSnapshot()
+  }, [captureSnapshot])
+
+  const canUndo = pastRef.current.length > 0
+  const canRedo = futureRef.current.length > 0
+  void historyVersion
+
+  const elements = useMemo(
+    () => buildElements(system, dpadMode, draftZones),
+    [system, dpadMode, draftZones],
+  )
   const selected = useMemo(() => elements.find((el) => el.id === selectedId) ?? elements[0], [elements, selectedId])
   const previewLayout = customLayoutFromZones(draftZones)
 
@@ -246,7 +389,30 @@ export function VirtualLayoutEditor({
     const narrow = window.matchMedia(COMPACT_LAYOUT_MQ).matches
     setLeftCollapsed(narrow)
     setRightCollapsed(narrow)
+    pastRef.current = []
+    futureRef.current = []
+    historyDragSnapshotRef.current = null
+    setHistoryVersion(0)
   }, [open, layout, system, dpadMode, opacity])
+
+  useEffect(() => {
+    if (!open) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return
+      const mod = e.metaKey || e.ctrlKey
+      if (!mod) return
+      if (e.key === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        undo()
+      } else if (e.key === 'y' || (e.key === 'z' && e.shiftKey)) {
+        e.preventDefault()
+        redo()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [open, redo, undo])
 
   const openToolsPanel = useCallback(() => {
     setLeftCollapsed(false)
@@ -283,6 +449,25 @@ export function VirtualLayoutEditor({
       return
     }
 
+    if (selected.kind === 'zone') {
+      const zone = ensureZone(draftZones, selected.zoneId)
+      const rotation = resolveZoneRotation(zone)
+      const el = target as HTMLElement
+      const bounds = el.getBoundingClientRect()
+      const centerX = bounds.left + bounds.width / 2 - stageRect.left
+      const centerY = bounds.top + bounds.height / 2 - stageRect.top
+
+      setSelectionRect({
+        left: centerX,
+        top: centerY,
+        width: el.offsetWidth,
+        height: el.offsetHeight,
+        rotation,
+      })
+      setGuides({ x: centerX, y: centerY })
+      return
+    }
+
     const rect = target.getBoundingClientRect()
     setSelectionRect({
       left: rect.left - stageRect.left,
@@ -294,7 +479,7 @@ export function VirtualLayoutEditor({
       x: rect.left - stageRect.left + rect.width / 2,
       y: rect.top - stageRect.top + rect.height / 2,
     })
-  }, [selected])
+  }, [draftZones, globalScale, selected])
 
   useLayoutEffect(() => {
     if (!open) return
@@ -338,7 +523,11 @@ export function VirtualLayoutEditor({
       for (const zoneId of ZONE_ORDER) {
         const zone = next[zoneId]
         if (!zone) continue
-        next[zoneId] = { ...zone, scale: clampScale((zone.scale ?? 1) * factor) }
+        next[zoneId] = {
+          ...zone,
+          scaleX: clampScale(resolveZoneScaleX(zone) * factor),
+          scaleY: clampScale(resolveZoneScaleY(zone) * factor),
+        }
       }
       return next
     },
@@ -351,6 +540,7 @@ export function VirtualLayoutEditor({
   }
 
   const handleReset = () => {
+    pushHistory()
     const base = getEditableZones(DEFAULT_LAYOUT)
     setDraftZones(ensureAllZoneButtons(base, system, dpadMode))
     setGlobalScale(100)
@@ -364,12 +554,14 @@ export function VirtualLayoutEditor({
     } else if (preset === 'custom') {
       // keep current
     } else {
+      pushHistory()
       setDraftZones(ensureAllZoneButtons(presetLayout(preset).zones, system, dpadMode))
     }
     setProfileOpen(false)
   }
 
   const toggleVisibility = (id: string) => {
+    pushHistory()
     setHiddenIds((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
@@ -381,16 +573,46 @@ export function VirtualLayoutEditor({
   const isHidden = (id: string) => hiddenIds.has(id)
 
   const endDrag = useCallback(() => {
+    const snapshot = historyDragSnapshotRef.current
+    if (draggingRef.current && snapshot) {
+      pastRef.current.push(snapshot)
+      if (pastRef.current.length > MAX_EDITOR_HISTORY) pastRef.current.shift()
+      futureRef.current = []
+      setHistoryVersion((v) => v + 1)
+    }
+    historyDragSnapshotRef.current = null
     dragRef.current = null
     dragOriginRef.current = null
     draggingRef.current = false
     measureSelection()
   }, [measureSelection])
 
+  const onStagePointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest('.layout-editor__selection')) return
+
+    const buttonEl = (e.target as HTMLElement).closest('[data-layout-button]')
+    const zoneEl = (e.target as HTMLElement).closest('[data-layout-zone]')
+
+    if (buttonEl && zoneEl) {
+      const buttonId = buttonEl.getAttribute('data-layout-button') as VirtualLayoutButtonId | null
+      const zoneId = zoneEl.getAttribute('data-layout-zone') as VirtualLayoutZoneId | null
+      if (buttonId && zoneId) {
+        setSelectedId(elementId(zoneId, buttonId))
+        return
+      }
+    }
+
+    if (zoneEl) {
+      const zoneId = zoneEl.getAttribute('data-layout-zone') as VirtualLayoutZoneId | null
+      if (zoneId) setSelectedId(elementId(zoneId))
+    }
+  }
+
   const onPointerDownMove = (e: ReactPointerEvent) => {
     if (!selected || selected.kind !== 'zone') return
     e.preventDefault()
     e.stopPropagation()
+    beginDragHistory()
     dragRef.current = { type: 'move-zone', zoneId: selected.zoneId }
     dragOriginRef.current = { x: e.clientX, y: e.clientY }
     draggingRef.current = false
@@ -401,6 +623,7 @@ export function VirtualLayoutEditor({
     if (!selected?.buttonId) return
     e.preventDefault()
     e.stopPropagation()
+    beginDragHistory()
     dragRef.current = {
       type: 'move-button',
       zoneId: selected.zoneId,
@@ -411,19 +634,20 @@ export function VirtualLayoutEditor({
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   }
 
-  const onPointerDownResize = (e: ReactPointerEvent) => {
+  const onPointerDownResize = (axis: ResizeAxis) => (e: ReactPointerEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    const stage = stageRef.current
-    if (!stage || !selected) return
+    if (!selected) return
+    beginDragHistory()
 
     if (selected.kind === 'zone') {
       const zone = ensureZone(draftZones, selected.zoneId)
       dragRef.current = {
         type: 'resize-zone',
         zoneId: selected.zoneId,
-        startScale: resolveZoneScale(zone),
-        startDist: 1,
+        axis,
+        startScaleX: resolveZoneScaleX(zone),
+        startScaleY: resolveZoneScaleY(zone),
       }
     } else if (selected.buttonId) {
       const zone = ensureZone(draftZones, selected.zoneId)
@@ -435,6 +659,31 @@ export function VirtualLayoutEditor({
         startScale: btn.scale,
         startDist: 1,
       }
+    }
+    dragOriginRef.current = { x: e.clientX, y: e.clientY }
+    draggingRef.current = true
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  }
+
+  const onPointerDownRotate = (e: ReactPointerEvent) => {
+    if (!selected || selected.kind !== 'zone' || !selectionRect) return
+    e.preventDefault()
+    e.stopPropagation()
+    const stage = stageRef.current
+    if (!stage) return
+    beginDragHistory()
+    const stageRect = stage.getBoundingClientRect()
+    const centerX = stageRect.left + selectionRect.left
+    const centerY = stageRect.top + selectionRect.top
+    const zone = ensureZone(draftZones, selected.zoneId)
+    const startAngle = (Math.atan2(e.clientY - centerY, e.clientX - centerX) * 180) / Math.PI
+    dragRef.current = {
+      type: 'rotate-zone',
+      zoneId: selected.zoneId,
+      startRotation: resolveZoneRotation(zone),
+      startAngle,
+      centerX,
+      centerY,
     }
     dragOriginRef.current = { x: e.clientX, y: e.clientY }
     draggingRef.current = true
@@ -468,15 +717,54 @@ export function VirtualLayoutEditor({
       return
     }
 
-    if (drag.type === 'resize-zone' || drag.type === 'resize-button') {
+    if (drag.type === 'resize-zone') {
+      if (drag.axis === 'uniform') {
+        const delta = (dx + dy) / 200
+        updateZone(drag.zoneId, {
+          scaleX: clampScale(drag.startScaleX + delta),
+          scaleY: clampScale(drag.startScaleY + delta),
+        })
+      } else if (drag.axis === 'x') {
+        updateZone(drag.zoneId, { scaleX: clampScale(drag.startScaleX + dx / 150) })
+      } else {
+        updateZone(drag.zoneId, { scaleY: clampScale(drag.startScaleY + dy / 150) })
+      }
+      return
+    }
+
+    if (drag.type === 'resize-button') {
       const delta = (dx + dy) / 200
       const nextScale = clampScale(drag.startScale + delta)
-      if (drag.type === 'resize-zone') {
-        updateZone(drag.zoneId, { scale: nextScale })
-      } else {
-        updateZoneButtons(drag.zoneId, drag.buttonId, { scale: nextScale })
-      }
+      updateZoneButtons(drag.zoneId, drag.buttonId, { scale: nextScale })
+      return
     }
+
+    if (drag.type === 'rotate-zone') {
+      const angle = (Math.atan2(e.clientY - drag.centerY, e.clientX - drag.centerX) * 180) / Math.PI
+      updateZone(drag.zoneId, { rotation: clampRotation(drag.startRotation + angle - drag.startAngle) })
+    }
+  }
+
+  const leftZone = ensureZone(draftZones, 'left')
+  const canAddDpad = !leftZoneHasDpad(leftZone, dpadMode)
+  const canAddStick = !stickZoneActive(draftZones, dpadMode)
+
+  const addDpad = () => {
+    pushHistory()
+    setDraftZones((prev) => ({
+      ...prev,
+      left: addLeftDpadButtons(ensureZone(prev, 'left')),
+    }))
+    setSelectedId('zone:left')
+  }
+
+  const addStick = () => {
+    pushHistory()
+    setDraftZones((prev) => ({
+      ...prev,
+      stick: prev.stick ?? createStickZone(ensureZone(prev, 'left')),
+    }))
+    setSelectedId('zone:stick')
   }
 
   const selectedZone = selected ? ensureZone(draftZones, selected.zoneId) : null
@@ -485,10 +773,14 @@ export function VirtualLayoutEditor({
       ? resolveZoneButtons(selectedZone, selected.zoneId, system, dpadMode)[selected.buttonId]
       : undefined
 
-  const selectedScale =
+  const selectedScaleX =
     selected?.kind === 'zone'
-      ? Math.round(resolveZoneScale(selectedZone ?? undefined) * 100)
+      ? Math.round(resolveZoneScaleX(selectedZone ?? undefined) * 100)
       : Math.round((selectedButton?.scale ?? 1) * 100)
+  const selectedScaleY =
+    selected?.kind === 'zone' ? Math.round(resolveZoneScaleY(selectedZone ?? undefined) * 100) : selectedScaleX
+  const selectedRotation =
+    selected?.kind === 'zone' ? resolveZoneRotation(selectedZone ?? undefined) : 0
 
   if (!open) return null
 
@@ -529,8 +821,8 @@ export function VirtualLayoutEditor({
         </div>
 
         <p className="layout-editor__instruction">
-          Drag each zone to reposition. Positions are saved per device. Opacity, scale, and alignment
-          guides can be adjusted from the floating toolbar.
+          Tap a control or region outline to select it. Drag to move; use corner, edge, or rotation
+          handles on regions to resize and rotate.
         </p>
 
         <div className="layout-editor__header-right">
@@ -544,14 +836,14 @@ export function VirtualLayoutEditor({
             Cancel
           </button>
           <button type="button" className="btn btn--primary" onClick={handleSave}>
-            Save Layout
+            Save
           </button>
           <details
             className="layout-editor__dropdown layout-editor__dropdown--header"
             open={profileOpen}
             onToggle={(e) => setProfileOpen(e.currentTarget.open)}
           >
-            <summary className="layout-editor__dropdown-trigger">Profile Manager</summary>
+            <summary className="layout-editor__dropdown-trigger">Profile</summary>
             <div className="layout-editor__dropdown-menu">
               <button type="button" onClick={() => applyPreset('default')}>Default</button>
               <button type="button" onClick={() => applyPreset('compact')}>Compact</button>
@@ -593,6 +885,27 @@ export function VirtualLayoutEditor({
           <div className="layout-editor__sidebar-body">
             <h3 className="layout-editor__sidebar-title">Quick Edit Tools</h3>
 
+            <div className="layout-editor__history">
+              <button
+                type="button"
+                className="btn btn--ghost layout-editor__history-btn"
+                disabled={!canUndo}
+                onClick={undo}
+                aria-label="Undo"
+              >
+                Undo
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost layout-editor__history-btn"
+                disabled={!canRedo}
+                onClick={redo}
+                aria-label="Redo"
+              >
+                Redo
+              </button>
+            </div>
+
             <label className="layout-editor__field">
               <span>Global Scale</span>
               <input
@@ -601,6 +914,7 @@ export function VirtualLayoutEditor({
                 max={200}
                 step={5}
                 value={globalScale}
+                onPointerDown={pushHistory}
                 onChange={(e) => setGlobalScale(Number(e.target.value))}
               />
               <em>{globalScale}%</em>
@@ -614,6 +928,7 @@ export function VirtualLayoutEditor({
                 max={100}
                 step={5}
                 value={globalOpacity}
+                onPointerDown={pushHistory}
                 onChange={(e) => setGlobalOpacity(Number(e.target.value))}
               />
               <em>{globalOpacity}%</em>
@@ -628,7 +943,57 @@ export function VirtualLayoutEditor({
               />
             </label>
 
-            {selected && (
+            {selected && selected.kind === 'zone' && (
+              <>
+                <label className="layout-editor__field">
+                  <span>{selected.label} width</span>
+                  <input
+                    type="range"
+                    min={50}
+                    max={200}
+                    step={5}
+                    value={selectedScaleX}
+                    onPointerDown={pushHistory}
+                    onChange={(e) =>
+                      updateZone(selected.zoneId, { scaleX: Number(e.target.value) / 100 })
+                    }
+                  />
+                  <em>{selectedScaleX}%</em>
+                </label>
+                <label className="layout-editor__field">
+                  <span>{selected.label} height</span>
+                  <input
+                    type="range"
+                    min={50}
+                    max={200}
+                    step={5}
+                    value={selectedScaleY}
+                    onPointerDown={pushHistory}
+                    onChange={(e) =>
+                      updateZone(selected.zoneId, { scaleY: Number(e.target.value) / 100 })
+                    }
+                  />
+                  <em>{selectedScaleY}%</em>
+                </label>
+                <label className="layout-editor__field">
+                  <span>{selected.label} rotation</span>
+                  <input
+                    type="range"
+                    min={-180}
+                    max={180}
+                    step={5}
+                    value={selectedRotation}
+                    onPointerDown={pushHistory}
+                    onChange={(e) =>
+                      updateZone(selected.zoneId, { rotation: Number(e.target.value) })
+                    }
+                  />
+                  <em>{selectedRotation}°</em>
+                </label>
+              </>
+            )}
+
+            {selected && selected.kind === 'button' && (
               <label className="layout-editor__field">
                 <span>{selected.label} size</span>
                 <input
@@ -636,15 +1001,17 @@ export function VirtualLayoutEditor({
                   min={50}
                   max={200}
                   step={5}
-                  value={selectedScale}
+                  value={selectedScaleX}
+                  onPointerDown={pushHistory}
                   onChange={(e) => {
-                    const scale = Number(e.target.value) / 100
-                    if (selected.kind === 'zone') updateZone(selected.zoneId, { scale })
-                    else if (selected.buttonId)
-                      updateZoneButtons(selected.zoneId, selected.buttonId, { scale })
+                    if (selected.buttonId) {
+                      updateZoneButtons(selected.zoneId, selected.buttonId, {
+                        scale: Number(e.target.value) / 100,
+                      })
+                    }
                   }}
                 />
-                <em>{selectedScale}%</em>
+                <em>{selectedScaleX}%</em>
               </label>
             )}
 
@@ -656,7 +1023,7 @@ export function VirtualLayoutEditor({
 
         <main className="layout-editor__canvas">
           <div className="layout-editor__grid" aria-hidden="true" />
-          <div className="layout-editor__stage" ref={stageRef}>
+          <div className="layout-editor__stage" ref={stageRef} onPointerDown={onStagePointerDown}>
             <VirtualController
               system={system}
               onPress={() => {}}
@@ -681,13 +1048,23 @@ export function VirtualLayoutEditor({
 
             {selectionRect && !isHidden(selectedId) && (
               <div
-                className="layout-editor__selection"
-                style={{
-                  left: selectionRect.left,
-                  top: selectionRect.top,
-                  width: selectionRect.width,
-                  height: selectionRect.height,
-                }}
+                className={`layout-editor__selection${selected.kind === 'zone' ? ' layout-editor__selection--zone' : ''}`}
+                style={
+                  selected.kind === 'zone'
+                    ? {
+                        left: selectionRect.left,
+                        top: selectionRect.top,
+                        width: selectionRect.width,
+                        height: selectionRect.height,
+                        transform: `translate(-50%, -50%) rotate(${selectionRect.rotation ?? 0}deg)`,
+                      }
+                    : {
+                        left: selectionRect.left,
+                        top: selectionRect.top,
+                        width: selectionRect.width,
+                        height: selectionRect.height,
+                      }
+                }
                 onPointerDown={selected.kind === 'zone' ? onPointerDownMove : onPointerDownMoveButton}
                 onPointerMove={onPointerMove}
                 onPointerUp={endDrag}
@@ -700,12 +1077,37 @@ export function VirtualLayoutEditor({
                     type="button"
                     className={`layout-editor__resize layout-editor__resize--${corner}`}
                     aria-label={`Resize ${selected.label}`}
-                    onPointerDown={onPointerDownResize}
+                    onPointerDown={onPointerDownResize(selected.kind === 'zone' ? 'uniform' : 'uniform')}
                     onPointerMove={onPointerMove}
                     onPointerUp={endDrag}
                     onPointerCancel={endDrag}
                   />
                 ))}
+                {selected.kind === 'zone' && (
+                  <>
+                    {(['n', 'e', 's', 'w'] as const).map((edge) => (
+                      <button
+                        key={edge}
+                        type="button"
+                        className={`layout-editor__resize layout-editor__resize--${edge}`}
+                        aria-label={`Resize ${selected.label} ${edge === 'n' || edge === 's' ? 'vertically' : 'horizontally'}`}
+                        onPointerDown={onPointerDownResize(edge === 'e' || edge === 'w' ? 'x' : 'y')}
+                        onPointerMove={onPointerMove}
+                        onPointerUp={endDrag}
+                        onPointerCancel={endDrag}
+                      />
+                    ))}
+                    <button
+                      type="button"
+                      className="layout-editor__rotate"
+                      aria-label={`Rotate ${selected.label}`}
+                      onPointerDown={onPointerDownRotate}
+                      onPointerMove={onPointerMove}
+                      onPointerUp={endDrag}
+                      onPointerCancel={endDrag}
+                    />
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -754,7 +1156,21 @@ export function VirtualLayoutEditor({
             <details className="layout-editor__dropdown layout-editor__dropdown--block">
               <summary className="layout-editor__dropdown-trigger">Add Control</summary>
               <div className="layout-editor__dropdown-menu">
-                <p className="layout-editor__dropdown-hint">All standard controls are already on screen. Select one below to edit.</p>
+                {canAddDpad && (
+                  <button type="button" onClick={addDpad}>
+                    D-pad
+                  </button>
+                )}
+                {canAddStick && (
+                  <button type="button" onClick={addStick}>
+                    Analog stick
+                  </button>
+                )}
+                {!canAddDpad && !canAddStick && (
+                  <p className="layout-editor__dropdown-hint">
+                    All movement controls are already on screen.
+                  </p>
+                )}
               </div>
             </details>
 
@@ -788,11 +1204,12 @@ export function VirtualLayoutEditor({
               <button
                 type="button"
                 className="btn btn--text"
-                onClick={() =>
+                onClick={() => {
+                  pushHistory()
                   updateZone(selected.zoneId, {
                     buttons: resetZoneButtons(selected.zoneId, system, dpadMode),
                   })
-                }
+                }}
               >
                 Reset {LAYOUT_ZONE_LABELS[selected.zoneId]} alignment
               </button>

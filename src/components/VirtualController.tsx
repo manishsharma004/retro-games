@@ -6,10 +6,13 @@ import {
   layoutUsesCustomPositions,
   resolveLayoutZones,
   resolveZoneButtons,
+  leftZoneHasDpad,
+  stickZoneActive,
   zoneStyle,
   zoneUsesCustomButtons,
   type VirtualControlsLayout,
   type VirtualLayoutButton,
+  type VirtualLayoutZone,
 } from '../lib/virtualLayout'
 import { VirtualStick } from './VirtualStick'
 
@@ -116,16 +119,19 @@ export function VirtualController({
     .join(' ')
 
   const leftZone = zonePositions?.left
+  const stickZone = zonePositions?.stick
   const metaZone = zonePositions?.meta
   const actionsZone = zonePositions?.actions
   const shouldersZone = zonePositions?.shoulders
 
   const leftCustomButtons = zoneUsesCustomButtons(leftZone)
+  const stickCustomButtons = zoneUsesCustomButtons(stickZone)
   const metaCustomButtons = zoneUsesCustomButtons(metaZone)
   const actionsCustomButtons = zoneUsesCustomButtons(actionsZone)
   const shouldersCustomButtons = zoneUsesCustomButtons(shouldersZone)
 
   const leftButtons = resolveZoneButtons(leftZone, 'left', system, dpadMode)
+  const stickButtons = resolveZoneButtons(stickZone, 'stick', system, dpadMode)
   const metaButtons = resolveZoneButtons(metaZone, 'meta', system, dpadMode)
   const actionButtons = resolveZoneButtons(actionsZone, 'actions', system, dpadMode)
   const shoulderButtons = resolveZoneButtons(shouldersZone, 'shoulders', system, dpadMode)
@@ -154,14 +160,7 @@ export function VirtualController({
   const hiddenStyle = (zoneId: string, buttonId?: string): CSSProperties | undefined =>
     isHidden(zoneId, buttonId) ? { visibility: 'hidden', pointerEvents: 'none' } : undefined
 
-  const zoneStyleWithGlobal = (zone: { x: number; y: number; scale?: number }) => {
-    const base = zoneStyle(zone)
-    const scale = (zone.scale ?? 1) * editorGlobalScale
-    return {
-      ...base,
-      transform: `translate(-50%, -50%) scale(${scale})`,
-    } as CSSProperties
-  }
+  const zoneStyleWithGlobal = (zone: VirtualLayoutZone) => zoneStyle(zone, editorGlobalScale) as CSSProperties
 
   const renderDpad = () => {
     if (leftCustomButtons) {
@@ -219,22 +218,38 @@ export function VirtualController({
     )
   }
 
-  const leftContent =
-    dpadMode === 'stick' ? (
+  const showLeftDpad = leftZoneHasDpad(leftZone, dpadMode)
+  const showStickZone = stickZoneActive(zonePositions ?? undefined, dpadMode)
+
+  const leftContent = showLeftDpad ? renderDpad() : null
+
+  const stickNode = showStickZone ? (
+    <div
+      className={[
+        customLayout ? 'vp-zone vp-zone--stick' : 'vp-zone-marker',
+        stickCustomButtons ? 'vp-zone--custom-buttons' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      style={{
+        ...(customLayout && stickZone ? zoneCss(stickZone) : undefined),
+        ...hiddenStyle('stick'),
+      }}
+      data-layout-zone="stick"
+    >
       <VirtualStick
         onPress={onPress}
         onRelease={onRelease}
         disabled={editing}
         style={
-          leftCustomButtons && leftButtons.stick
-            ? mergeBtn('left', 'stick', leftButtons.stick)
-            : hiddenStyle('left', 'stick')
+          stickCustomButtons && stickButtons.stick
+            ? mergeBtn('stick', 'stick', stickButtons.stick)
+            : hiddenStyle('stick', 'stick')
         }
-        className={leftCustomButtons ? 'vp-stick--custom' : undefined}
+        className={stickCustomButtons ? 'vp-stick--custom' : undefined}
       />
-    ) : (
-      renderDpad()
-    )
+    </div>
+  ) : null
 
   const leftWrapperClass = [
     customLayout ? 'vp-zone vp-zone--left' : 'vp-zone-marker',
@@ -243,7 +258,7 @@ export function VirtualController({
     .filter(Boolean)
     .join(' ')
 
-  const leftNode = (
+  const leftNode = showLeftDpad ? (
     <div
       className={leftWrapperClass}
       style={{
@@ -254,7 +269,7 @@ export function VirtualController({
     >
       {leftContent}
     </div>
-  )
+  ) : null
 
   return (
     <div className={padClass} style={style} aria-label="On-screen controller">
@@ -300,6 +315,7 @@ export function VirtualController({
 
       <div className="virtual-pad__main">
         {leftNode}
+        {stickNode}
 
         <div
           className={[

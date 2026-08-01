@@ -23,6 +23,7 @@ export {
 export { compressStateBlob, decompressStateBlob, maybeDecompressStateBlob } from './stateCompress'
 export {
   pickSyncSettings,
+  COOP_GO_DELAY_MS,
   type ControlMessage,
   type PeerRole,
   type PeerSeat,

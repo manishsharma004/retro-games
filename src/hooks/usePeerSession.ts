@@ -5,6 +5,7 @@ import {
   getLatencyProfile,
   pickSyncSettings,
   smoothLatency,
+  COOP_GO_DELAY_MS,
   type ConnectionPath,
   type IceTier,
   type LatencyProfile,
@@ -55,7 +56,7 @@ interface UsePeerSessionOptions {
   sessionMode?: SessionMode
   onRemoteInput?: (seat: PeerSeat, button: string, down: boolean) => void
   onBootstrap?: (payload: PeerBootstrapPayload) => void | Promise<void>
-  onGo?: () => void
+  onGo?: (resumeAt?: number) => void
   onResyncState?: (state: Uint8Array, compressed?: boolean) => void | Promise<void>
   onResyncRequest?: () => void
   onResyncStart?: () => void
@@ -394,7 +395,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           setRemoteReady(true)
         } else if (msg.type === 'go') {
           updatePhase('playing')
-          optionsRef.current.onGo?.()
+          optionsRef.current.onGo?.(msg.at)
         } else if (msg.type === 'resync-request') {
           optionsRef.current.onResyncRequest?.()
         } else if (msg.type === 'resync-start') {
@@ -660,9 +661,10 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   const sendGo = useCallback(() => {
     const conn = connRef.current
     if (!conn?.connected) return
-    conn.sendControl({ type: 'go', at: Date.now() })
+    const at = Date.now() + COOP_GO_DELAY_MS
+    conn.sendControl({ type: 'go', at })
     updatePhase('playing')
-    optionsRef.current.onGo?.()
+    optionsRef.current.onGo?.(at)
   }, [updatePhase])
 
   const sendInput = useCallback((button: string, down: boolean) => {

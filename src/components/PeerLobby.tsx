@@ -532,8 +532,9 @@ export function PeerLobby({
             {phase === 'playing' && showCoopFlow && (
               <>
                 <p className="peer-lobby__hint">
-                  Input sync active — P{seat} on this device. Emulators may drift over time; state
-                  sync pauses both devices, transfers the host save state, then resumes together.
+                  Input sync active — P{seat} on this device. Both emulators run locked
+                  60&nbsp;Hz NTSC timing (audio sync, no vsync). Emulators may still drift;
+                  use state sync if they fall out of step.
                 </p>
                 {suggestStateSync && latencyProfile?.advice && (
                   <p className="peer-lobby__hint peer-lobby__hint--warn">

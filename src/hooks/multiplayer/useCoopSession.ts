@@ -63,6 +63,7 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
 
   const shareGame = useCallback(async () => {
     if (!enabled || !isHost || !emu.game) throw new Error('Host must have a game loaded')
+    await emu.applyCoopTiming()
     emu.pause()
     let rom = await emu.getRomBytes()
     if (!rom && emu.game.source === 'demo') {

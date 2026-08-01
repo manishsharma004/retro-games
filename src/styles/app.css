@@ -703,6 +703,82 @@ body.rg-faux-fullscreen {
   background: rgba(0, 0, 0, 0.55);
 }
 
+.fs-corner-actions {
+  position: fixed;
+  top: max(0.65rem, env(safe-area-inset-top, 0px));
+  right: max(0.65rem, env(safe-area-inset-right, 0px));
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.fs-corner-actions .fs-exit-btn,
+.fs-corner-btn {
+  position: static;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.35);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  backdrop-filter: blur(4px);
+}
+
+.fs-corner-btn:active,
+.fs-corner-actions .fs-exit-btn:active {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.fs-enter-btn {
+  position: absolute;
+  top: max(0.65rem, env(safe-area-inset-top, 0px));
+  right: max(0.65rem, env(safe-area-inset-right, 0px));
+  z-index: 4;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.35);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  backdrop-filter: blur(4px);
+}
+
+.fs-enter-btn:active {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.remote-guest__fs-prompt {
+  z-index: 5;
+  padding: 1rem;
+}
+
+.remote-guest__fs-prompt-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.65rem;
+  margin-top: 0.75rem;
+}
+
+.remote-guest__auto-fs {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
 .play-canvas {
   /* !important overrides inline pixel size Emscripten writes at launch so the
      canvas tracks the stage. object-fit keeps aspect without CSS transform

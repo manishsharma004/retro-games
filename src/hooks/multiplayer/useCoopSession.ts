@@ -28,6 +28,30 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
     return () => window.clearTimeout(timer)
   }, [syncPending])
 
+  const pauseForResync = useCallback(() => {
+    if (!enabled) return
+    wasRunningBeforeResyncRef.current = emu.isRunning()
+    emu.releaseAllInputs()
+    if (wasRunningBeforeResyncRef.current) {
+      emu.pause()
+    }
+  }, [enabled, emu])
+
+  const resumeAfterResync = useCallback(() => {
+    if (!enabled) return
+    if (wasRunningBeforeResyncRef.current && peer.phase === 'playing') {
+      emu.resume()
+    }
+    wasRunningBeforeResyncRef.current = false
+    setSyncPending(false)
+    setImporting(false)
+  }, [enabled, emu, peer.phase])
+
+  const abortResync = useCallback(() => {
+    peer.sendResyncDone()
+    resumeAfterResync()
+  }, [peer, resumeAfterResync])
+
   const shareGame = useCallback(async () => {
     if (!enabled || !isHost || !emu.game) throw new Error('Host must have a game loaded')
     emu.pause()
@@ -55,27 +79,27 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
     if (!enabled || !isHost || !emu.game) throw new Error('Host must have a game loaded')
     if (pushing) return
     setPushing(true)
+    const conn = peer.getConnection()
     try {
-      const blob = await emu.exportStateBlob()
-      if (!blob) throw new Error('Could not capture save state')
-      const raw = new Uint8Array(await blob.arrayBuffer())
-      const { payload, compressed } = compressStateBlob(raw)
-      const conn = peer.getConnection()
+      pauseForResync()
       try {
         conn?.sendControl({ type: 'resync-start' })
       } catch {
         // ignore
       }
+
+      const blob = await emu.exportStateBlob({ keepPaused: true })
+      if (!blob) throw new Error('Could not capture save state')
+      const raw = new Uint8Array(await blob.arrayBuffer())
+      const { payload, compressed } = compressStateBlob(raw)
       await peer.sendResyncState(payload, compressed)
-      try {
-        conn?.sendControl({ type: 'resync-done' })
-      } catch {
-        // ignore
-      }
+    } catch (err) {
+      abortResync()
+      throw err
     } finally {
       setPushing(false)
     }
-  }, [enabled, isHost, emu, peer, pushing])
+  }, [enabled, isHost, emu, peer, pushing, pauseForResync, abortResync])
 
   const handleResyncRequest = useCallback(async () => {
     if (!enabled || !isHost) return
@@ -87,34 +111,32 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
   }, [enabled, isHost, pushGameState])
 
   const handleResyncStart = useCallback(() => {
-    if (!enabled || isHost) return
-    wasRunningBeforeResyncRef.current = emu.isRunning()
-    emu.releaseAllInputs()
-    if (wasRunningBeforeResyncRef.current) {
-      emu.pause()
-    }
-  }, [enabled, isHost, emu])
+    pauseForResync()
+  }, [pauseForResync])
+
+  const handleResyncDone = useCallback(() => {
+    resumeAfterResync()
+  }, [resumeAfterResync])
 
   const handleResyncState = useCallback(
     async (data: Uint8Array, compressed = false) => {
       if (!enabled) return
-      setSyncPending(false)
       setImporting(true)
       try {
         const raw = decompressStateBlob(data, compressed)
         const blob = new Blob([
           raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer,
         ])
-        await emu.importStateBlob(blob)
-        if (!isHost && wasRunningBeforeResyncRef.current && peer.phase === 'playing') {
-          emu.resume()
-        }
-      } finally {
-        wasRunningBeforeResyncRef.current = false
-        setImporting(false)
+        await emu.importStateBlob(blob, { keepPaused: true })
+        peer.sendResyncDone()
+        resumeAfterResync()
+      } catch (err) {
+        console.error(err)
+        abortResync()
+        throw err
       }
     },
-    [enabled, emu, isHost, peer.phase],
+    [enabled, emu, peer, resumeAfterResync, abortResync],
   )
 
   const syncGameState = useCallback(async () => {
@@ -134,6 +156,7 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
     syncGameState,
     handleResyncRequest,
     handleResyncStart,
+    handleResyncDone,
     handleResyncState,
     syncPending,
     stateSyncBusy,

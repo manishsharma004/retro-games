@@ -105,6 +105,7 @@ export interface UsePeerSessionResult {
   sendInput: (button: string, down: boolean) => void
   sendPing: (t: number) => void
   sendResyncState: (state: Uint8Array, compressed?: boolean) => Promise<void>
+  sendResyncDone: () => void
   requestResync: () => void
   attachMediaStream: (stream: MediaStream) => Promise<void>
   getConnection: () => PeerConnection | null
@@ -680,6 +681,14 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     connRef.current?.sendControl({ type: 'resync-request' })
   }, [])
 
+  const sendResyncDone = useCallback(() => {
+    try {
+      connRef.current?.sendControl({ type: 'resync-done' })
+    } catch {
+      // ignore
+    }
+  }, [])
+
   const attachMediaStream = useCallback(async (stream: MediaStream) => {
     const conn = connRef.current
     if (!conn) throw new Error('No connection')
@@ -752,6 +761,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     sendInput,
     sendPing,
     sendResyncState,
+    sendResyncDone,
     requestResync,
     attachMediaStream,
     getConnection,

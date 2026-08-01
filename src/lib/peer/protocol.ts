@@ -31,6 +31,7 @@ export function pickSyncSettings(settings: EmulatorSettings): PeerSyncSettings {
 
 export type ControlMessage =
   | { type: 'hello'; role: PeerRole; seat: PeerSeat; mode: SessionMode; name?: string }
+  | { type: 'seat-pick'; seat: PeerSeat }
   | { type: 'ready' }
   | { type: 'go'; at: number }
   | {

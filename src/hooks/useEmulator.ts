@@ -61,6 +61,8 @@ export interface UseEmulatorResult {
   pressUp: (button: string, player?: number) => void
   remotePressDown: (button: string, player: number) => void
   remotePressUp: (button: string, player: number) => void
+  releaseAllInputs: () => void
+  isRunning: () => boolean
   relaunchWithSettings: () => void
   getNostalgist: () => Nostalgist | null
 }
@@ -302,6 +304,40 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     [queueLaunch],
   )
 
+  const mapButton = useCallback((button: string) => {
+    if (!settingsRef.current.swapAB) return button
+    if (button === 'a') return 'b'
+    if (button === 'b') return 'a'
+    if (button === 'x') return 'y'
+    if (button === 'y') return 'x'
+    return button
+  }, [])
+
+  const sendPressUp = useCallback(
+    (emu: Nostalgist, button: string, player: number) => {
+      const mapped = mapButton(button)
+      if (player === 1) emu.pressUp(mapped)
+      else emu.pressUp({ button: mapped, player })
+    },
+    [mapButton],
+  )
+
+  const releaseAllInputs = useCallback(() => {
+    const emu = nostalgistRef.current
+    const held = [...pressCountsRef.current.entries()]
+    pressCountsRef.current.clear()
+    if (!emu) return
+    for (const [key, count] of held) {
+      if (count <= 0) continue
+      const colon = key.indexOf(':')
+      const player = Number(key.slice(0, colon))
+      const button = key.slice(colon + 1)
+      sendPressUp(emu, button, player)
+    }
+  }, [sendPressUp])
+
+  const isRunning = useCallback(() => statusRef.current === 'running', [])
+
   const exit = useCallback(() => {
     setPending(null)
     cleanup()
@@ -312,15 +348,16 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
   }, [cleanup])
 
   const pause = useCallback(() => {
+    releaseAllInputs()
     nostalgistRef.current?.pause()
     setStatus('paused')
-  }, [])
+  }, [releaseAllInputs])
 
   const resume = useCallback(() => {
-    pressCountsRef.current.clear()
+    releaseAllInputs()
     nostalgistRef.current?.resume()
     setStatus('running')
-  }, [])
+  }, [releaseAllInputs])
 
   const restart = useCallback(() => {
     nostalgistRef.current?.restart()
@@ -372,6 +409,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     stateIoBusyRef.current = true
     const wasRunning = statusRef.current === 'running'
     try {
+      releaseAllInputs()
       if (wasRunning) emu.pause()
       const { state } = await emu.saveState()
       return state
@@ -382,7 +420,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
       }
       stateIoBusyRef.current = false
     }
-  }, [])
+  }, [releaseAllInputs])
 
   const importStateBlob = useCallback(async (state: Blob) => {
     const emu = nostalgistRef.current
@@ -390,8 +428,10 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     stateIoBusyRef.current = true
     const wasRunning = statusRef.current === 'running'
     try {
+      releaseAllInputs()
       if (wasRunning) emu.pause()
       await emu.loadState(state)
+      releaseAllInputs()
     } finally {
       if (wasRunning && nostalgistRef.current === emu) {
         emu.resume()
@@ -399,7 +439,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
       }
       stateIoBusyRef.current = false
     }
-  }, [])
+  }, [releaseAllInputs])
 
   const getRomBytes = useCallback(async () => {
     const active = gameRef.current
@@ -408,19 +448,10 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     return new Uint8Array(buf)
   }, [])
 
-  const mapButton = useCallback((button: string) => {
-    if (!settingsRef.current.swapAB) return button
-    if (button === 'a') return 'b'
-    if (button === 'b') return 'a'
-    if (button === 'x') return 'y'
-    if (button === 'y') return 'x'
-    return button
-  }, [])
-
   const pressDown = useCallback(
     (button: string, player = 1) => {
       const emu = nostalgistRef.current
-      if (!emu) return
+      if (!emu || stateIoBusyRef.current) return
       const mapped = mapButton(button)
       const key = pressKey(player, mapped)
       const next = (pressCountsRef.current.get(key) ?? 0) + 1
@@ -451,20 +482,16 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
 
   const remotePressDown = useCallback(
     (button: string, player: number) => {
-      const mapped = mapButton(button)
-      if (player === 1) nostalgistRef.current?.pressDown(mapped)
-      else nostalgistRef.current?.pressDown({ button: mapped, player })
+      pressDown(button, player)
     },
-    [mapButton],
+    [pressDown],
   )
 
   const remotePressUp = useCallback(
     (button: string, player: number) => {
-      const mapped = mapButton(button)
-      if (player === 1) nostalgistRef.current?.pressUp(mapped)
-      else nostalgistRef.current?.pressUp({ button: mapped, player })
+      pressUp(button, player)
     },
-    [mapButton],
+    [pressUp],
   )
 
   const relaunchWithSettings = useCallback(() => {
@@ -499,6 +526,8 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     pressUp,
     remotePressDown,
     remotePressUp,
+    releaseAllInputs,
+    isRunning,
     relaunchWithSettings,
     getNostalgist,
   }

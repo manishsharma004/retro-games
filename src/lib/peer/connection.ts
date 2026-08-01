@@ -1,5 +1,11 @@
 import { compressSignal, decompressSignal } from './compress'
-import { getIceConfig, ICE_CONNECT_TIMEOUT_MS } from './connectivity'
+import {
+  getIceConfig,
+  ICE_CONNECT_TIMEOUT_MS,
+  ICE_LOCAL_RETRY_MS,
+  type ConnectionPath,
+  type IceTier,
+} from './connectivity'
 import {
   CHUNK_PAYLOAD_SIZE,
   decodeChunk,
@@ -9,7 +15,9 @@ import {
 } from './protocol'
 
 export interface PeerConnectionOptions {
+  /** @deprecated use iceTier — relay tier forces TURN from the start */
   preferTurn?: boolean
+  iceTier?: IceTier
 }
 
 /** States where we are still exchanging SDP out-of-band — ICE must not kill the session. */
@@ -47,6 +55,12 @@ export interface PeerConnectionHandlers {
   onError?: (error: Error) => void
   /** Guest regenerated answer after ICE died while waiting for host — re-share this string. */
   onSignalRefresh?: (signal: string) => void
+  /** Host needs to push an ICE-restart offer (local→relay fallback or LAN migration). */
+  onRenegotiationOffer?: (signal: string) => void
+  /** ICE tier changed (local STUN-only vs relay fallback). */
+  onIceTierChange?: (tier: IceTier) => void
+  /** Active transport path once ICE selects a candidate pair. */
+  onConnectionPath?: (path: ConnectionPath) => void
   /** Remote mode: incoming media stream from peer. */
   onRemoteStream?: (stream: MediaStream) => void
 }
@@ -92,11 +106,45 @@ export class PeerConnection {
   private remoteOfferSdp: string | null = null
   private refreshingAnswer = false
   private isAnswerer = false
-  private preferTurn = false
+  private iceTier: IceTier = 'local'
+  private relayRetryDone = false
+  private localMigrateAttempted = false
+  private localMigrateTimer: number | null = null
+  private connectionPath: ConnectionPath = 'unknown'
 
   constructor(handlers: PeerConnectionHandlers = {}, options: PeerConnectionOptions = {}) {
     this.handlers = handlers
-    this.preferTurn = options.preferTurn ?? false
+    this.iceTier = options.iceTier ?? (options.preferTurn ? 'relay' : 'local')
+  }
+
+  get activeIceTier(): IceTier {
+    return this.iceTier
+  }
+
+  get activeConnectionPath(): ConnectionPath {
+    return this.connectionPath
+  }
+
+  private setConnectionPath(path: ConnectionPath) {
+    if (this.connectionPath === path) return
+    this.connectionPath = path
+    this.handlers.onConnectionPath?.(path)
+  }
+
+  private clearLocalMigrateTimer() {
+    if (this.localMigrateTimer !== null) {
+      window.clearTimeout(this.localMigrateTimer)
+      this.localMigrateTimer = null
+    }
+  }
+
+  private scheduleLocalMigration() {
+    if (this.localMigrateAttempted || this.iceTier !== 'relay') return
+    this.clearLocalMigrateTimer()
+    this.localMigrateTimer = window.setTimeout(() => {
+      this.localMigrateTimer = null
+      void this.tryMigrateToLocal()
+    }, 1500)
   }
 
   get connectionState(): PeerConnectionState {
@@ -124,19 +172,126 @@ export class PeerConnection {
     this.clearConnectWatch()
     this.connectWatchTimer = window.setTimeout(() => {
       this.connectWatchTimer = null
-      if (this.state === 'connecting' || this.state === 'awaiting-answer') {
-        this.handlers.onError?.(
-          new Error(
-            'Connection timed out — try same Wi‑Fi/hotspot, enable TURN, or use manual SDP paste',
-          ),
-        )
-        this.setState('failed')
+      if (this.state !== 'connecting' && this.state !== 'awaiting-answer') return
+      if (!this.relayRetryDone && this.iceTier === 'local' && !this.isAnswerer) {
+        void this.tryRelayFallback()
+        return
       }
+      this.handlers.onError?.(
+        new Error(
+          'Connection timed out — try same Wi‑Fi/hotspot, enable TURN, or use manual SDP paste',
+        ),
+      )
+      this.setState('failed')
     }, timeoutMs)
+  }
+
+  private async readSelectedCandidatePath(): Promise<ConnectionPath> {
+    const pc = this.pc
+    if (!pc) return 'unknown'
+    try {
+      const stats = await pc.getStats()
+      let selected: { localCandidateId?: string } | undefined
+      for (const report of stats.values()) {
+        const r = report as { type?: string; selected?: boolean; selectedCandidatePairId?: string; localCandidateId?: string; candidateType?: string }
+        if (r.type === 'transport' && r.selectedCandidatePairId) {
+          const pair = stats.get(r.selectedCandidatePairId) as { type?: string; localCandidateId?: string } | undefined
+          if (pair?.type === 'candidate-pair') selected = pair
+        }
+        if (r.type === 'candidate-pair' && r.selected) {
+          selected = r
+        }
+      }
+      if (!selected?.localCandidateId) return 'unknown'
+      const local = stats.get(selected.localCandidateId) as { candidateType?: string } | undefined
+      const type = local?.candidateType
+      if (type === 'host') return 'local'
+      if (type === 'srflx' || type === 'prflx') return 'stun'
+      if (type === 'relay') return 'relay'
+      return 'unknown'
+    } catch {
+      return 'unknown'
+    }
+  }
+
+  private async refreshConnectionPath() {
+    const path = await this.readSelectedCandidatePath()
+    if (path !== 'unknown') this.setConnectionPath(path)
+  }
+
+  private async tryRelayFallback(): Promise<void> {
+    if (this.relayRetryDone || this.iceTier === 'relay' || this.isAnswerer) return
+    this.relayRetryDone = true
+    this.iceTier = 'relay'
+    this.handlers.onIceTierChange?.('relay')
+    try {
+      const offer = await this.renegotiateAsOfferer('relay')
+      this.handlers.onRenegotiationOffer?.(offer)
+      this.watchForConnect(ICE_CONNECT_TIMEOUT_MS)
+    } catch (err) {
+      this.handlers.onError?.(
+        err instanceof Error ? err : new Error('Could not upgrade to relay connection'),
+      )
+      this.setState('failed')
+    }
+  }
+
+  private async tryMigrateToLocal(): Promise<void> {
+    if (this.localMigrateAttempted || this.isAnswerer || !this.pc) return
+    const path = await this.readSelectedCandidatePath()
+    if (path !== 'relay') return
+    this.localMigrateAttempted = true
+    this.iceTier = 'local'
+    this.handlers.onIceTierChange?.('local')
+    try {
+      const offer = await this.renegotiateAsOfferer('local')
+      this.handlers.onRenegotiationOffer?.(offer)
+    } catch {
+      this.iceTier = 'relay'
+      this.handlers.onIceTierChange?.('relay')
+      this.localMigrateAttempted = false
+    }
+  }
+
+  private async renegotiateAsOfferer(tier: IceTier): Promise<string> {
+    const pc = this.pc
+    if (!pc) throw new Error('No peer connection')
+    const { iceServers } = getIceConfig(tier)
+    pc.setConfiguration({ iceServers, iceCandidatePoolSize: 10 })
+    pc.restartIce()
+    const offer = await pc.createOffer({ iceRestart: true })
+    await pc.setLocalDescription(offer)
+    await waitForIceGathering(pc)
+    const local = pc.localDescription
+    if (!local?.sdp) throw new Error('Failed to create ICE restart offer')
+    return compressSignal(local.sdp)
+  }
+
+  async acceptRenegotiationOffer(encoded: string): Promise<string> {
+    const pc = this.pc
+    if (!pc) throw new Error('No peer connection')
+    const sdp = decompressSignal(encoded)
+    await pc.setRemoteDescription({ type: 'offer', sdp })
+    const answer = await pc.createAnswer()
+    await pc.setLocalDescription(answer)
+    await waitForIceGathering(pc)
+    const local = pc.localDescription
+    if (!local?.sdp) throw new Error('Failed to create ICE restart answer')
+    this.watchForConnect(ICE_CONNECT_TIMEOUT_MS)
+    return compressSignal(local.sdp)
+  }
+
+  async acceptRenegotiationAnswer(encoded: string): Promise<void> {
+    const pc = this.pc
+    if (!pc) throw new Error('No peer connection')
+    const sdp = decompressSignal(encoded)
+    await pc.setRemoteDescription({ type: 'answer', sdp })
+    this.watchForConnect(ICE_CONNECT_TIMEOUT_MS)
   }
 
   private teardownPc(keepOffer = false) {
     this.clearConnectWatch()
+    this.clearLocalMigrateTimer()
     try {
       this.channel?.close()
     } catch {
@@ -157,7 +312,7 @@ export class PeerConnection {
 
   private ensurePc(): RTCPeerConnection {
     if (this.pc) return this.pc
-    const { iceServers } = getIceConfig(this.preferTurn)
+    const { iceServers } = getIceConfig(this.iceTier)
     const pc = new RTCPeerConnection({
       iceServers,
       iceCandidatePoolSize: 10,
@@ -170,7 +325,8 @@ export class PeerConnection {
       const s = pc.connectionState
       if (s === 'connected') {
         this.clearConnectWatch()
-        // Prefer DataChannel onopen as the source of truth; still mark connected here.
+        void this.refreshConnectionPath()
+        if (this.iceTier === 'relay') this.scheduleLocalMigration()
         if (this.channel?.readyState === 'open') this.setState('connected')
         else if (!SIGNALING_WAIT_STATES.has(this.state)) this.setState('connecting')
         return
@@ -178,6 +334,10 @@ export class PeerConnection {
       if (SIGNALING_WAIT_STATES.has(this.state)) return
 
       if (s === 'failed') {
+        if (!this.relayRetryDone && this.iceTier === 'local' && !this.isAnswerer) {
+          void this.tryRelayFallback()
+          return
+        }
         if (this.offererAnswerApplied || this.state === 'connecting') {
           this.setState('failed')
         }
@@ -192,9 +352,11 @@ export class PeerConnection {
     pc.oniceconnectionstatechange = () => {
       const ice = pc.iceConnectionState
       if (ice === 'connected' || ice === 'completed') {
+        void this.refreshConnectionPath()
         if (this.channel?.readyState === 'open') {
           this.clearConnectWatch()
           this.setState('connected')
+          if (this.iceTier === 'relay') this.scheduleLocalMigration()
         }
         return
       }
@@ -215,6 +377,10 @@ export class PeerConnection {
       if (SIGNALING_WAIT_STATES.has(this.state)) return
       if (!this.offererAnswerApplied && this.state !== 'connecting') return
       if (this.state === 'connected') return
+      if (!this.relayRetryDone && this.iceTier === 'local' && !this.isAnswerer) {
+        void this.tryRelayFallback()
+        return
+      }
       this.handlers.onError?.(
         new Error('ICE connection failed — use the same Wi‑Fi/hotspot and start a fresh session'),
       )
@@ -249,6 +415,8 @@ export class PeerConnection {
     channel.onopen = () => {
       this.clearConnectWatch()
       this.setState('connected')
+      void this.refreshConnectionPath()
+      if (this.iceTier === 'relay') this.scheduleLocalMigration()
     }
     channel.onclose = () => {
       if (this.state === 'connected' || this.state === 'connecting') {
@@ -344,6 +512,10 @@ export class PeerConnection {
     this.close()
     this.offererAnswerApplied = false
     this.isAnswerer = false
+    this.iceTier = 'local'
+    this.relayRetryDone = false
+    this.localMigrateAttempted = false
+    this.connectionPath = 'unknown'
     this.setState('creating-offer')
     const pc = this.ensurePc()
     const channel = pc.createDataChannel('retro-games', { ordered: true })
@@ -364,7 +536,7 @@ export class PeerConnection {
     this.offererAnswerApplied = true
     this.setState('connecting')
     await pc.setRemoteDescription({ type: 'answer', sdp })
-    this.watchForConnect(ICE_CONNECT_TIMEOUT_MS)
+    this.watchForConnect(ICE_LOCAL_RETRY_MS)
   }
 
   /** Attach canvas/audio stream for remote mode (host side). */
@@ -436,8 +608,13 @@ export class PeerConnection {
   }
 
   close(): void {
+    this.clearLocalMigrateTimer()
     this.teardownPc(false)
     this.isAnswerer = false
+    this.iceTier = 'local'
+    this.relayRetryDone = false
+    this.localMigrateAttempted = false
+    this.connectionPath = 'unknown'
     this.setState('closed')
   }
 }

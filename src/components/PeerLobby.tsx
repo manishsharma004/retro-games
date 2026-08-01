@@ -18,6 +18,7 @@ interface PeerLobbyProps {
   roomCode: string | null
   joinUrl: string | null
   signalingLabel: string
+  connectionPathLabel: string
   useManualSignaling: boolean
   transfer: PeerTransferStatus
   error: string | null
@@ -51,6 +52,7 @@ export function PeerLobby({
   roomCode,
   joinUrl,
   signalingLabel,
+  connectionPathLabel,
   useManualSignaling,
   transfer,
   error,
@@ -338,7 +340,13 @@ export function PeerLobby({
           <p className="peer-lobby__fallback">
             {useManualSignaling
               ? 'Room code unavailable — using manual SDP paste'
-              : `Connection path: ${signalingLabel}`}
+              : `Signaling: ${signalingLabel}`}
+          </p>
+        )}
+
+        {phase !== 'idle' && connectionPathLabel && connectionPathLabel !== 'Connecting…' && (
+          <p className="peer-lobby__fallback">
+            Data path: <strong>{connectionPathLabel}</strong>
           </p>
         )}
 

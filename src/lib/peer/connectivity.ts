@@ -1,8 +1,14 @@
 export type ConnectivityTier = 'stun' | 'turn' | 'manual'
 
+/** ICE gathering phase: local LAN/STUN first, TURN relay only as fallback. */
+export type IceTier = 'local' | 'relay'
+
+export type ConnectionPath = 'local' | 'stun' | 'relay' | 'unknown'
+
 export interface IceConfig {
   iceServers: RTCIceServer[]
-  tier: ConnectivityTier
+  tier: IceTier
+  connectivityTier: ConnectivityTier
 }
 
 /** Free public STUN servers — always included. */
@@ -14,8 +20,8 @@ const STUN_SERVERS: RTCIceServer[] = [
 ]
 
 /**
- * Free public TURN relay (Open Relay Project / Metered) — included by default so
- * cross-NAT connections work without any env configuration.
+ * Free public TURN relay (Open Relay Project / Metered) — used only after local
+ * Wi‑Fi / STUN path fails so same-LAN peers connect directly when possible.
  * @see https://www.metered.ca/tools/openrelay/
  */
 const FREE_TURN_SERVERS: RTCIceServer[] = [
@@ -44,14 +50,34 @@ function readCustomTurnServers(): RTCIceServer[] {
   return [{ urls: url, username, credential }]
 }
 
-/** ICE servers: public STUN + free Open Relay TURN by default; custom TURN via env adds on top. */
-export function getIceConfig(preferTurn = false): IceConfig {
-  const customTurn = readCustomTurnServers()
-  const turnServers = [...FREE_TURN_SERVERS, ...customTurn]
-  const iceServers = [...STUN_SERVERS, ...turnServers]
+function turnServers(): RTCIceServer[] {
+  return [...FREE_TURN_SERVERS, ...readCustomTurnServers()]
+}
+
+/**
+ * Local tier: STUN only — prefers host (LAN/Wi‑Fi) candidates after SDP handshake.
+ * Relay tier: STUN + TURN — fallback when direct path cannot be established.
+ */
+export function getIceConfig(tier: IceTier = 'local'): IceConfig {
+  const relay = turnServers()
+  const iceServers = tier === 'local' ? [...STUN_SERVERS] : [...STUN_SERVERS, ...relay]
   return {
     iceServers,
-    tier: preferTurn || turnServers.length > 0 ? 'turn' : 'stun',
+    tier,
+    connectivityTier: tier === 'relay' && relay.length > 0 ? 'turn' : 'stun',
+  }
+}
+
+export function formatConnectionPath(path: ConnectionPath): string {
+  switch (path) {
+    case 'local':
+      return 'Local Wi‑Fi / LAN'
+    case 'stun':
+      return 'Direct (STUN)'
+    case 'relay':
+      return 'Relay (TURN)'
+    case 'unknown':
+      return 'Connecting…'
   }
 }
 
@@ -82,3 +108,4 @@ export function suggestedCaptureFps(): number {
 }
 
 export const ICE_CONNECT_TIMEOUT_MS = 20_000
+export const ICE_LOCAL_RETRY_MS = 12_000

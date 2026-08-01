@@ -533,8 +533,8 @@ export function PeerLobby({
               <>
                 <p className="peer-lobby__hint">
                   Input sync active — P{seat} on this device. Both emulators run locked
-                  60&nbsp;Hz NTSC timing with buffered remote inputs. State sync runs
-                  automatically in the background; use manual sync if you notice drift.
+                  60&nbsp;Hz NTSC timing with latency-buffered inputs on both sides. State
+                  sync runs automatically in the background; use manual sync if you notice drift.
                 </p>
                 {suggestStateSync && latencyProfile?.advice && (
                   <p className="peer-lobby__hint peer-lobby__hint--warn">

@@ -17,7 +17,7 @@ export interface LatencyProfile {
   coopSyncIntervalMs: number | null
   /** Co-op: automatic background state sync interval. */
   coopAutoSyncIntervalMs: number | null
-  /** Co-op: delay before applying remote inputs (ms). */
+  /** Co-op: symmetric input buffer before applying local or remote inputs (ms). */
   coopInputDelayMs: number
   /** Show input-delay warning in the lobby/toolbar. */
   warnInputDelay: boolean
@@ -44,8 +44,11 @@ export function formatLatency(ms: number | null): string {
 }
 
 export function getCoopInputDelayMs(latencyMs: number | null): number {
-  const base = latencyMs ?? 80
-  return Math.min(180, Math.max(60, Math.round(base * 0.75)))
+  const rtt = latencyMs ?? 80
+  // One-way transit (RTT/2) plus ~3 frames at 60 Hz so both peers land on the same frame.
+  const oneWay = Math.ceil(rtt / 2)
+  const frameBuffer = 50
+  return Math.min(250, Math.max(80, oneWay + frameBuffer))
 }
 
 export function getLatencyProfile(

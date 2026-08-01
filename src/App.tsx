@@ -127,18 +127,18 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   }, [emu])
 
   const coopRef = useRef<ReturnType<typeof useCoopSession> | null>(null)
-  const coopInputDelayRef = useRef<((seat: PeerSeat, button: string, down: boolean) => void) | null>(
-    null,
-  )
+  const coopInputDelayRef = useRef<
+    ((seat: PeerSeat, button: string, down: boolean, executeAt?: number) => void) | null
+  >(null)
 
   const peer = usePeerSession({
     settings,
     sessionMode,
-    onRemoteInput: (seat, button, down) => {
+    onRemoteInput: (seat, button, down, executeAt) => {
       if (sessionMode === 'coop') {
         const local = peerRef.current.getSeat()
         if (local !== null && seat === local) return
-        coopInputDelayRef.current?.(seat, button, down)
+        coopInputDelayRef.current?.(seat, button, down, executeAt)
         return
       }
       if (down) emu.remotePressDown(button, seat)
@@ -235,14 +235,15 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   const peerPlaying = peer.phase === 'playing'
   const peerActive = peer.role !== null && peer.phase !== 'idle' && peer.phase !== 'error'
 
-  const { applyRemoteInput } = useCoopInputDelay({
+  const { queueLocalInput, applyRemoteInput } = useCoopInputDelay({
     enabled: sessionMode === 'coop' && peerPlaying,
     delayMs: peer.latencyProfile.coopInputDelayMs,
     localSeat: localSeat === 1 || localSeat === 2 ? localSeat : null,
     handlers: {
-      pressDown: emu.remotePressDown,
-      pressUp: emu.remotePressUp,
+      pressDown: emu.pressDown,
+      pressUp: emu.pressUp,
     },
+    sendInput: peer.sendInput,
   })
 
   useEffect(() => {
@@ -251,38 +252,54 @@ export default function App({ initialCoopJoin = null }: AppProps) {
 
   const onLocalPress = useCallback(
     (button: string) => {
+      if (sessionMode === 'coop' && peerPlaying) {
+        queueLocalInput(button, true)
+        return
+      }
       const seat = resolveLocalSeat()
       emu.pressDown(button, seat)
       if (peerPlaying) peer.sendInput(button, true)
     },
-    [emu, resolveLocalSeat, peer, peerPlaying],
+    [emu, resolveLocalSeat, peer, peerPlaying, sessionMode, queueLocalInput],
   )
 
   const onLocalRelease = useCallback(
     (button: string) => {
+      if (sessionMode === 'coop' && peerPlaying) {
+        queueLocalInput(button, false)
+        return
+      }
       const seat = resolveLocalSeat()
       emu.pressUp(button, seat)
       if (peerPlaying) peer.sendInput(button, false)
     },
-    [emu, resolveLocalSeat, peer, peerPlaying],
+    [emu, resolveLocalSeat, peer, peerPlaying, sessionMode, queueLocalInput],
   )
 
   const onPadPress = useCallback(
     (button: string, player: number) => {
       const seat = resolveLocalSeat()
+      if (sessionMode === 'coop' && peerPlaying && player === seat) {
+        queueLocalInput(button, true)
+        return
+      }
       emu.pressDown(button, player)
       if (peerPlaying && player === seat) peer.sendInput(button, true)
     },
-    [emu, resolveLocalSeat, peer, peerPlaying],
+    [emu, resolveLocalSeat, peer, peerPlaying, sessionMode, queueLocalInput],
   )
 
   const onPadRelease = useCallback(
     (button: string, player: number) => {
       const seat = resolveLocalSeat()
+      if (sessionMode === 'coop' && peerPlaying && player === seat) {
+        queueLocalInput(button, false)
+        return
+      }
       emu.pressUp(button, player)
       if (peerPlaying && player === seat) peer.sendInput(button, false)
     },
-    [emu, resolveLocalSeat, peer, peerPlaying],
+    [emu, resolveLocalSeat, peer, peerPlaying, sessionMode, queueLocalInput],
   )
 
   const inputEnabled =

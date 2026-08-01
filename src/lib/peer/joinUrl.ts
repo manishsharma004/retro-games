@@ -12,10 +12,15 @@ export function generateRoomCode(length = 4): string {
   return code
 }
 
+export function normalizeRoomCode(code: string): string {
+  return code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+}
+
 export function buildJoinUrl(code: string, mode: SessionMode): string {
+  const normalized = normalizeRoomCode(code)
   const base = import.meta.env.BASE_URL.replace(/\/$/, '') || '/'
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
-  const params = new URLSearchParams({ room: code, mode, join: '1' })
+  const params = new URLSearchParams({ room: normalized, mode, join: '1' })
   return `${origin}${base}?${params.toString()}`
 }
 
@@ -32,6 +37,8 @@ export function parseJoinLocation(search: string, hash: string): {
     room = parts[0] ?? null
     mode = (parts[1] as SessionMode) ?? null
   }
+
+  if (room) room = normalizeRoomCode(room)
 
   if (mode !== 'local' && mode !== 'remote' && mode !== 'coop') {
     mode = room ? 'local' : null

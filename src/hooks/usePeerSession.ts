@@ -13,6 +13,7 @@ import {
   formatSignalingPath,
   type SignalingAdapterName,
 } from '../lib/peer/signaling'
+import { normalizeRoomCode } from '../lib/peer/joinUrl'
 import type { SystemId } from '../lib/cores'
 import type { EmulatorSettings } from '../lib/settings'
 
@@ -344,10 +345,16 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         setSignalingPath(chain.lastAdapter)
         updatePhase('host-offer')
 
-        void chain.waitForAnswer(room.code).then(async (answer) => {
-          updatePhase('connecting')
-          await conn.acceptAnswer(answer)
-        })
+        const answerPromise = chain.waitForAnswer(room.code)
+        void answerPromise
+          .then(async (answer) => {
+            updatePhase('connecting')
+            await conn.acceptAnswer(answer)
+          })
+          .catch((err) => {
+            setError(err instanceof Error ? err.message : 'Waiting for guest answer failed')
+            updatePhase('error')
+          })
       } catch {
         setUseManualSignaling(true)
         setSignalingPath('manual')
@@ -390,32 +397,51 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
 
   const joinWithRoomCode = useCallback(
     async (code: string, mode: SessionMode) => {
+      const normalized = normalizeRoomCode(code)
+      if (!normalized) {
+        setError('Enter a valid room code')
+        return
+      }
+
       setError(null)
-      setRoomCode(code)
+      setRoomCode(normalized)
       modeRef.current = mode
       setSessionMode(mode)
       roleRef.current = 'guest'
       seatRef.current = 2
       setRole('guest')
       setSeat(2)
+      updatePhase('connecting')
 
-      signalingRef.current?.close()
-      const chain = new SignalingAdapterChain()
-      signalingRef.current = chain
+      const maxAttempts = 6
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        signalingRef.current?.close()
+        const chain = new SignalingAdapterChain()
+        signalingRef.current = chain
 
-      try {
-        const offer = await chain.guestFetchOffer(code)
-        setSignalingPath(chain.lastAdapter)
-        const conn = createConnection()
-        const answer = await conn.createAnswerFromOffer(offer)
-        setLocalSignal(answer)
-        await chain.guestPublishAnswer(code, answer)
-        updatePhase('guest-answer')
-      } catch {
-        setUseManualSignaling(true)
-        setSignalingPath('manual')
-        setError('Could not join room — paste host offer manually')
-        updatePhase('idle')
+        try {
+          const offer = await chain.guestFetchOffer(normalized)
+          setSignalingPath(chain.lastAdapter)
+          const conn = createConnection()
+          const answer = await conn.createAnswerFromOffer(offer)
+          setLocalSignal(answer)
+          await chain.guestPublishAnswer(normalized, answer)
+          updatePhase('guest-answer')
+          return
+        } catch (err) {
+          if (attempt < maxAttempts - 1) {
+            await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)))
+            continue
+          }
+          setUseManualSignaling(true)
+          setSignalingPath('manual')
+          setError(
+            err instanceof Error
+              ? `${err.message} — paste the host offer below`
+              : 'Could not join room — paste host offer manually',
+          )
+          updatePhase('error')
+        }
       }
     },
     [createConnection, updatePhase],

@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { VirtualController } from '../components/VirtualController'
 import { usePeerSession } from '../hooks/usePeerSession'
 import { useLocalGuest } from '../hooks/multiplayer/useLocalGuest'
 import { useRemoteGuest } from '../hooks/multiplayer/useRemoteGuest'
-import { parseJoinLocation, type SessionMode } from '../lib/peer'
+import { buildJoinUrl, normalizeRoomCode, parseJoinLocation, type SessionMode } from '../lib/peer'
 import { DEFAULT_LAYOUT } from '../lib/virtualLayout'
 import { loadSettings } from '../lib/settings'
 import '../styles/app.css'
@@ -17,6 +17,7 @@ export function JoinPage({ initialRoom, initialMode }: JoinPageProps) {
   const [mode] = useState<SessionMode>(initialMode)
   const [roomInput, setRoomInput] = useState(initialRoom)
   const [joined, setJoined] = useState(Boolean(initialRoom))
+  const joinStartedRef = useRef(false)
 
   const peer = usePeerSession({
     settings: loadSettings(),
@@ -36,10 +37,10 @@ export function JoinPage({ initialRoom, initialMode }: JoinPageProps) {
   })
 
   useEffect(() => {
-    if (!joined || !roomInput.trim()) return
-    void peer.joinWithRoomCode(roomInput.trim().toUpperCase(), mode)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- join once
-  }, [joined])
+    if (!joined || !roomInput.trim() || joinStartedRef.current) return
+    joinStartedRef.current = true
+    void peer.joinWithRoomCode(roomInput.trim(), mode)
+  }, [joined, roomInput, mode, peer.joinWithRoomCode])
 
   if (mode === 'local') {
     return (
@@ -47,7 +48,13 @@ export function JoinPage({ initialRoom, initialMode }: JoinPageProps) {
         <header className="join-page__header">
           <h1>Player {localGuest.seat}</h1>
           <p className="join-page__status">
-            {peer.connectionState === 'connected' ? 'Connected' : 'Connecting…'}
+            {peer.phase === 'connecting' && 'Connecting to room…'}
+            {peer.phase === 'guest-answer' && 'Waiting for host to accept…'}
+            {peer.connectionState === 'connected' && 'Connected'}
+            {peer.connectionState !== 'connected' &&
+              peer.phase !== 'connecting' &&
+              peer.phase !== 'guest-answer' &&
+              'Not connected'}
             {peer.signalingLabel ? ` · ${peer.signalingLabel}` : ''}
           </p>
         </header>
@@ -87,6 +94,7 @@ export function JoinPage({ initialRoom, initialMode }: JoinPageProps) {
             layout={DEFAULT_LAYOUT}
           />
         )}
+        {joined && peer.error && <p className="join-page__error">{peer.error}</p>}
       </div>
     )
   }
@@ -96,7 +104,10 @@ export function JoinPage({ initialRoom, initialMode }: JoinPageProps) {
       <div className="join-page join-page--stream">
         <header className="join-page__header">
           <h1>Remote play</h1>
-          <p className="join-page__status">{peer.connectionState}</p>
+          <p className="join-page__status">
+            {peer.phase} · {peer.connectionState}
+            {peer.error ? ` · ${peer.error}` : ''}
+          </p>
         </header>
         {!joined ? (
           <div className="join-page__form">
@@ -135,7 +146,10 @@ export function JoinPage({ initialRoom, initialMode }: JoinPageProps) {
   return (
     <div className="join-page">
       <p>Co-op join opens the full app with dual-emulator sync.</p>
-      <a className="btn btn--primary" href={`${import.meta.env.BASE_URL}?coop=${roomInput}`}>
+      <a
+        className="btn btn--primary"
+        href={buildJoinUrl(roomInput || initialRoom, 'coop')}
+      >
         Open co-op session
       </a>
     </div>
@@ -144,12 +158,19 @@ export function JoinPage({ initialRoom, initialMode }: JoinPageProps) {
 
 export function resolveJoinRoute(): { room: string; mode: SessionMode } | null {
   const params = new URLSearchParams(window.location.search)
-  if (params.get('join') !== '1' && !window.location.pathname.endsWith('/join')) {
-    const coop = params.get('coop')
-    if (coop) return { room: coop, mode: 'coop' }
-    return null
+  const coopLegacy = params.get('coop')
+  if (coopLegacy) {
+    return { room: normalizeRoomCode(coopLegacy), mode: 'coop' }
   }
+
   const { room, mode } = parseJoinLocation(window.location.search, window.location.hash)
   if (!room || !mode) return null
+
+  const hasJoinFlag =
+    params.get('join') === '1' ||
+    window.location.pathname.endsWith('/join') ||
+    Boolean(params.get('room') && params.get('mode'))
+
+  if (!hasJoinFlag) return null
   return { room, mode }
 }

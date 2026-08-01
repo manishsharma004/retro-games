@@ -123,7 +123,11 @@ export function PeerLobby({
 
   const showCoopFlow = sessionMode === 'coop'
   const showManualExchange =
-    manualOpen || useManualSignaling || phase === 'host-offer' || phase === 'guest-answer'
+    manualOpen ||
+    useManualSignaling ||
+    phase === 'host-offer' ||
+    phase === 'guest-answer' ||
+    (phase === 'error' && role === 'guest')
 
   async function withBusy(fn: () => void | Promise<void>) {
     setBusy(true)
@@ -223,7 +227,23 @@ export function PeerLobby({
           </button>
         </header>
 
-        {phase === 'idle' && (
+        {(phase === 'connecting' || (phase === 'error' && role === 'guest')) && role === 'guest' && (
+          <div className="peer-lobby__status">
+            <p>
+              {phase === 'connecting'
+                ? 'Joining room… (retrying if host is still setting up)'
+                : 'Could not join automatically'}
+            </p>
+            {roomCode && (
+              <p>
+                Room: <strong>{roomCode}</strong>
+              </p>
+            )}
+            {error && <p className="peer-lobby__hint">{error}</p>}
+          </div>
+        )}
+
+        {phase === 'idle' && role !== 'guest' && (
           <>
             <div className="peer-lobby__modes" role="radiogroup" aria-label="Session mode">
               <label className="peer-lobby__mode">

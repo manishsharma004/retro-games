@@ -282,6 +282,17 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
   private conn: DataConn | null = null
   private answerResolve: ((answer: string) => void) | null = null
   private answerReject: ((err: Error) => void) | null = null
+  private pendingAnswer: string | null = null
+
+  private deliverAnswer(answer: string) {
+    if (this.answerResolve) {
+      this.answerResolve(answer)
+      this.answerResolve = null
+      this.answerReject = null
+    } else {
+      this.pendingAnswer = answer
+    }
+  }
 
   private async loadPeer(): Promise<PeerJsModule> {
     const mod = await import('peerjs')
@@ -294,7 +305,6 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     const cfg = readPeerJsConfig()
     const peer = new Peer(`rg-${code}`, cfg)
     this.peer = peer
-    await waitPeerOpen(peer, 12_000)
 
     peer.on('connection', (conn) => {
       this.conn = conn
@@ -304,12 +314,12 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
       conn.on('data', (data: unknown) => {
         const msg = data as { type?: string; answer?: string }
         if (msg.type === 'answer' && msg.answer) {
-          this.answerResolve?.(msg.answer)
-          this.answerResolve = null
-          this.answerReject = null
+          this.deliverAnswer(msg.answer)
         }
       })
     })
+
+    await waitPeerOpen(peer, 12_000)
 
     return { code, joinUrl: buildJoinUrl(code, meta.mode) }
   }
@@ -320,6 +330,11 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
   }
 
   async waitForAnswer(_code: string, timeoutMs = 120_000) {
+    if (this.pendingAnswer) {
+      const answer = this.pendingAnswer
+      this.pendingAnswer = null
+      return answer
+    }
     if (this.answerResolve) {
       throw new Error('Already waiting for answer')
     }
@@ -337,14 +352,14 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
   }
 
   async guestFetchOffer(code: string, timeoutMs = 45_000) {
+    const normalized = code.trim().toUpperCase()
     const Peer = await this.loadPeer()
     const cfg = readPeerJsConfig()
     const peer = new Peer(cfg)
     this.peer = peer
     await waitPeerOpen(peer, 12_000)
-    const conn = peer.connect(`rg-${code}`, { reliable: true })
+    const conn = peer.connect(`rg-${normalized}`, { reliable: true })
     this.conn = conn
-    await waitConnOpen(conn, 12_000)
 
     return new Promise<string>((resolve, reject) => {
       const timer = window.setTimeout(() => reject(new Error('PeerJS offer timeout')), timeoutMs)
@@ -355,7 +370,12 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
           resolve(msg.offer)
         }
       })
-      conn.send({ type: 'guest-ready' })
+      void waitConnOpen(conn, 12_000)
+        .then(() => conn.send({ type: 'guest-ready' }))
+        .catch(() => {
+          window.clearTimeout(timer)
+          reject(new Error('PeerJS guest connection failed'))
+        })
     })
   }
 
@@ -363,6 +383,7 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     this.answerReject?.(new Error('PeerJS closed'))
     this.answerResolve = null
     this.answerReject = null
+    this.pendingAnswer = null
     this.conn?.close()
     this.peer?.destroy()
     this.conn = null

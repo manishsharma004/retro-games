@@ -120,6 +120,9 @@ export function buildRetroarchConfig(settings: EmulatorSettings): Record<string,
     // an unused pad index instead so RetroArch's native joypad path stays idle.
     input_player1_joypad_index: 99,
     input_player2_joypad_index: 99,
+    // Ensure port 2 accepts Retropad binds (required for pressDown player: 2).
+    input_libretro_device_p1: 1,
+    input_libretro_device_p2: 1,
     // Keep RetroArch's default Z/X/arrow binds. useKeyboardControls claims
     // those keys (stopPropagation) and drives them via pressDown/pressUp,
     // which synthesizes the same default key codes.

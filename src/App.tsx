@@ -4,6 +4,7 @@ import { ControllerPanel } from './components/ControllerPanel'
 import { EmulatorScreen } from './components/EmulatorScreen'
 import { GamepadStatus } from './components/GamepadStatus'
 import { LatencyBadge } from './components/LatencyBadge'
+import { PlayHud } from './components/PlayHud'
 import { PeerLobby } from './components/PeerLobby'
 import { RomLoader } from './components/RomLoader'
 import { VirtualController } from './components/VirtualController'
@@ -12,6 +13,7 @@ import { useCoopSession } from './hooks/multiplayer/useCoopSession'
 import { useLocalHost } from './hooks/multiplayer/useLocalHost'
 import { useRemoteHost } from './hooks/multiplayer/useRemoteHost'
 import { useEmulator } from './hooks/useEmulator'
+import { useEmulatorFps } from './hooks/useEmulatorFps'
 import { useFullscreen } from './hooks/useFullscreen'
 import { useGamepadControls } from './hooks/useGamepadControls'
 import { useGamepads } from './hooks/useGamepads'
@@ -334,7 +336,8 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   const isLandscape = useLandscape()
   const padOverlay = settings.virtualControlsOverlay || isLandscape
   const effectivePadOverlay = padOverlay || isFullscreen
-  const iosMinimalFs = isFullscreen && (cssFallback || touchDevice)
+  const minimalFs = isFullscreen
+  const emuFps = useEmulatorFps(emu.canvasRef, emu.status === 'running')
 
   const isPlaying = emu.status === 'running' || emu.status === 'paused' || emu.status === 'loading'
   const showLanding = !isPlaying
@@ -420,16 +423,24 @@ export default function App({ initialCoopJoin = null }: AppProps) {
           .join(' ')}
         aria-hidden={!isPlaying}
       >
-        {isPlaying && iosMinimalFs ? (
-          <button
-            type="button"
-            className="fs-exit-btn"
-            onClick={() => void toggleFullscreen()}
-            aria-label="Exit fullscreen"
-            title="Exit fullscreen"
-          >
-            ✕
-          </button>
+        {isPlaying && minimalFs ? (
+          <>
+            <PlayHud
+              className="play-hud--corner"
+              fps={emuFps}
+              latencyProfile={peer.latencyProfile}
+              peerConnected={Boolean(peer.role && peer.connectionState === 'connected')}
+            />
+            <button
+              type="button"
+              className="fs-exit-btn"
+              onClick={() => void toggleFullscreen()}
+              aria-label="Exit fullscreen"
+              title="Exit fullscreen"
+            >
+              ✕
+            </button>
+          </>
         ) : isPlaying ? (
           <div className={`toolbar ${isFullscreen ? 'toolbar--overlay' : ''}`}>
             <div className="toolbar__left">
@@ -450,7 +461,9 @@ export default function App({ initialCoopJoin = null }: AppProps) {
                     detail={
                       sessionMode === 'remote' && isHost && peer.latencyProfile.streamFps < 60
                         ? `${peer.latencyProfile.streamFps} FPS`
-                        : null
+                        : emuFps !== null
+                          ? `${emuFps} FPS`
+                          : null
                     }
                   />
                 </>

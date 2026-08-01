@@ -74,6 +74,7 @@ export function PeerLobby({
   const [qrUrl, setQrUrl] = useState<string | null>(null)
   const [statusNote, setStatusNote] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const busyRef = useRef(false)
   const [scanning, setScanning] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [manualOpen, setManualOpen] = useState(false)
@@ -130,6 +131,8 @@ export function PeerLobby({
     (phase === 'error' && role === 'guest')
 
   async function withBusy(fn: () => void | Promise<void>) {
+    if (busyRef.current) return
+    busyRef.current = true
     setBusy(true)
     setStatusNote(null)
     try {
@@ -137,6 +140,7 @@ export function PeerLobby({
     } catch (err) {
       setStatusNote(err instanceof Error ? err.message : 'Something went wrong')
     } finally {
+      busyRef.current = false
       setBusy(false)
     }
   }

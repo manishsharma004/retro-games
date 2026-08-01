@@ -123,6 +123,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   const remoteReadyRef = useRef(false)
   const phaseRef = useRef<PeerPhase>('idle')
   const resyncCompressedRef = useRef(false)
+  const hostGenerationRef = useRef(0)
+  const hostOfferInFlightRef = useRef(false)
 
   const [phase, setPhase] = useState<PeerPhase>('idle')
   const [role, setRole] = useState<PeerRole | null>(null)
@@ -305,7 +307,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   useEffect(() => {
     return () => {
       connRef.current?.close()
-      signalingRef.current?.close()
+      signalingRef.current?.close({ rejectPending: true })
       connRef.current = null
       signalingRef.current = null
     }
@@ -320,6 +322,10 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
 
   const createHostOffer = useCallback(
     async (mode: SessionMode = modeRef.current) => {
+      if (hostOfferInFlightRef.current) return
+      hostOfferInFlightRef.current = true
+      const generation = ++hostGenerationRef.current
+
       setError(null)
       setLocalSignal('')
       setUseManualSignaling(false)
@@ -330,16 +336,18 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       setRole('host')
       setSeat(1)
 
-      const conn = createConnection()
-      const offer = await conn.createOffer()
-      setLocalSignal(offer)
-
-      signalingRef.current?.close()
-      const chain = new SignalingAdapterChain()
-      signalingRef.current = chain
-
       try {
+        const conn = createConnection()
+        const offer = await conn.createOffer()
+        setLocalSignal(offer)
+
+        signalingRef.current?.close()
+        const chain = new SignalingAdapterChain()
+        signalingRef.current = chain
+
         const room = await chain.hostRoom(offer, { mode })
+        if (generation !== hostGenerationRef.current) return
+
         setRoomCode(room.code)
         setJoinUrl(room.joinUrl)
         setSignalingPath(chain.lastAdapter)
@@ -348,19 +356,24 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         const answerPromise = chain.waitForAnswer(room.code)
         void answerPromise
           .then(async (answer) => {
+            if (generation !== hostGenerationRef.current) return
             updatePhase('connecting')
             await conn.acceptAnswer(answer)
           })
           .catch((err) => {
+            if (generation !== hostGenerationRef.current) return
             setError(err instanceof Error ? err.message : 'Waiting for guest answer failed')
             updatePhase('error')
           })
       } catch {
+        if (generation !== hostGenerationRef.current) return
         setUseManualSignaling(true)
         setSignalingPath('manual')
         setRoomCode(null)
         setJoinUrl(null)
         updatePhase('host-offer')
+      } finally {
+        hostOfferInFlightRef.current = false
       }
     },
     [createConnection, updatePhase],
@@ -530,7 +543,9 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   const getConnection = useCallback(() => connRef.current, [])
 
   const disconnect = useCallback(() => {
-    signalingRef.current?.close()
+    hostGenerationRef.current += 1
+    hostOfferInFlightRef.current = false
+    signalingRef.current?.close({ rejectPending: true })
     signalingRef.current = null
     connRef.current?.close()
     connRef.current = null

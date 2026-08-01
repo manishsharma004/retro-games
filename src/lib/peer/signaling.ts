@@ -14,7 +14,7 @@ export interface SignalingAdapter {
   guestPublishAnswer(code: string, answer: string): Promise<void>
   waitForAnswer(code: string, timeoutMs?: number): Promise<string>
   guestFetchOffer(code: string, timeoutMs?: number): Promise<string>
-  close(): void
+  close(opts?: { rejectPending?: boolean }): void
 }
 
 /** Free public PeerJS cloud broker — default signaling path, no API key required. */
@@ -190,7 +190,7 @@ export class BroadcastSignalingAdapter implements SignalingAdapter {
     return waitForRoomField(code, 'offer', timeoutMs)
   }
 
-  close() {
+  close(_opts?: { rejectPending?: boolean }) {
     for (const code of this.codes) {
       localStorage.removeItem(roomKey(code))
     }
@@ -264,7 +264,7 @@ export class FirebaseSignalingAdapter implements SignalingAdapter {
     throw new Error('Firebase offer timeout')
   }
 
-  close() {
+  close(_opts?: { rejectPending?: boolean }) {
     if (this.activeCode && this.enabled()) {
       void fetch(this.url(`rooms/${this.activeCode}`), { method: 'DELETE' })
     }
@@ -283,15 +283,49 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
   private answerResolve: ((answer: string) => void) | null = null
   private answerReject: ((err: Error) => void) | null = null
   private pendingAnswer: string | null = null
+  private answerTimer: number | null = null
+  private hostCode: string | null = null
+  private disconnecting = false
 
   private deliverAnswer(answer: string) {
     if (this.answerResolve) {
-      this.answerResolve(answer)
-      this.answerResolve = null
-      this.answerReject = null
+      const resolve = this.answerResolve
+      this.clearAnswerWait()
+      resolve(answer)
     } else {
       this.pendingAnswer = answer
     }
+  }
+
+  private clearAnswerWait() {
+    if (this.answerTimer !== null) {
+      window.clearTimeout(this.answerTimer)
+      this.answerTimer = null
+    }
+    this.answerResolve = null
+    this.answerReject = null
+  }
+
+  private attachPeerLifecycle(peer: PeerInstance) {
+    peer.on('disconnected', () => {
+      if (this.disconnecting || !this.peer) return
+      try {
+        peer.reconnect()
+      } catch {
+        // broker may already be reconnecting
+      }
+    })
+    peer.on('close', () => {
+      if (this.disconnecting) return
+      // Broker dropped the session — try once more before giving up.
+      if (this.hostCode && this.peer === peer) {
+        try {
+          peer.reconnect()
+        } catch {
+          // ignore
+        }
+      }
+    })
   }
 
   private async loadPeer(): Promise<PeerJsModule> {
@@ -305,6 +339,12 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     const cfg = readPeerJsConfig()
     const peer = new Peer(`rg-${code}`, cfg)
     this.peer = peer
+    this.hostCode = code
+
+    // Same-browser / offline fallback while PeerJS broker is flaky.
+    writeRoom(code, { offer, meta, answer: undefined })
+
+    this.attachPeerLifecycle(peer)
 
     peer.on('connection', (conn) => {
       this.conn = conn
@@ -314,6 +354,7 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
       conn.on('data', (data: unknown) => {
         const msg = data as { type?: string; answer?: string }
         if (msg.type === 'answer' && msg.answer) {
+          writeRoom(code, { answer: msg.answer })
           this.deliverAnswer(msg.answer)
         }
       })
@@ -324,12 +365,16 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     return { code, joinUrl: buildJoinUrl(code, meta.mode) }
   }
 
-  async guestPublishAnswer(_code: string, answer: string) {
+  async guestPublishAnswer(code: string, answer: string) {
+    writeRoom(code, { answer })
     if (!this.conn?.open) throw new Error('PeerJS guest connection not open')
     this.conn.send({ type: 'answer', answer })
   }
 
-  async waitForAnswer(_code: string, timeoutMs = 120_000) {
+  async waitForAnswer(code: string, timeoutMs = 120_000) {
+    const existing = readRoom(code)?.answer
+    if (existing) return existing
+
     if (this.pendingAnswer) {
       const answer = this.pendingAnswer
       this.pendingAnswer = null
@@ -341,10 +386,9 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     return new Promise<string>((resolve, reject) => {
       this.answerResolve = resolve
       this.answerReject = reject
-      window.setTimeout(() => {
+      this.answerTimer = window.setTimeout(() => {
         if (this.answerResolve === resolve) {
-          this.answerResolve = null
-          this.answerReject = null
+          this.clearAnswerWait()
           reject(new Error('PeerJS answer timeout'))
         }
       }, timeoutMs)
@@ -379,15 +423,19 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     })
   }
 
-  close() {
-    this.answerReject?.(new Error('PeerJS closed'))
-    this.answerResolve = null
-    this.answerReject = null
+  close(opts?: { rejectPending?: boolean }) {
+    this.disconnecting = true
+    if (opts?.rejectPending) {
+      this.answerReject?.(new Error('PeerJS closed'))
+    }
+    this.clearAnswerWait()
     this.pendingAnswer = null
     this.conn?.close()
     this.peer?.destroy()
     this.conn = null
     this.peer = null
+    this.hostCode = null
+    this.disconnecting = false
   }
 }
 
@@ -401,13 +449,15 @@ const ADAPTER_TIMEOUT_MS: Record<SignalingAdapterName, number> = {
 export class SignalingAdapterChain {
   private adapters: SignalingAdapter[] = []
   private active: SignalingAdapter | null = null
+  private broadcastAdapter: BroadcastSignalingAdapter
   lastAdapter: SignalingAdapterName = 'peerjs'
   lastError: string | null = null
 
   constructor() {
     // Free public servers first — no API keys required.
     this.adapters.push(new PeerJSSignalingAdapter())
-    this.adapters.push(new BroadcastSignalingAdapter())
+    this.broadcastAdapter = new BroadcastSignalingAdapter()
+    this.adapters.push(this.broadcastAdapter)
 
     const firebase = new FirebaseSignalingAdapter()
     if (import.meta.env.VITE_FIREBASE_DATABASE_URL && import.meta.env.VITE_FIREBASE_API_KEY) {
@@ -415,16 +465,32 @@ export class SignalingAdapterChain {
     }
   }
 
+  private async raceAdapter<T>(
+    adapter: SignalingAdapter,
+    run: () => Promise<T>,
+    timeoutMs: number,
+  ): Promise<T> {
+    let timer: number | null = null
+    try {
+      return await Promise.race([
+        run(),
+        new Promise<never>((_, reject) => {
+          timer = window.setTimeout(
+            () => reject(new Error(`${adapter.name} timeout`)),
+            timeoutMs,
+          )
+        }),
+      ])
+    } finally {
+      if (timer !== null) window.clearTimeout(timer)
+    }
+  }
+
   async hostRoom(offer: string, meta: SignalingRoomMeta) {
     for (const adapter of this.adapters) {
       const timeoutMs = ADAPTER_TIMEOUT_MS[adapter.name]
       try {
-        const result = await Promise.race([
-          adapter.hostRoom(offer, meta),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error(`${adapter.name} timeout`)), timeoutMs),
-          ),
-        ])
+        const result = await this.raceAdapter(adapter, () => adapter.hostRoom(offer, meta), timeoutMs)
         this.active = adapter
         this.lastAdapter = adapter.name
         this.lastError = null
@@ -476,21 +542,33 @@ export class SignalingAdapterChain {
   }
 
   async waitForAnswer(code: string) {
+    const waits: Promise<string>[] = []
+
     if (this.active) {
-      return this.active.waitForAnswer(code)
+      waits.push(this.active.waitForAnswer(code))
     }
-    for (const adapter of this.adapters) {
-      try {
-        return await adapter.waitForAnswer(code)
-      } catch {
-        adapter.close()
+
+    // PeerJS host also mirrors the offer to localStorage — listen there too.
+    if (this.active?.name === 'peerjs') {
+      waits.push(this.broadcastAdapter.waitForAnswer(code))
+    }
+
+    if (waits.length === 0) {
+      for (const adapter of this.adapters) {
+        try {
+          return await adapter.waitForAnswer(code)
+        } catch {
+          adapter.close()
+        }
       }
+      throw new Error('Answer timeout')
     }
-    throw new Error('Answer timeout')
+
+    return Promise.race(waits)
   }
 
-  close() {
-    this.active?.close()
+  close(opts?: { rejectPending?: boolean }) {
+    this.active?.close(opts)
     this.active = null
   }
 }

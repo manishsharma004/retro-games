@@ -1,9 +1,11 @@
 import type { SystemId } from '../cores'
 import type { EmulatorSettings } from '../settings'
 
-export type PeerSeat = 1 | 2
+export type PeerSeat = 1 | 2 | 3 | 4
 
 export type PeerRole = 'host' | 'guest'
+
+export type SessionMode = 'local' | 'remote' | 'coop'
 
 export interface PeerSyncSettings {
   swapAB: boolean
@@ -28,7 +30,7 @@ export function pickSyncSettings(settings: EmulatorSettings): PeerSyncSettings {
 }
 
 export type ControlMessage =
-  | { type: 'hello'; role: PeerRole; seat: PeerSeat }
+  | { type: 'hello'; role: PeerRole; seat: PeerSeat; mode: SessionMode; name?: string }
   | { type: 'ready' }
   | { type: 'go'; at: number }
   | {
@@ -44,7 +46,10 @@ export type ControlMessage =
   | { type: 'transfer-start'; id: number; kind: 'rom' | 'state'; size: number }
   | { type: 'transfer-end'; id: number; kind: 'rom' | 'state' }
   | { type: 'input'; seat: PeerSeat; button: string; down: boolean; t: number }
+  | { type: 'rumble'; seat: PeerSeat; pattern: number[] }
   | { type: 'resync-request' }
+  | { type: 'resync-start' }
+  | { type: 'resync-done' }
   | { type: 'ping'; t: number }
   | { type: 'pong'; t: number }
 

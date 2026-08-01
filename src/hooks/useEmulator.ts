@@ -62,6 +62,7 @@ export interface UseEmulatorResult {
   remotePressDown: (button: string, player: number) => void
   remotePressUp: (button: string, player: number) => void
   relaunchWithSettings: () => void
+  getNostalgist: () => Nostalgist | null
 }
 
 function pressKey(player: number, button: string): string {
@@ -468,6 +469,8 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     else if (active.file) launchFile(active.file)
   }, [launchDemo, launchFile])
 
+  const getNostalgist = useCallback(() => nostalgistRef.current, [])
+
   return {
     status,
     error,
@@ -492,5 +495,6 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     remotePressDown,
     remotePressUp,
     relaunchWithSettings,
+    getNostalgist,
   }
 }

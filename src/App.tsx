@@ -7,6 +7,9 @@ import { PeerLobby } from './components/PeerLobby'
 import { RomLoader } from './components/RomLoader'
 import { VirtualController } from './components/VirtualController'
 import { VirtualLayoutEditor } from './components/VirtualLayoutEditor'
+import { useCoopSession } from './hooks/multiplayer/useCoopSession'
+import { useLocalHost } from './hooks/multiplayer/useLocalHost'
+import { useRemoteHost } from './hooks/multiplayer/useRemoteHost'
 import { useEmulator } from './hooks/useEmulator'
 import { useFullscreen } from './hooks/useFullscreen'
 import { useGamepadControls } from './hooks/useGamepadControls'
@@ -15,30 +18,35 @@ import { useLandscape } from './hooks/useLandscape'
 import { useKeyboardControls } from './hooks/useKeyboardControls'
 import { usePeerSession } from './hooks/usePeerSession'
 import { usePreventGameTouchGestures } from './hooks/usePreventGameTouchGestures'
+import type { SessionMode } from './lib/peer/protocol'
 import {
   loadControllerBindings,
   saveControllerBindings,
   type ControllerBindings,
 } from './lib/gamepad'
-import { fetchLibrary, romUrl, type LibraryRom } from './lib/library'
+import { fetchLibrary, type LibraryRom } from './lib/library'
 import { loadSettings, saveSettings, type EmulatorSettings } from './lib/settings'
 import './styles/app.css'
-
-const RESYNC_INTERVAL_MS = 3500
 
 function prefersTouch(): boolean {
   return window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0
 }
 
-export default function App() {
+interface AppProps {
+  initialCoopJoin?: string | null
+}
+
+export default function App({ initialCoopJoin = null }: AppProps) {
   const [settings, setSettings] = useState<EmulatorSettings>(() => loadSettings())
   const [controllerBindings, setControllerBindings] = useState<ControllerBindings>(() =>
     loadControllerBindings(),
   )
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [peerOpen, setPeerOpen] = useState(false)
+  const [peerOpen, setPeerOpen] = useState(Boolean(initialCoopJoin))
   const [controllersOpen, setControllersOpen] = useState(false)
   const [layoutEditorOpen, setLayoutEditorOpen] = useState(false)
+  const [sessionMode, setSessionMode] = useState<SessionMode>(initialCoopJoin ? 'coop' : 'local')
+  const [hostOnScreenP2, setHostOnScreenP2] = useState(false)
   const [touchDevice] = useState(() => prefersTouch())
   const [library, setLibrary] = useState<LibraryRom[]>([])
   const autoLoadedRef = useRef(false)
@@ -54,16 +62,6 @@ export default function App() {
 
   const emu = useEmulator(settings)
   const { launchLibrary } = emu
-
-  const resyncRequestHandlerRef = useRef<() => void>(() => {})
-
-  const handleRemoteInput = useCallback(
-    (seat: 1 | 2, button: string, down: boolean) => {
-      if (down) emu.remotePressDown(button, seat)
-      else emu.remotePressUp(button, seat)
-    },
-    [emu],
-  )
 
   const handleBootstrap = useCallback(
     async (payload: {
@@ -113,50 +111,86 @@ export default function App() {
     emu.resume()
   }, [emu])
 
-  const handleResyncState = useCallback(
-    async (state: Uint8Array) => {
-      await emu.importStateBlob(
-        new Blob([
-          state.buffer.slice(state.byteOffset, state.byteOffset + state.byteLength) as ArrayBuffer,
-        ]),
-      )
-    },
-    [emu],
-  )
+  const coopRef = useRef<ReturnType<typeof useCoopSession> | null>(null)
+
+  const handleResyncState = useCallback(async (state: Uint8Array, compressed?: boolean) => {
+    await coopRef.current?.importResyncState(state, compressed)
+  }, [])
 
   const peer = usePeerSession({
     settings,
-    onRemoteInput: handleRemoteInput,
+    sessionMode,
+    onRemoteInput: (seat, button, down) => {
+      if (down) emu.remotePressDown(button, seat)
+      else emu.remotePressUp(button, seat)
+    },
     onBootstrap: handleBootstrap,
     onGo: handleGo,
     onResyncState: handleResyncState,
-    onResyncRequest: () => resyncRequestHandlerRef.current(),
+    onResyncRequest: () => coopRef.current?.onResyncRequest(),
     onLinked: () => {
-      // Host: auto-share the loaded ROM so the session doesn't sit in "linked".
+      if (sessionMode !== 'coop') return
       window.setTimeout(() => {
         if (peerRef.current.role !== 'host') return
         if (peerRef.current.phase !== 'linked') return
-        void shareGameWithPeerRef.current().catch(() => {
-          // Manual share CTA remains in the lobby if auto-share cannot run yet.
-        })
+        void coopRef.current?.shareGame().catch(() => {})
       }, 50)
+    },
+    onRumble: (seat, pattern) => {
+      if (seat === peerRef.current.seat) {
+        try {
+          navigator.vibrate?.(pattern)
+        } catch {
+          // ignore
+        }
+      }
     },
   })
 
   const peerRef = useRef(peer)
   peerRef.current = peer
 
-  const shareGameWithPeerRef = useRef<() => Promise<void>>(async () => {})
+  const isHost = peer.role === 'host'
+  const isGuest = peer.role === 'guest'
 
-  resyncRequestHandlerRef.current = () => {
-    void (async () => {
-      if (peerRef.current.role !== 'host') return
-      const blob = await emu.exportStateBlob()
-      if (!blob) return
-      const bytes = new Uint8Array(await blob.arrayBuffer())
-      await peerRef.current.sendResyncState(bytes)
-    })()
-  }
+  const coop = useCoopSession({
+    enabled: sessionMode === 'coop',
+    peer,
+    emu,
+    settings,
+    isHost,
+    onRawStateFallback: () => {},
+  })
+  coopRef.current = coop
+
+  useLocalHost({
+    enabled: sessionMode === 'local' && isHost,
+    peer,
+    emu,
+    isHost,
+    hostOnScreenP2,
+  })
+
+  useRemoteHost({
+    enabled: sessionMode === 'remote' && isHost,
+    peer,
+    emu,
+    isHost,
+    onVideoOnly: () => {},
+  })
+
+  useEffect(() => {
+    if (initialCoopJoin) {
+      void peer.joinWithRoomCode(initialCoopJoin, 'coop')
+    }
+  }, [initialCoopJoin, peer])
+
+  useEffect(() => {
+    if (isGuest) {
+      skipAutoLoadRef.current = true
+      autoLoadedRef.current = true
+    }
+  }, [isGuest])
 
   const localSeat = peer.seat ?? 1
   const peerPlaying = peer.phase === 'playing'
@@ -164,18 +198,20 @@ export default function App() {
 
   const onLocalPress = useCallback(
     (button: string) => {
-      emu.pressDown(button, localSeat)
+      const seat = hostOnScreenP2 && sessionMode === 'local' && isHost ? 2 : localSeat
+      emu.pressDown(button, seat)
       if (peerPlaying) peer.sendInput(button, true)
     },
-    [emu, localSeat, peer, peerPlaying],
+    [emu, localSeat, peer, peerPlaying, hostOnScreenP2, sessionMode, isHost],
   )
 
   const onLocalRelease = useCallback(
     (button: string) => {
-      emu.pressUp(button, localSeat)
+      const seat = hostOnScreenP2 && sessionMode === 'local' && isHost ? 2 : localSeat
+      emu.pressUp(button, seat)
       if (peerPlaying) peer.sendInput(button, false)
     },
-    [emu, localSeat, peer, peerPlaying],
+    [emu, localSeat, peer, peerPlaying, hostOnScreenP2, sessionMode, isHost],
   )
 
   const onPadPress = useCallback(
@@ -210,30 +246,10 @@ export default function App() {
   useGamepadControls({
     enabled: inputEnabled,
     bindings: controllerBindings,
-    peerSeat: peerActive ? localSeat : null,
+    peerSeat: peerActive && (localSeat === 1 || localSeat === 2) ? localSeat : null,
     onPress: onPadPress,
     onRelease: onPadRelease,
   })
-
-  useEffect(() => {
-    if (peer.role === 'guest') {
-      skipAutoLoadRef.current = true
-      autoLoadedRef.current = true
-    }
-  }, [peer.role])
-
-  useEffect(() => {
-    if (peer.phase !== 'playing' || peer.role !== 'host') return
-    const id = window.setInterval(() => {
-      void (async () => {
-        const blob = await emu.exportStateBlob()
-        if (!blob) return
-        const bytes = new Uint8Array(await blob.arrayBuffer())
-        await peerRef.current.sendResyncState(bytes)
-      })()
-    }, RESYNC_INTERVAL_MS)
-    return () => window.clearInterval(id)
-  }, [peer.phase, peer.role, emu])
 
   useEffect(() => {
     const timer = window.setTimeout(() => saveSettings(settings), 300)
@@ -261,13 +277,27 @@ export default function App() {
     }
   }, [launchLibrary])
 
+  useEffect(() => {
+    try {
+      const bc = new BroadcastChannel('retro-games-lobby')
+      bc.onmessage = (event) => {
+        if (event.data?.type === 'join-offer' && peer.phase === 'idle') {
+          setPeerOpen(true)
+          void peer.joinWithOffer(event.data.offer, event.data.mode ?? 'local')
+        }
+      }
+      return () => bc.close()
+    } catch {
+      return undefined
+    }
+  }, [peer])
+
   const showVirtual = useMemo(() => {
     if (settings.showVirtualController === 'auto') return touchDevice
     return settings.showVirtualController
   }, [settings.showVirtualController, touchDevice])
 
   const isLandscape = useLandscape()
-  // Landscape: float semi-transparent controls over the game (no separate pad row).
   const padOverlay = settings.virtualControlsOverlay || isLandscape
   const effectivePadOverlay = padOverlay || isFullscreen
   const iosMinimalFs = isFullscreen && (cssFallback || touchDevice)
@@ -284,7 +314,7 @@ export default function App() {
   }, [isPlaying, isFullscreen, exitFullscreen])
 
   const canHostShareGame = Boolean(
-    peer.role === 'host' &&
+    isHost &&
       peer.connectionState === 'connected' &&
       emu.game &&
       (emu.status === 'running' || emu.status === 'paused') &&
@@ -293,30 +323,8 @@ export default function App() {
 
   const emuReadyForPeer = emu.status === 'running' || emu.status === 'paused'
 
-  const shareGameWithPeer = useCallback(async () => {
-    if (peer.role !== 'host' || !emu.game) throw new Error('Host must have a game loaded')
-    emu.pause()
-    let rom = await emu.getRomBytes()
-    if (!rom && emu.game.source === 'demo') {
-      const res = await fetch(romUrl('flappybird.nes'))
-      if (!res.ok) throw new Error('Could not fetch demo ROM for peer share')
-      rom = new Uint8Array(await res.arrayBuffer())
-    }
-    if (!rom) throw new Error('ROM bytes unavailable — load a local or library ROM')
-    const stateBlob = await emu.exportStateBlob()
-    if (!stateBlob) throw new Error('Could not capture save state')
-    const state = new Uint8Array(await stateBlob.arrayBuffer())
-    await peer.sendBootstrap({
-      name: emu.game.name,
-      system: emu.game.system,
-      core: emu.game.core,
-      rom,
-      state,
-      libraryFile: emu.game.libraryFile,
-    })
-  }, [emu, peer])
-
-  shareGameWithPeerRef.current = shareGameWithPeer
+  const showHostP2Pad =
+    sessionMode === 'local' && isHost && hostOnScreenP2 && peer.connectionState === 'connected'
 
   return (
     <div className={`app ${isPlaying ? 'app--playing' : 'app--landing'}`}>
@@ -327,8 +335,8 @@ export default function App() {
           <p className="hero__brand">Retro Games</p>
           <h1 className="hero__tagline">Play NES &amp; SNES ROMs in your browser</h1>
           <p className="hero__sub">
-            Local files only. Controllers welcome — desktop, mobile, or on-screen. Link two devices
-            for 2-player over WebRTC.
+            Local files only. Link devices for multiplayer — phones as controllers, remote stream,
+            or low-bandwidth co-op sync.
           </p>
           <RomLoader
             disabled={emu.status === 'loading'}
@@ -337,7 +345,7 @@ export default function App() {
           />
           <div className="hero__peer">
             <button type="button" className="btn btn--primary" onClick={() => setPeerOpen(true)}>
-              2 Player
+              Play with Friends
             </button>
             <button type="button" className="btn btn--ghost" onClick={() => setControllersOpen(true)}>
               Controllers
@@ -398,8 +406,8 @@ export default function App() {
                 </span>
               )}
               {peer.role && (
-                <span className="toolbar__peer" title="2-player session">
-                  2P · P{peer.seat} · {peer.phase}
+                <span className="toolbar__peer" title="Multiplayer session">
+                  {sessionMode} · P{peer.seat} · {peer.phase}
                 </span>
               )}
             </div>
@@ -495,19 +503,40 @@ export default function App() {
           padOverlay={effectivePadOverlay}
         >
           {emu.game && isPlaying && (
-            <VirtualController
-              system={emu.game.system}
-              onPress={onLocalPress}
-              onRelease={onLocalRelease}
-              visible={showVirtual && emu.status !== 'loading' && !layoutEditorOpen}
-              dpadMode={settings.virtualDpadMode}
-              overlay={effectivePadOverlay}
-              size={settings.virtualControlsSize}
-              // Portrait: enlarge thumbs so controls fill the docked band.
-              scaleBoost={isLandscape ? 1 : 1.4}
-              opacity={settings.virtualControlsOpacity}
-              layout={settings.virtualControlsLayout}
-            />
+            <>
+              <VirtualController
+                system={emu.game.system}
+                onPress={onLocalPress}
+                onRelease={onLocalRelease}
+                visible={showVirtual && emu.status !== 'loading' && !layoutEditorOpen && !showHostP2Pad}
+                dpadMode={settings.virtualDpadMode}
+                overlay={effectivePadOverlay}
+                size={settings.virtualControlsSize}
+                scaleBoost={isLandscape ? 1 : 1.4}
+                opacity={settings.virtualControlsOpacity}
+                layout={settings.virtualControlsLayout}
+              />
+              {showHostP2Pad && (
+                <VirtualController
+                  system={emu.game.system}
+                  onPress={(b) => {
+                    emu.pressDown(b, 2)
+                    if (peerPlaying) peer.sendInput(b, true)
+                  }}
+                  onRelease={(b) => {
+                    emu.pressUp(b, 2)
+                    if (peerPlaying) peer.sendInput(b, false)
+                  }}
+                  visible
+                  dpadMode={settings.virtualDpadMode}
+                  overlay
+                  size={settings.virtualControlsSize}
+                  scaleBoost={1}
+                  opacity={0.75}
+                  layout={settings.virtualControlsLayout}
+                />
+              )}
+            </>
           )}
         </EmulatorScreen>
 
@@ -574,7 +603,7 @@ export default function App() {
         pads={pads}
         bindings={controllerBindings}
         onChange={setControllerBindings}
-        peerSeat={peerActive ? localSeat : null}
+        peerSeat={peerActive && (localSeat === 1 || localSeat === 2) ? localSeat : null}
       />
 
       <PeerLobby
@@ -582,25 +611,29 @@ export default function App() {
         onClose={() => setPeerOpen(false)}
         phase={peer.phase}
         role={peer.role}
-        seat={peer.seat}
+        seat={peer.seat && peer.seat <= 2 ? (peer.seat as 1 | 2) : peer.seat}
+        sessionMode={sessionMode}
+        onSessionModeChange={setSessionMode}
         connectionState={peer.connectionState}
         localSignal={peer.localSignal}
+        roomCode={peer.roomCode}
+        joinUrl={peer.joinUrl}
+        signalingLabel={peer.signalingLabel}
+        useManualSignaling={peer.useManualSignaling}
         transfer={peer.transfer}
         error={peer.error}
         remoteReady={peer.remoteReady}
         canHostShareGame={canHostShareGame}
         emuReady={emuReadyForPeer}
-        onCreateHost={() => peer.createHostOffer()}
+        hostOnScreenP2={hostOnScreenP2}
+        onHostOnScreenP2Change={setHostOnScreenP2}
+        onCreateHost={() => peer.createHostOffer(sessionMode)}
         onAcceptAnswer={(answer) => peer.acceptGuestAnswer(answer)}
-        onJoinOffer={(offer) => peer.joinWithOffer(offer)}
-        onShareGame={() => shareGameWithPeer()}
+        onJoinOffer={(offer) => peer.joinWithOffer(offer, sessionMode)}
+        onShareGame={() => coop.shareGame()}
         onReady={() => peer.sendReady()}
         onGo={() => peer.sendGo()}
-        onResync={async () => {
-          const blob = await emu.exportStateBlob()
-          if (!blob) throw new Error('No state to push')
-          await peer.sendResyncState(new Uint8Array(await blob.arrayBuffer()))
-        }}
+        onResync={() => coop.pushResync()}
         onRequestResync={() => peer.requestResync()}
         onDisconnect={() => peer.disconnect()}
         onOpenControllers={() => {
@@ -618,7 +651,7 @@ export default function App() {
             Controllers
           </button>
           <button type="button" className="btn btn--text" onClick={() => setPeerOpen(true)}>
-            2 Player
+            Play with Friends
           </button>
           <span>Powered by Nostalgist · ROMs are not distributed</span>
         </footer>

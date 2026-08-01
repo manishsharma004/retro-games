@@ -6,7 +6,13 @@ import {
   type PeerRole,
   type PeerSeat,
   type PeerSyncSettings,
+  type SessionMode,
 } from '../lib/peer'
+import {
+  SignalingAdapterChain,
+  formatSignalingPath,
+  type SignalingAdapterName,
+} from '../lib/peer/signaling'
 import type { SystemId } from '../lib/cores'
 import type { EmulatorSettings } from '../lib/settings'
 
@@ -39,28 +45,40 @@ export interface PeerBootstrapPayload {
 
 interface UsePeerSessionOptions {
   settings: EmulatorSettings
+  sessionMode?: SessionMode
   onRemoteInput?: (seat: PeerSeat, button: string, down: boolean) => void
   onBootstrap?: (payload: PeerBootstrapPayload) => void | Promise<void>
   onGo?: () => void
-  onResyncState?: (state: Uint8Array) => void | Promise<void>
+  onResyncState?: (state: Uint8Array, compressed?: boolean) => void | Promise<void>
   onResyncRequest?: () => void
   onPeerError?: (message: string) => void
-  /** Fired once the DataChannel is open (WebRTC link ready). */
   onLinked?: () => void
+  onRemoteStream?: (stream: MediaStream) => void
+  onHello?: (mode: SessionMode, seat: PeerSeat) => void
+  onRumble?: (seat: PeerSeat, pattern: number[]) => void
+  onLatency?: (ms: number) => void
 }
 
 export interface UsePeerSessionResult {
   phase: PeerPhase
   role: PeerRole | null
   seat: PeerSeat | null
+  sessionMode: SessionMode
   connectionState: PeerConnectionState
   localSignal: string
+  roomCode: string | null
+  joinUrl: string | null
+  signalingPath: SignalingAdapterName
+  signalingLabel: string
+  useManualSignaling: boolean
+  remoteStream: MediaStream | null
   transfer: PeerTransferStatus
   error: string | null
   remoteReady: boolean
-  createHostOffer: () => Promise<void>
+  createHostOffer: (mode?: SessionMode) => Promise<void>
   acceptGuestAnswer: (answer: string) => Promise<void>
-  joinWithOffer: (offer: string) => Promise<void>
+  joinWithOffer: (offer: string, mode?: SessionMode) => Promise<void>
+  joinWithRoomCode: (code: string, mode: SessionMode) => Promise<void>
   sendBootstrap: (payload: {
     name: string
     system: SystemId
@@ -72,8 +90,11 @@ export interface UsePeerSessionResult {
   sendReady: () => void
   sendGo: () => void
   sendInput: (button: string, down: boolean) => void
-  sendResyncState: (state: Uint8Array) => Promise<void>
+  sendPing: (t: number) => void
+  sendResyncState: (state: Uint8Array, compressed?: boolean) => Promise<void>
   requestResync: () => void
+  attachMediaStream: (stream: MediaStream) => Promise<void>
+  getConnection: () => PeerConnection | null
   disconnect: () => void
 }
 
@@ -82,8 +103,10 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   optionsRef.current = options
 
   const connRef = useRef<PeerConnection | null>(null)
+  const signalingRef = useRef<SignalingAdapterChain | null>(null)
   const roleRef = useRef<PeerRole | null>(null)
   const seatRef = useRef<PeerSeat | null>(null)
+  const modeRef = useRef<SessionMode>(options.sessionMode ?? 'local')
   const bootstrapDoneRef = useRef(false)
   const bootstrapMetaRef = useRef<{
     name: string
@@ -98,12 +121,19 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   const stateBufRef = useRef<Uint8Array | null>(null)
   const remoteReadyRef = useRef(false)
   const phaseRef = useRef<PeerPhase>('idle')
+  const resyncCompressedRef = useRef(false)
 
   const [phase, setPhase] = useState<PeerPhase>('idle')
   const [role, setRole] = useState<PeerRole | null>(null)
   const [seat, setSeat] = useState<PeerSeat | null>(null)
+  const [sessionMode, setSessionMode] = useState<SessionMode>(options.sessionMode ?? 'local')
   const [connectionState, setConnectionState] = useState<PeerConnectionState>('idle')
   const [localSignal, setLocalSignal] = useState('')
+  const [roomCode, setRoomCode] = useState<string | null>(null)
+  const [joinUrl, setJoinUrl] = useState<string | null>(null)
+  const [signalingPath, setSignalingPath] = useState<SignalingAdapterName>('manual')
+  const [useManualSignaling, setUseManualSignaling] = useState(false)
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
   const [transfer, setTransfer] = useState<PeerTransferStatus>({
     kind: null,
     received: 0,
@@ -117,6 +147,18 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     setPhase(next)
   }, [])
 
+  const sendHello = useCallback((conn: PeerConnection) => {
+    const r = roleRef.current
+    const s = seatRef.current
+    const m = modeRef.current
+    if (!r || !s) return
+    try {
+      conn.sendControl({ type: 'hello', role: r, seat: s, mode: m })
+    } catch {
+      // ignore
+    }
+  }, [])
+
   const createConnection = useCallback(() => {
     connRef.current?.close()
     bootstrapDoneRef.current = false
@@ -125,6 +167,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     bootstrapMetaRef.current = null
     remoteReadyRef.current = false
     setRemoteReady(false)
+    setRemoteStream(null)
 
     const conn = new PeerConnection({
       onState: (state) => {
@@ -139,13 +182,11 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
             updatePhase('linked')
           }
           window.setTimeout(() => {
-            const r = roleRef.current
-            const s = seatRef.current
-            if (r && s && conn.connected) {
-              try {
-                conn.sendControl({ type: 'hello', role: r, seat: s })
-              } catch {
-                // ignore
+            if (conn.connected) {
+              sendHello(conn)
+              if (modeRef.current === 'local' || modeRef.current === 'remote') {
+                updatePhase('playing')
+                optionsRef.current.onGo?.()
               }
             }
             optionsRef.current.onLinked?.()
@@ -175,8 +216,16 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         setError(err.message)
         optionsRef.current.onPeerError?.(err.message)
       },
+      onRemoteStream: (stream) => {
+        setRemoteStream(stream)
+        optionsRef.current.onRemoteStream?.(stream)
+      },
       onControl: (msg) => {
-        if (msg.type === 'bootstrap') {
+        if (msg.type === 'hello') {
+          modeRef.current = msg.mode
+          setSessionMode(msg.mode)
+          optionsRef.current.onHello?.(msg.mode, msg.seat)
+        } else if (msg.type === 'bootstrap') {
           bootstrapDoneRef.current = false
           romBufRef.current = null
           stateBufRef.current = null
@@ -192,6 +241,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           updatePhase('transferring')
         } else if (msg.type === 'input') {
           optionsRef.current.onRemoteInput?.(msg.seat, msg.button, msg.down)
+        } else if (msg.type === 'rumble') {
+          optionsRef.current.onRumble?.(msg.seat, msg.pattern)
         } else if (msg.type === 'ready') {
           remoteReadyRef.current = true
           setRemoteReady(true)
@@ -206,6 +257,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           } catch {
             // ignore
           }
+        } else if (msg.type === 'pong') {
+          optionsRef.current.onLatency?.(Date.now() - msg.t)
         }
       },
       onTransferProgress: ({ kind, received, total }) => {
@@ -214,7 +267,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       },
       onTransferComplete: ({ kind, data }) => {
         if (bootstrapDoneRef.current && kind === 'state') {
-          void optionsRef.current.onResyncState?.(data)
+          void optionsRef.current.onResyncState?.(data, resyncCompressedRef.current)
+          resyncCompressedRef.current = false
           return
         }
         if (kind === 'rom') romBufRef.current = data
@@ -245,27 +299,65 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     })
     connRef.current = conn
     return conn
-  }, [updatePhase])
+  }, [sendHello, updatePhase])
 
   useEffect(() => {
     return () => {
       connRef.current?.close()
+      signalingRef.current?.close()
       connRef.current = null
+      signalingRef.current = null
     }
   }, [])
 
-  const createHostOffer = useCallback(async () => {
-    setError(null)
-    setLocalSignal('')
-    roleRef.current = 'host'
-    seatRef.current = 1
-    setRole('host')
-    setSeat(1)
-    const conn = createConnection()
-    const offer = await conn.createOffer()
-    setLocalSignal(offer)
-    updatePhase('host-offer')
-  }, [createConnection, updatePhase])
+  useEffect(() => {
+    if (options.sessionMode) {
+      modeRef.current = options.sessionMode
+      setSessionMode(options.sessionMode)
+    }
+  }, [options.sessionMode])
+
+  const createHostOffer = useCallback(
+    async (mode: SessionMode = modeRef.current) => {
+      setError(null)
+      setLocalSignal('')
+      setUseManualSignaling(false)
+      modeRef.current = mode
+      setSessionMode(mode)
+      roleRef.current = 'host'
+      seatRef.current = 1
+      setRole('host')
+      setSeat(1)
+
+      const conn = createConnection()
+      const offer = await conn.createOffer()
+      setLocalSignal(offer)
+
+      signalingRef.current?.close()
+      const chain = new SignalingAdapterChain()
+      signalingRef.current = chain
+
+      try {
+        const room = await chain.hostRoom(offer, { mode })
+        setRoomCode(room.code)
+        setJoinUrl(room.joinUrl)
+        setSignalingPath(chain.lastAdapter)
+        updatePhase('host-offer')
+
+        void chain.waitForAnswer(room.code).then(async (answer) => {
+          updatePhase('connecting')
+          await conn.acceptAnswer(answer)
+        })
+      } catch {
+        setUseManualSignaling(true)
+        setSignalingPath('manual')
+        setRoomCode(null)
+        setJoinUrl(null)
+        updatePhase('host-offer')
+      }
+    },
+    [createConnection, updatePhase],
+  )
 
   const acceptGuestAnswer = useCallback(
     async (answer: string) => {
@@ -279,9 +371,11 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   )
 
   const joinWithOffer = useCallback(
-    async (offer: string) => {
+    async (offer: string, mode: SessionMode = modeRef.current) => {
       setError(null)
       setLocalSignal('')
+      modeRef.current = mode
+      setSessionMode(mode)
       roleRef.current = 'guest'
       seatRef.current = 2
       setRole('guest')
@@ -290,6 +384,39 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       const answer = await conn.createAnswerFromOffer(offer)
       setLocalSignal(answer)
       updatePhase('guest-answer')
+    },
+    [createConnection, updatePhase],
+  )
+
+  const joinWithRoomCode = useCallback(
+    async (code: string, mode: SessionMode) => {
+      setError(null)
+      setRoomCode(code)
+      modeRef.current = mode
+      setSessionMode(mode)
+      roleRef.current = 'guest'
+      seatRef.current = 2
+      setRole('guest')
+      setSeat(2)
+
+      signalingRef.current?.close()
+      const chain = new SignalingAdapterChain()
+      signalingRef.current = chain
+
+      try {
+        const offer = await chain.guestFetchOffer(code)
+        setSignalingPath(chain.lastAdapter)
+        const conn = createConnection()
+        const answer = await conn.createAnswerFromOffer(offer)
+        setLocalSignal(answer)
+        await chain.guestPublishAnswer(code, answer)
+        updatePhase('guest-answer')
+      } catch {
+        setUseManualSignaling(true)
+        setSignalingPath('manual')
+        setError('Could not join room — paste host offer manually')
+        updatePhase('idle')
+      }
     },
     [createConnection, updatePhase],
   )
@@ -326,9 +453,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   )
 
   const sendReady = useCallback(() => {
-    const conn = connRef.current
-    if (!conn?.connected) return
-    conn.sendControl({ type: 'ready' })
+    connRef.current?.sendControl({ type: 'ready' })
   }, [])
 
   const sendGo = useCallback(() => {
@@ -343,7 +468,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     const conn = connRef.current
     const s = seatRef.current
     if (!conn?.connected || !s) return
-    if (phaseRef.current !== 'playing') return
+    if (phaseRef.current !== 'playing' && phaseRef.current !== 'linked') return
     try {
       conn.sendControl({ type: 'input', seat: s, button, down, t: Date.now() })
     } catch {
@@ -351,19 +476,36 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     }
   }, [])
 
-  const sendResyncState = useCallback(async (state: Uint8Array) => {
+  const sendPing = useCallback((t: number) => {
+    try {
+      connRef.current?.sendControl({ type: 'ping', t })
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  const sendResyncState = useCallback(async (state: Uint8Array, compressed = false) => {
     const conn = connRef.current
     if (!conn?.connected) return
+    resyncCompressedRef.current = compressed
     await conn.sendBlob('state', state)
   }, [])
 
   const requestResync = useCallback(() => {
-    const conn = connRef.current
-    if (!conn?.connected) return
-    conn.sendControl({ type: 'resync-request' })
+    connRef.current?.sendControl({ type: 'resync-request' })
   }, [])
 
+  const attachMediaStream = useCallback(async (stream: MediaStream) => {
+    const conn = connRef.current
+    if (!conn) throw new Error('No connection')
+    conn.addMediaStream(stream)
+  }, [])
+
+  const getConnection = useCallback(() => connRef.current, [])
+
   const disconnect = useCallback(() => {
+    signalingRef.current?.close()
+    signalingRef.current = null
     connRef.current?.close()
     connRef.current = null
     roleRef.current = null
@@ -372,6 +514,10 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     setRole(null)
     setSeat(null)
     setLocalSignal('')
+    setRoomCode(null)
+    setJoinUrl(null)
+    setRemoteStream(null)
+    setUseManualSignaling(false)
     updatePhase('idle')
     setError(null)
     setTransfer({ kind: null, received: 0, total: 0 })
@@ -383,20 +529,31 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     phase,
     role,
     seat,
+    sessionMode,
     connectionState,
     localSignal,
+    roomCode,
+    joinUrl,
+    signalingPath,
+    signalingLabel: formatSignalingPath(signalingPath),
+    useManualSignaling,
+    remoteStream,
     transfer,
     error,
     remoteReady,
     createHostOffer,
     acceptGuestAnswer,
     joinWithOffer,
+    joinWithRoomCode,
     sendBootstrap,
     sendReady,
     sendGo,
     sendInput,
+    sendPing,
     sendResyncState,
     requestResync,
+    attachMediaStream,
+    getConnection,
     disconnect,
   }
 }

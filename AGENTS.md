@@ -32,3 +32,21 @@ suite.
 - Emscripten writes a fixed pixel size onto the `<canvas>` at launch; CSS in `src/styles/app.css` uses `width/height: 100% !important` + `object-fit: contain` so it still scales to fill the stage (important for fullscreen).
 - Simultaneous opposing D-pad inputs (Up+Down / Left+Right) require the core options `fceumm_up_down_allowed` / `snes9x_up_down_allowed`; these are enabled by default and toggleable in Advanced settings (require "Apply & relaunch").
 - `pressDown`/`pressUp` are ref-counted so keyboard and on-screen controls can hold the same button without one release canceling the other.
+
+### Multiplayer (WebRTC tri-state)
+
+Three session modes share one peer stack under `src/lib/peer/` and `src/hooks/multiplayer/`:
+
+| Mode | Guest runs WASM | Use case |
+|------|-----------------|----------|
+| `local` | No (controller page) | Couch co-op — phones as pads |
+| `remote` | No (video stream) | Remote fast-action — host streams canvas |
+| `coop` | Yes (dual emulator) | Turn-based / metered — low-bandwidth state sync |
+
+**Signaling fallback chain:** Firebase (if `VITE_FIREBASE_*` env) → PeerJS cloud → BroadcastChannel/localStorage → manual SDP paste (`RG1.` compress).
+
+**ICE fallback:** Google/Mozilla STUN → optional TURN (`VITE_TURN_URL`, `VITE_TURN_USERNAME`, `VITE_TURN_CREDENTIAL`).
+
+**Join URL:** `?join=1&room=CODE&mode=local|remote|coop` (see `buildJoinUrl` in `src/lib/peer/joinUrl.ts`). Co-op guests can use `?coop=CODE` on the main app.
+
+**Co-op resync:** `fflate` compression with raw-blob fallback; pause-on-import via `resync-start`/`resync-done` when supported.

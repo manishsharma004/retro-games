@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
-import { copySignalString, shareSignalString } from '../lib/peer'
+import { copySignalString } from '../lib/peer'
+import type { SessionMode } from '../lib/peer/protocol'
 import type { PeerPhase, PeerTransferStatus } from '../hooks/usePeerSession'
 import type { PeerConnectionState, PeerRole, PeerSeat } from '../lib/peer'
 
@@ -10,13 +11,21 @@ interface PeerLobbyProps {
   phase: PeerPhase
   role: PeerRole | null
   seat: PeerSeat | null
+  sessionMode: SessionMode
+  onSessionModeChange: (mode: SessionMode) => void
   connectionState: PeerConnectionState
   localSignal: string
+  roomCode: string | null
+  joinUrl: string | null
+  signalingLabel: string
+  useManualSignaling: boolean
   transfer: PeerTransferStatus
   error: string | null
   remoteReady: boolean
   canHostShareGame: boolean
   emuReady: boolean
+  hostOnScreenP2: boolean
+  onHostOnScreenP2Change: (on: boolean) => void
   onCreateHost: () => void | Promise<void>
   onAcceptAnswer: (answer: string) => void | Promise<void>
   onJoinOffer: (offer: string) => void | Promise<void>
@@ -29,21 +38,27 @@ interface PeerLobbyProps {
   onOpenControllers?: () => void
 }
 
-type ScanKind = 'offer' | 'answer'
-
 export function PeerLobby({
   open,
   onClose,
   phase,
   role,
   seat,
+  sessionMode,
+  onSessionModeChange,
   connectionState,
   localSignal,
+  roomCode,
+  joinUrl,
+  signalingLabel,
+  useManualSignaling,
   transfer,
   error,
   remoteReady,
   canHostShareGame,
   emuReady,
+  hostOnScreenP2,
+  onHostOnScreenP2Change,
   onCreateHost,
   onAcceptAnswer,
   onJoinOffer,
@@ -60,17 +75,20 @@ export function PeerLobby({
   const [statusNote, setStatusNote] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [scanning, setScanning] = useState(false)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [manualOpen, setManualOpen] = useState(false)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const scanStreamRef = useRef<MediaStream | null>(null)
-  const scanKindRef = useRef<ScanKind>('offer')
+
+  const qrSource = joinUrl || localSignal
 
   useEffect(() => {
-    if (!localSignal) {
+    if (!qrSource) {
       setQrUrl(null)
       return
     }
     let cancelled = false
-    void QRCode.toDataURL(localSignal, {
+    void QRCode.toDataURL(qrSource, {
       errorCorrectionLevel: 'M',
       margin: 1,
       width: 280,
@@ -81,12 +99,19 @@ export function PeerLobby({
     return () => {
       cancelled = true
     }
-  }, [localSignal])
+  }, [qrSource])
 
   useEffect(() => {
     if (!open) stopScan()
     return () => stopScan()
   }, [open])
+
+  useEffect(() => {
+    if (useManualSignaling) {
+      setManualOpen(true)
+      setAdvancedOpen(true)
+    }
+  }, [useManualSignaling])
 
   if (!open) return null
 
@@ -95,6 +120,10 @@ export function PeerLobby({
 
   const transferPct =
     transfer.total > 0 ? Math.min(100, Math.round((transfer.received / transfer.total) * 100)) : 0
+
+  const showCoopFlow = sessionMode === 'coop'
+  const showManualExchange =
+    manualOpen || useManualSignaling || phase === 'host-offer' || phase === 'guest-answer'
 
   async function withBusy(fn: () => void | Promise<void>) {
     setBusy(true)
@@ -108,18 +137,20 @@ export function PeerLobby({
     }
   }
 
-  async function handleCopy() {
-    if (!localSignal) return
-    const ok = await copySignalString(localSignal)
-    setStatusNote(ok ? 'Copied — paste into a messaging app or the other device' : 'Copy failed')
+  async function handleCopyJoinUrl() {
+    if (!joinUrl) return
+    try {
+      await navigator.clipboard.writeText(joinUrl)
+      setStatusNote('Join link copied')
+    } catch {
+      setStatusNote('Copy failed')
+    }
   }
 
-  async function handleShare() {
-    if (!localSignal || !signalKind) return
-    const result = await shareSignalString(localSignal, signalKind)
-    if (result === 'shared') setStatusNote('Opened share sheet — send via any messaging app')
-    else if (result === 'copied') setStatusNote('Share unavailable — copied to clipboard instead')
-    else setStatusNote('Share unavailable — select and copy the text below')
+  async function handleCopySignal() {
+    if (!localSignal) return
+    const ok = await copySignalString(localSignal)
+    setStatusNote(ok ? 'SDP copied' : 'Copy failed')
   }
 
   function stopScan() {
@@ -129,10 +160,7 @@ export function PeerLobby({
     if (videoRef.current) videoRef.current.srcObject = null
   }
 
-  async function startScan(kind: ScanKind) {
-    scanKindRef.current = kind
-    setStatusNote(null)
-    // Prefer BarcodeDetector when available.
+  async function startScan() {
     const Detector = (
       window as unknown as {
         BarcodeDetector?: new (opts: { formats: string[] }) => {
@@ -141,12 +169,8 @@ export function PeerLobby({
       }
     ).BarcodeDetector
 
-    if (!Detector) {
-      setStatusNote('Camera QR scan not supported here — paste the string instead')
-      return
-    }
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setStatusNote('Camera not available — paste the string instead')
+    if (!Detector || !navigator.mediaDevices?.getUserMedia) {
+      setStatusNote('Camera QR scan not supported — paste instead')
       return
     }
 
@@ -172,7 +196,9 @@ export function PeerLobby({
           if (value) {
             stopScan()
             setPasteValue(value)
-            setStatusNote('QR captured — tap Apply')
+            if (phase === 'host-offer') await onAcceptAnswer(value)
+            else if (phase === 'idle') await onJoinOffer(value)
+            setStatusNote('QR applied')
             return
           }
         } catch {
@@ -183,92 +209,150 @@ export function PeerLobby({
       requestAnimationFrame(() => void tick())
     } catch {
       stopScan()
-      setStatusNote('Camera permission denied — paste the string instead')
+      setStatusNote('Camera permission denied')
     }
   }
 
   return (
-    <div className="peer-lobby" role="dialog" aria-modal="true" aria-label="2 player session">
+    <div className="peer-lobby" role="dialog" aria-modal="true" aria-label="Play with friends">
       <div className="peer-lobby__panel">
         <header className="peer-lobby__header">
-          <h2>2 Player</h2>
+          <h2>Play with Friends</h2>
           <button type="button" className="btn btn--ghost" onClick={onClose}>
             Close
           </button>
         </header>
 
-        <p className="peer-lobby__lead">
-          Connect over WebRTC. Exchange a compressed offer/answer with a QR code, copy/paste, or any
-          messaging app (iMessage, WhatsApp, Slack, etc.). Play stays on the peer DataChannel.
-        </p>
-
         {phase === 'idle' && (
-          <div className="peer-lobby__actions">
+          <>
+            <div className="peer-lobby__modes" role="radiogroup" aria-label="Session mode">
+              <label className="peer-lobby__mode">
+                <input
+                  type="radio"
+                  name="session-mode"
+                  checked={sessionMode === 'local'}
+                  onChange={() => onSessionModeChange('local')}
+                />
+                <span>Local co-op (phones as controllers)</span>
+              </label>
+              <label className="peer-lobby__mode">
+                <input
+                  type="radio"
+                  name="session-mode"
+                  checked={sessionMode === 'remote'}
+                  onChange={() => onSessionModeChange('remote')}
+                />
+                <span>Remote stream (share video/audio)</span>
+              </label>
+            </div>
+
             <button
               type="button"
-              className="btn btn--primary"
-              disabled={busy}
-              onClick={() => void withBusy(onCreateHost)}
+              className="btn btn--ghost peer-lobby__advanced"
+              onClick={() => setAdvancedOpen((v) => !v)}
             >
-              Host session
+              Advanced options {advancedOpen ? '▲' : '▼'}
             </button>
-            <button
-              type="button"
-              className="btn btn--ghost"
-              disabled={busy}
-              onClick={() => setStatusNote('Paste or scan a host offer below, then Join')}
-            >
-              Join session
+
+            {advancedOpen && (
+              <div className="peer-lobby__modes">
+                <label className="peer-lobby__mode">
+                  <input
+                    type="radio"
+                    name="session-mode"
+                    checked={sessionMode === 'coop'}
+                    onChange={() => onSessionModeChange('coop')}
+                  />
+                  <span>Dual-emulator sync (low bandwidth)</span>
+                </label>
+                <label className="peer-lobby__mode">
+                  <input
+                    type="checkbox"
+                    checked={manualOpen}
+                    onChange={(e) => setManualOpen(e.target.checked)}
+                  />
+                  <span>Manual SDP WebRTC paste</span>
+                </label>
+                {sessionMode === 'local' && (
+                  <label className="peer-lobby__mode">
+                    <input
+                      type="checkbox"
+                      checked={hostOnScreenP2}
+                      onChange={(e) => onHostOnScreenP2Change(e.target.checked)}
+                    />
+                    <span>Host on-screen Player 2 pad (fallback)</span>
+                  </label>
+                )}
+              </div>
+            )}
+
+            <div className="peer-lobby__actions">
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={busy}
+                onClick={() => void withBusy(onCreateHost)}
+              >
+                Host session
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                disabled={busy}
+                onClick={() => {
+                  setManualOpen(true)
+                  setStatusNote('Paste or scan a host offer below')
+                }}
+              >
+                Join session
+              </button>
+            </div>
+          </>
+        )}
+
+        {(useManualSignaling || signalingLabel) && phase !== 'idle' && (
+          <p className="peer-lobby__fallback">
+            {useManualSignaling
+              ? 'Room code unavailable — using manual SDP paste'
+              : `Connection path: ${signalingLabel}`}
+          </p>
+        )}
+
+        {roomCode && joinUrl && phase !== 'idle' && (
+          <div className="peer-lobby__signal-out">
+            <p className="peer-lobby__label">Room code</p>
+            <p className="peer-lobby__room">{roomCode.split('').join(' ')}</p>
+            {qrUrl && (
+              <img className="peer-lobby__qr" src={qrUrl} alt="Join QR code" />
+            )}
+            <p className="peer-lobby__hint">{joinUrl}</p>
+            <button type="button" className="btn btn--ghost" onClick={() => void handleCopyJoinUrl()}>
+              Copy join link
             </button>
           </div>
         )}
 
-        {(phase === 'idle' || phase === 'host-offer' || phase === 'guest-answer') && (
+        {showManualExchange && (
           <div className="peer-lobby__exchange">
             {localSignal && signalKind && (
               <div className="peer-lobby__signal-out">
-                <p className="peer-lobby__label">
-                  Your compressed {signalKind} — share via QR, copy, or messaging app
-                </p>
-                {qrUrl && (
-                  <img className="peer-lobby__qr" src={qrUrl} alt={`QR code for ${signalKind}`} />
-                )}
-                <textarea
-                  className="peer-lobby__textarea"
-                  readOnly
-                  value={localSignal}
-                  rows={4}
-                  onFocus={(e) => e.currentTarget.select()}
-                />
-                <div className="peer-lobby__row">
-                  <button type="button" className="btn btn--ghost" onClick={() => void handleCopy()}>
-                    Copy
-                  </button>
-                  <button type="button" className="btn btn--primary" onClick={() => void handleShare()}>
-                    Share via messaging app
-                  </button>
-                </div>
-                <p className="peer-lobby__hint">
-                  Send the string through iMessage, WhatsApp, Slack, email, or any chat — then paste on
-                  the other device. Take your time pasting; the host waits for the answer. Same Wi‑Fi
-                  or hotspot recommended for WebRTC.
-                </p>
+                <p className="peer-lobby__label">Manual SDP ({signalKind})</p>
+                <textarea className="peer-lobby__textarea" readOnly value={localSignal} rows={3} />
+                <button type="button" className="btn btn--ghost" onClick={() => void handleCopySignal()}>
+                  Copy SDP
+                </button>
               </div>
             )}
 
             <div className="peer-lobby__signal-in">
               <p className="peer-lobby__label">
-                {phase === 'host-offer'
-                  ? 'Paste or scan guest answer'
-                  : phase === 'guest-answer'
-                    ? 'Waiting for host to accept your answer…'
-                    : 'Paste or scan host offer to join'}
+                {phase === 'host-offer' ? 'Paste/scan guest answer' : 'Paste/scan host offer'}
               </p>
               <textarea
                 className="peer-lobby__textarea"
                 value={pasteValue}
-                rows={4}
-                placeholder="RG1.… paste offer/answer from messaging app or QR"
+                rows={3}
+                placeholder="RG1.…"
                 onChange={(e) => setPasteValue(e.target.value)}
                 disabled={phase === 'guest-answer'}
               />
@@ -279,17 +363,10 @@ export function PeerLobby({
                       type="button"
                       className="btn btn--ghost"
                       disabled={busy || scanning}
-                      onClick={() =>
-                        void startScan(phase === 'host-offer' ? 'answer' : 'offer')
-                      }
+                      onClick={() => void startScan()}
                     >
                       {scanning ? 'Scanning…' : 'Scan QR'}
                     </button>
-                    {scanning && (
-                      <button type="button" className="btn btn--ghost" onClick={stopScan}>
-                        Stop camera
-                      </button>
-                    )}
                     <button
                       type="button"
                       className="btn btn--primary"
@@ -303,7 +380,7 @@ export function PeerLobby({
                         })
                       }
                     >
-                      {phase === 'host-offer' ? 'Accept answer' : 'Join with offer'}
+                      Apply
                     </button>
                   </>
                 )}
@@ -322,22 +399,10 @@ export function PeerLobby({
           phase === 'playing') && (
           <div className="peer-lobby__status">
             <p>
-              Role: <strong>{role ?? '—'}</strong> · Seat P{seat ?? '—'} · Link:{' '}
-              <strong>{connectionState}</strong>
-              {phase === 'connecting' && connectionState !== 'connected' ? ' (establishing…)…' : ''}
+              Mode: <strong>{sessionMode}</strong> · Role: <strong>{role ?? '—'}</strong> · P
+              {seat ?? '—'} · {connectionState}
             </p>
-            {phase === 'connecting' && connectionState !== 'connected' && (
-              <p className="peer-lobby__hint">
-                Establishing WebRTC… keep both devices on the same Wi‑Fi/hotspot. If this hangs,
-                disconnect and exchange a fresh offer/answer.
-              </p>
-            )}
-            {phase === 'transferring' && (
-              <p>
-                Transferring {transfer.kind ?? 'data'}… {transferPct}%
-              </p>
-            )}
-            {phase === 'linked' && role === 'host' && (
+            {phase === 'linked' && role === 'host' && showCoopFlow && (
               <>
                 {canHostShareGame ? (
                   <button
@@ -349,36 +414,27 @@ export function PeerLobby({
                     Share ROM &amp; start sync
                   </button>
                 ) : (
-                  <p className="peer-lobby__hint">
-                    Linked. Load a ROM on this device, then share it with the guest.
-                  </p>
+                  <p className="peer-lobby__hint">Load a ROM on this device, then share.</p>
                 )}
               </>
             )}
-            {phase === 'linked' && role === 'guest' && (
-              <p className="peer-lobby__hint">Linked — waiting for host to share the ROM…</p>
+            {phase === 'linked' && role === 'host' && !showCoopFlow && (
+              <p className="peer-lobby__hint">
+                Linked — {sessionMode === 'local' ? 'waiting for controller input' : 'starting stream…'}
+              </p>
             )}
-            {(phase === 'ready-wait' || phase === 'playing') &&
-              role === 'host' &&
-              canHostShareGame && (
-                <button
-                  type="button"
-                  className="btn btn--ghost"
-                  disabled={busy}
-                  onClick={() => void withBusy(onShareGame)}
-                >
-                  Re-share current ROM
-                </button>
-              )}
-            {phase === 'ready-wait' && (
+            {phase === 'linked' && role === 'guest' && showCoopFlow && (
+              <p className="peer-lobby__hint">Waiting for host to share ROM…</p>
+            )}
+            {phase === 'transferring' && (
+              <p>
+                Transferring {transfer.kind ?? 'data'}… {transferPct}%
+              </p>
+            )}
+            {phase === 'ready-wait' && showCoopFlow && (
               <div className="peer-lobby__row">
-                <button
-                  type="button"
-                  className="btn btn--ghost"
-                  disabled={!emuReady}
-                  onClick={onReady}
-                >
-                  {emuReady ? 'Ready' : 'Waiting for emulator…'}
+                <button type="button" className="btn btn--ghost" disabled={!emuReady} onClick={onReady}>
+                  Ready
                 </button>
                 {role === 'host' && (
                   <button
@@ -387,19 +443,15 @@ export function PeerLobby({
                     disabled={!remoteReady || !emuReady}
                     onClick={onGo}
                   >
-                    {remoteReady ? 'Go — start together' : 'Waiting for guest ready…'}
+                    Go
                   </button>
                 )}
               </div>
             )}
-            {phase === 'playing' && (
+            {phase === 'playing' && showCoopFlow && (
               <div className="peer-lobby__row">
                 {role === 'host' ? (
-                  <button
-                    type="button"
-                    className="btn btn--ghost"
-                    onClick={() => void withBusy(onResync)}
-                  >
+                  <button type="button" className="btn btn--ghost" onClick={() => void withBusy(onResync)}>
                     Push resync
                   </button>
                 ) : (
@@ -407,37 +459,12 @@ export function PeerLobby({
                     Request resync
                   </button>
                 )}
-                {onOpenControllers && (
-                  <button type="button" className="btn btn--ghost" onClick={onOpenControllers}>
-                    Controllers
-                  </button>
-                )}
               </div>
             )}
           </div>
         )}
 
-        {phase === 'error' && (
-          <div className="peer-lobby__status">
-            <p className="peer-lobby__hint">
-              Signaling was interrupted. Disconnect and create a fresh host offer, then paste the
-              answer before starting a new exchange on the other device.
-            </p>
-          </div>
-        )}
-
-        {(phase === 'idle' || phase === 'host-offer' || phase === 'guest-answer') &&
-          onOpenControllers && (
-            <div className="peer-lobby__row">
-              <button type="button" className="btn btn--ghost" onClick={onOpenControllers}>
-                Choose controllers
-              </button>
-            </div>
-          )}
-
-        {(statusNote || error) && (
-          <p className="peer-lobby__note">{error ?? statusNote}</p>
-        )}
+        {(statusNote || error) && <p className="peer-lobby__note">{error ?? statusNote}</p>}
 
         {phase !== 'idle' && (
           <div className="peer-lobby__footer">
@@ -451,8 +478,13 @@ export function PeerLobby({
                 setStatusNote(null)
               }}
             >
-              {phase === 'error' ? 'Start over' : 'Disconnect'}
+              Disconnect
             </button>
+            {onOpenControllers && (
+              <button type="button" className="btn btn--ghost" onClick={onOpenControllers}>
+                Controllers
+              </button>
+            )}
           </div>
         )}
       </div>

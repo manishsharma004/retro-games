@@ -1,4 +1,5 @@
 import { compressSignal, decompressSignal } from './compress'
+import { getIceConfig, ICE_CONNECT_TIMEOUT_MS } from './connectivity'
 import {
   CHUNK_PAYLOAD_SIZE,
   decodeChunk,
@@ -7,10 +8,9 @@ import {
   type ControlMessage,
 } from './protocol'
 
-const ICE_SERVERS: RTCIceServer[] = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-]
+export interface PeerConnectionOptions {
+  preferTurn?: boolean
+}
 
 /** States where we are still exchanging SDP out-of-band — ICE must not kill the session. */
 const SIGNALING_WAIT_STATES: ReadonlySet<PeerConnectionState> = new Set([
@@ -47,6 +47,8 @@ export interface PeerConnectionHandlers {
   onError?: (error: Error) => void
   /** Guest regenerated answer after ICE died while waiting for host — re-share this string. */
   onSignalRefresh?: (signal: string) => void
+  /** Remote mode: incoming media stream from peer. */
+  onRemoteStream?: (stream: MediaStream) => void
 }
 
 interface PendingTransfer {
@@ -90,9 +92,11 @@ export class PeerConnection {
   private remoteOfferSdp: string | null = null
   private refreshingAnswer = false
   private isAnswerer = false
+  private preferTurn = false
 
-  constructor(handlers: PeerConnectionHandlers = {}) {
+  constructor(handlers: PeerConnectionHandlers = {}, options: PeerConnectionOptions = {}) {
     this.handlers = handlers
+    this.preferTurn = options.preferTurn ?? false
   }
 
   get connectionState(): PeerConnectionState {
@@ -123,7 +127,7 @@ export class PeerConnection {
       if (this.state === 'connecting' || this.state === 'awaiting-answer') {
         this.handlers.onError?.(
           new Error(
-            'Connection timed out — start a new session on both devices (same Wi‑Fi/hotspot), and paste the latest answer',
+            'Connection timed out — try same Wi‑Fi/hotspot, enable TURN, or use manual SDP paste',
           ),
         )
         this.setState('failed')
@@ -153,10 +157,15 @@ export class PeerConnection {
 
   private ensurePc(): RTCPeerConnection {
     if (this.pc) return this.pc
+    const { iceServers } = getIceConfig(this.preferTurn)
     const pc = new RTCPeerConnection({
-      iceServers: ICE_SERVERS,
+      iceServers,
       iceCandidatePoolSize: 10,
     })
+    pc.ontrack = (event) => {
+      const stream = event.streams[0]
+      if (stream) this.handlers.onRemoteStream?.(stream)
+    }
     pc.onconnectionstatechange = () => {
       const s = pc.connectionState
       if (s === 'connected') {
@@ -355,7 +364,24 @@ export class PeerConnection {
     this.offererAnswerApplied = true
     this.setState('connecting')
     await pc.setRemoteDescription({ type: 'answer', sdp })
-    this.watchForConnect(60000)
+    this.watchForConnect(ICE_CONNECT_TIMEOUT_MS)
+  }
+
+  /** Attach canvas/audio stream for remote mode (host side). */
+  addMediaStream(stream: MediaStream): void {
+    const pc = this.ensurePc()
+    for (const track of stream.getTracks()) {
+      pc.addTrack(track, stream)
+    }
+  }
+
+  getPeerConnection(): RTCPeerConnection | null {
+    return this.pc
+  }
+
+  async createOfferWithMedia(stream?: MediaStream): Promise<string> {
+    if (stream) this.addMediaStream(stream)
+    return this.createOffer()
   }
 
   async createAnswerFromOffer(encoded: string): Promise<string> {

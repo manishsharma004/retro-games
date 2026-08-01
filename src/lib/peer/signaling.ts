@@ -1,0 +1,440 @@
+import type { SessionMode } from './protocol'
+import { buildJoinUrl, generateRoomCode } from './joinUrl'
+
+export type SignalingAdapterName = 'firebase' | 'peerjs' | 'broadcast' | 'manual'
+
+export interface SignalingRoomMeta {
+  mode: SessionMode
+  hostName?: string
+}
+
+export interface SignalingAdapter {
+  readonly name: SignalingAdapterName
+  hostRoom(offer: string, meta: SignalingRoomMeta): Promise<{ code: string; joinUrl: string }>
+  guestPublishAnswer(code: string, answer: string): Promise<void>
+  waitForAnswer(code: string, timeoutMs?: number): Promise<string>
+  guestFetchOffer(code: string, timeoutMs?: number): Promise<string>
+  close(): void
+}
+
+const ROOM_TTL_MS = 5 * 60 * 1000
+const BC_CHANNEL = 'retro-games-lobby'
+
+type RoomRecord = {
+  offer?: string
+  answer?: string
+  meta?: SignalingRoomMeta
+  updatedAt: number
+}
+
+function roomKey(code: string): string {
+  return `retro-games-room-${code}`
+}
+
+function writeRoom(code: string, patch: Partial<RoomRecord>) {
+  const prev: RoomRecord = JSON.parse(localStorage.getItem(roomKey(code)) ?? '{}')
+  const next: RoomRecord = { ...prev, ...patch, updatedAt: Date.now() }
+  localStorage.setItem(roomKey(code), JSON.stringify(next))
+  try {
+    const bc = new BroadcastChannel(BC_CHANNEL)
+    bc.postMessage({ type: 'room-update', code })
+    bc.close()
+  } catch {
+    // ignore
+  }
+}
+
+function readRoom(code: string): RoomRecord | null {
+  const raw = localStorage.getItem(roomKey(code))
+  if (!raw) return null
+  try {
+    const rec = JSON.parse(raw) as RoomRecord
+    if (Date.now() - rec.updatedAt > ROOM_TTL_MS) {
+      localStorage.removeItem(roomKey(code))
+      return null
+    }
+    return rec
+  } catch {
+    return null
+  }
+}
+
+function waitForRoomField(
+  code: string,
+  field: 'offer' | 'answer',
+  timeoutMs: number,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const started = Date.now()
+    let bc: BroadcastChannel | null = null
+
+    const check = () => {
+      const rec = readRoom(code)
+      const value = rec?.[field]
+      if (value) {
+        cleanup()
+        resolve(value)
+        return
+      }
+      if (Date.now() - started > timeoutMs) {
+        cleanup()
+        reject(new Error(`Timed out waiting for ${field}`))
+        return
+      }
+      window.setTimeout(check, 400)
+    }
+
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === roomKey(code)) check()
+    }
+
+    const onBc = (e: MessageEvent) => {
+      if (e.data?.type === 'room-update' && e.data?.code === code) check()
+    }
+
+    const cleanup = () => {
+      window.removeEventListener('storage', onStorage)
+      bc?.close()
+    }
+
+    window.addEventListener('storage', onStorage)
+    try {
+      bc = new BroadcastChannel(BC_CHANNEL)
+      bc.onmessage = onBc
+    } catch {
+      // polling only
+    }
+    check()
+  })
+}
+
+/** Same-origin room exchange via localStorage + BroadcastChannel (dev / same browser profile). */
+export class BroadcastSignalingAdapter implements SignalingAdapter {
+  readonly name = 'broadcast' as const
+  private codes: string[] = []
+
+  async hostRoom(offer: string, meta: SignalingRoomMeta) {
+    const code = generateRoomCode(4)
+    this.codes.push(code)
+    writeRoom(code, { offer, meta, answer: undefined })
+    return { code, joinUrl: buildJoinUrl(code, meta.mode) }
+  }
+
+  async guestPublishAnswer(code: string, answer: string) {
+    writeRoom(code, { answer })
+  }
+
+  async waitForAnswer(code: string, timeoutMs = 120_000) {
+    return waitForRoomField(code, 'answer', timeoutMs)
+  }
+
+  async guestFetchOffer(code: string, timeoutMs = 30_000) {
+    const existing = readRoom(code)?.offer
+    if (existing) return existing
+    return waitForRoomField(code, 'offer', timeoutMs)
+  }
+
+  close() {
+    for (const code of this.codes) {
+      localStorage.removeItem(roomKey(code))
+    }
+    this.codes = []
+  }
+}
+
+/** Optional Firebase REST signaling when env vars are set. */
+export class FirebaseSignalingAdapter implements SignalingAdapter {
+  readonly name = 'firebase' as const
+  private databaseUrl = import.meta.env.VITE_FIREBASE_DATABASE_URL as string | undefined
+  private apiKey = import.meta.env.VITE_FIREBASE_API_KEY as string | undefined
+  private activeCode: string | null = null
+
+  private enabled(): boolean {
+    return Boolean(this.databaseUrl && this.apiKey)
+  }
+
+  private url(path: string): string {
+    return `${this.databaseUrl!.replace(/\/$/, '')}/${path}.json?auth=${this.apiKey}`
+  }
+
+  async hostRoom(offer: string, meta: SignalingRoomMeta) {
+    if (!this.enabled()) throw new Error('Firebase not configured')
+    const code = generateRoomCode(4)
+    this.activeCode = code
+    const res = await fetch(this.url(`rooms/${code}`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ offer, meta, createdAt: Date.now() }),
+    })
+    if (!res.ok) throw new Error('Firebase room create failed')
+    return { code, joinUrl: buildJoinUrl(code, meta.mode) }
+  }
+
+  async guestPublishAnswer(code: string, answer: string) {
+    if (!this.enabled()) throw new Error('Firebase not configured')
+    const res = await fetch(this.url(`rooms/${code}/answer`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(answer),
+    })
+    if (!res.ok) throw new Error('Firebase answer publish failed')
+  }
+
+  async waitForAnswer(code: string, timeoutMs = 120_000) {
+    if (!this.enabled()) throw new Error('Firebase not configured')
+    const started = Date.now()
+    while (Date.now() - started < timeoutMs) {
+      const res = await fetch(this.url(`rooms/${code}/answer`))
+      if (res.ok) {
+        const answer = await res.json()
+        if (typeof answer === 'string' && answer.length > 0) return answer
+      }
+      await new Promise((r) => setTimeout(r, 500))
+    }
+    throw new Error('Firebase answer timeout')
+  }
+
+  async guestFetchOffer(code: string, timeoutMs = 30_000) {
+    if (!this.enabled()) throw new Error('Firebase not configured')
+    const started = Date.now()
+    while (Date.now() - started < timeoutMs) {
+      const res = await fetch(this.url(`rooms/${code}`))
+      if (res.ok) {
+        const data = (await res.json()) as { offer?: string } | null
+        if (data?.offer) return data.offer
+      }
+      await new Promise((r) => setTimeout(r, 500))
+    }
+    throw new Error('Firebase offer timeout')
+  }
+
+  close() {
+    if (this.activeCode && this.enabled()) {
+      void fetch(this.url(`rooms/${this.activeCode}`), { method: 'DELETE' })
+    }
+    this.activeCode = null
+  }
+}
+
+/** PeerJS cloud broker for cross-device signaling without our backend. */
+export class PeerJSSignalingAdapter implements SignalingAdapter {
+  readonly name = 'peerjs' as const
+  private peer: import('peerjs').default | null = null
+  private conn: import('peerjs').DataConnection | null = null
+  private hostCode: string | null = null
+
+  private async loadPeer(): Promise<typeof import('peerjs').default> {
+    const mod = await import('peerjs')
+    return mod.default
+  }
+
+  async hostRoom(offer: string, meta: SignalingRoomMeta) {
+    const Peer = await this.loadPeer()
+    const code = generateRoomCode(4)
+    this.hostCode = code
+    const peer = new Peer(`rg-${code}`, {
+      host: '0.peerjs.com',
+      secure: true,
+      port: 443,
+      path: '/',
+    })
+    this.peer = peer
+    await new Promise<void>((resolve, reject) => {
+      const timer = window.setTimeout(() => reject(new Error('PeerJS host timeout')), 8000)
+      peer.on('open', () => {
+        window.clearTimeout(timer)
+        resolve()
+      })
+      peer.on('error', (err) => {
+        window.clearTimeout(timer)
+        reject(err)
+      })
+    })
+    peer.on('connection', (conn) => {
+      this.conn = conn
+      conn.on('open', () => {
+        conn.send({ type: 'offer', offer, meta })
+      })
+      conn.on('data', (data: unknown) => {
+        const msg = data as { type?: string; answer?: string }
+        if (msg.type === 'answer' && msg.answer) {
+          writeRoom(code, { answer: msg.answer })
+        }
+      })
+    })
+    writeRoom(code, { offer, meta })
+    return { code, joinUrl: buildJoinUrl(code, meta.mode) }
+  }
+
+  async guestPublishAnswer(code: string, answer: string) {
+    writeRoom(code, { answer })
+    if (this.conn?.open) {
+      this.conn.send({ type: 'answer', answer })
+    }
+  }
+
+  async waitForAnswer(code: string, timeoutMs = 120_000) {
+    try {
+      return await waitForRoomField(code, 'answer', timeoutMs)
+    } catch {
+      if (this.conn) {
+        return new Promise<string>((resolve, reject) => {
+          const timer = window.setTimeout(() => reject(new Error('PeerJS answer timeout')), timeoutMs)
+          this.conn!.on('data', (data: unknown) => {
+            const msg = data as { type?: string; answer?: string }
+            if (msg.type === 'answer' && msg.answer) {
+              window.clearTimeout(timer)
+              resolve(msg.answer)
+            }
+          })
+        })
+      }
+      throw new Error('No PeerJS answer')
+    }
+  }
+
+  async guestFetchOffer(code: string, timeoutMs = 30_000) {
+    const Peer = await this.loadPeer()
+    const peer = new Peer({ host: '0.peerjs.com', secure: true, port: 443, path: '/' })
+    this.peer = peer
+    await new Promise<void>((resolve, reject) => {
+      const timer = window.setTimeout(() => reject(new Error('PeerJS guest timeout')), 8000)
+      peer.on('open', () => {
+        window.clearTimeout(timer)
+        resolve()
+      })
+      peer.on('error', (err) => {
+        window.clearTimeout(timer)
+        reject(err)
+      })
+    })
+    const conn = peer.connect(`rg-${code}`)
+    this.conn = conn
+    return new Promise<string>((resolve, reject) => {
+      const timer = window.setTimeout(() => reject(new Error('PeerJS offer timeout')), timeoutMs)
+      conn.on('open', () => {
+        conn.send({ type: 'guest-ready' })
+      })
+      conn.on('data', (data: unknown) => {
+        const msg = data as { type?: string; offer?: string }
+        if (msg.type === 'offer' && msg.offer) {
+          window.clearTimeout(timer)
+          writeRoom(code, { offer: msg.offer })
+          resolve(msg.offer)
+        }
+      })
+    })
+  }
+
+  close() {
+    this.conn?.close()
+    this.peer?.destroy()
+    this.conn = null
+    this.peer = null
+    if (this.hostCode) {
+      localStorage.removeItem(roomKey(this.hostCode))
+      this.hostCode = null
+    }
+  }
+}
+
+export class SignalingAdapterChain {
+  private adapters: SignalingAdapter[] = []
+  private active: SignalingAdapter | null = null
+  lastAdapter: SignalingAdapterName = 'manual'
+  lastError: string | null = null
+
+  constructor() {
+    const firebase = new FirebaseSignalingAdapter()
+    if (import.meta.env.VITE_FIREBASE_DATABASE_URL && import.meta.env.VITE_FIREBASE_API_KEY) {
+      this.adapters.push(firebase)
+    }
+    this.adapters.push(new PeerJSSignalingAdapter())
+    this.adapters.push(new BroadcastSignalingAdapter())
+  }
+
+  async hostRoom(offer: string, meta: SignalingRoomMeta, timeoutPerAdapter = 3000) {
+    for (const adapter of this.adapters) {
+      try {
+        const result = await Promise.race([
+          adapter.hostRoom(offer, meta),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`${adapter.name} timeout`)), timeoutPerAdapter),
+          ),
+        ])
+        this.active = adapter
+        this.lastAdapter = adapter.name
+        this.lastError = null
+        return result
+      } catch (err) {
+        this.lastError = err instanceof Error ? err.message : 'signaling failed'
+        adapter.close()
+      }
+    }
+    this.lastAdapter = 'manual'
+    throw new Error('All signaling adapters failed — use manual SDP paste')
+  }
+
+  async guestFetchOffer(code: string) {
+    for (const adapter of this.adapters) {
+      try {
+        this.active = adapter
+        const offer = await adapter.guestFetchOffer(code)
+        this.lastAdapter = adapter.name
+        return offer
+      } catch {
+        adapter.close()
+      }
+    }
+    this.lastAdapter = 'manual'
+    throw new Error('Could not fetch offer — try manual SDP paste')
+  }
+
+  async guestPublishAnswer(code: string, answer: string) {
+    if (this.active) {
+      await this.active.guestPublishAnswer(code, answer)
+      return
+    }
+    for (const adapter of this.adapters) {
+      try {
+        await adapter.guestPublishAnswer(code, answer)
+        this.active = adapter
+        return
+      } catch {
+        adapter.close()
+      }
+    }
+  }
+
+  async waitForAnswer(code: string) {
+    if (this.active) {
+      return this.active.waitForAnswer(code)
+    }
+    for (const adapter of this.adapters) {
+      try {
+        return await adapter.waitForAnswer(code)
+      } catch {
+        adapter.close()
+      }
+    }
+    throw new Error('Answer timeout')
+  }
+
+  close() {
+    this.active?.close()
+    this.active = null
+  }
+}
+
+export function formatSignalingPath(name: SignalingAdapterName): string {
+  switch (name) {
+    case 'firebase':
+      return 'Room code (Firebase)'
+    case 'peerjs':
+      return 'Room code (PeerJS relay)'
+    case 'broadcast':
+      return 'Room code (local browser)'
+    case 'manual':
+      return 'Manual SDP paste'
+  }
+}

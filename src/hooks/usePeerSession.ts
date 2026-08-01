@@ -171,27 +171,31 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     }
   }, [])
 
-  const publishRenegotiation = useCallback((type: 'ice-reoffer' | 'ice-reanswer', sdp: string) => {
-    const conn = connRef.current
-    const chain = signalingRef.current
-    const payload = { type, sdp }
-    if (conn?.connected) {
-      try {
-        conn.sendControl(payload)
-        return
-      } catch {
-        // fall through to signaling channel
+  const publishRenegotiation = useCallback(
+    (type: 'ice-reoffer' | 'ice-reanswer', sdp: string, tier?: IceTier) => {
+      const conn = connRef.current
+      const chain = signalingRef.current
+      const payload =
+        type === 'ice-reoffer' ? { type, sdp, tier: tier ?? 'relay' } : { type, sdp }
+      if (conn?.connected) {
+        try {
+          conn.sendControl(payload)
+          return
+        } catch {
+          // fall through to signaling channel
+        }
       }
-    }
-    chain?.sendSessionMessage(payload)
-  }, [])
+      chain?.sendSessionMessage(payload)
+    },
+    [],
+  )
 
   const handleRenegotiationOffer = useCallback(
-    async (sdp: string) => {
+    async (sdp: string, tier: IceTier = 'relay') => {
       const conn = connRef.current
       if (!conn) return
       try {
-        const answer = await conn.acceptRenegotiationOffer(sdp)
+        const answer = await conn.acceptRenegotiationOffer(sdp, tier)
         publishRenegotiation('ice-reanswer', answer)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'ICE renegotiation failed')
@@ -212,8 +216,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     (chain: SignalingAdapterChain) => {
       signalingSessionUnsubRef.current?.()
       signalingSessionUnsubRef.current = chain.onSessionMessage((data) => {
-        const msg = data as { type?: string; sdp?: string }
-        if (msg.type === 'ice-reoffer' && msg.sdp) void handleRenegotiationOffer(msg.sdp)
+        const msg = data as { type?: string; sdp?: string; tier?: IceTier }
+        if (msg.type === 'ice-reoffer' && msg.sdp) void handleRenegotiationOffer(msg.sdp, msg.tier)
         if (msg.type === 'ice-reanswer' && msg.sdp) void handleRenegotiationAnswer(msg.sdp)
       })
     },
@@ -275,8 +279,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         setLocalSignal(signal)
         if (roleRef.current === 'guest') updatePhase('guest-answer')
       },
-      onRenegotiationOffer: (signal) => {
-        publishRenegotiation('ice-reoffer', signal)
+      onRenegotiationOffer: (signal, tier) => {
+        publishRenegotiation('ice-reoffer', signal, tier)
       },
       onIceTierChange: (tier) => {
         setIceTier(tier)
@@ -332,7 +336,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         } else if (msg.type === 'pong') {
           optionsRef.current.onLatency?.(Date.now() - msg.t)
         } else if (msg.type === 'ice-reoffer') {
-          void handleRenegotiationOffer(msg.sdp)
+          void handleRenegotiationOffer(msg.sdp, msg.tier)
         } else if (msg.type === 'ice-reanswer') {
           void handleRenegotiationAnswer(msg.sdp)
         }

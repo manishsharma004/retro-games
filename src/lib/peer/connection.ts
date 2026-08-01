@@ -56,7 +56,7 @@ export interface PeerConnectionHandlers {
   /** Guest regenerated answer after ICE died while waiting for host — re-share this string. */
   onSignalRefresh?: (signal: string) => void
   /** Host needs to push an ICE-restart offer (local→relay fallback or LAN migration). */
-  onRenegotiationOffer?: (signal: string) => void
+  onRenegotiationOffer?: (signal: string, tier: IceTier) => void
   /** ICE tier changed (local STUN-only vs relay fallback). */
   onIceTierChange?: (tier: IceTier) => void
   /** Active transport path once ICE selects a candidate pair. */
@@ -226,7 +226,7 @@ export class PeerConnection {
     this.handlers.onIceTierChange?.('relay')
     try {
       const offer = await this.renegotiateAsOfferer('relay')
-      this.handlers.onRenegotiationOffer?.(offer)
+      this.handlers.onRenegotiationOffer?.(offer, 'relay')
       this.watchForConnect(ICE_CONNECT_TIMEOUT_MS)
     } catch (err) {
       this.handlers.onError?.(
@@ -245,7 +245,7 @@ export class PeerConnection {
     this.handlers.onIceTierChange?.('local')
     try {
       const offer = await this.renegotiateAsOfferer('local')
-      this.handlers.onRenegotiationOffer?.(offer)
+      this.handlers.onRenegotiationOffer?.(offer, 'local')
     } catch {
       this.iceTier = 'relay'
       this.handlers.onIceTierChange?.('relay')
@@ -267,9 +267,13 @@ export class PeerConnection {
     return compressSignal(local.sdp)
   }
 
-  async acceptRenegotiationOffer(encoded: string): Promise<string> {
+  async acceptRenegotiationOffer(encoded: string, tier: IceTier = 'relay'): Promise<string> {
     const pc = this.pc
     if (!pc) throw new Error('No peer connection')
+    this.iceTier = tier
+    this.handlers.onIceTierChange?.(tier)
+    const { iceServers } = getIceConfig(tier)
+    pc.setConfiguration({ iceServers, iceCandidatePoolSize: 10 })
     const sdp = decompressSignal(encoded)
     await pc.setRemoteDescription({ type: 'offer', sdp })
     const answer = await pc.createAnswer()

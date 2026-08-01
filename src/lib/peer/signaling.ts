@@ -1,7 +1,7 @@
 import type { SessionMode } from './protocol'
 import { buildJoinUrl, generateRoomCode } from './joinUrl'
 
-export type SignalingAdapterName = 'firebase' | 'peerjs' | 'broadcast' | 'manual'
+export type SignalingAdapterName = 'peerjs' | 'firebase' | 'broadcast' | 'manual'
 
 export interface SignalingRoomMeta {
   mode: SessionMode
@@ -16,6 +16,14 @@ export interface SignalingAdapter {
   guestFetchOffer(code: string, timeoutMs?: number): Promise<string>
   close(): void
 }
+
+/** Free public PeerJS cloud broker — default signaling path, no API key required. */
+export const DEFAULT_PEERJS_CONFIG = {
+  host: '0.peerjs.com',
+  secure: true,
+  port: 443,
+  path: '/',
+} as const
 
 const ROOM_TTL_MS = 5 * 60 * 1000
 const BC_CHANNEL = 'retro-games-lobby'
@@ -108,7 +116,55 @@ function waitForRoomField(
   })
 }
 
-/** Same-origin room exchange via localStorage + BroadcastChannel (dev / same browser profile). */
+function readPeerJsConfig() {
+  const host = (import.meta.env.VITE_PEERJS_HOST as string | undefined) ?? DEFAULT_PEERJS_CONFIG.host
+  const port = Number(import.meta.env.VITE_PEERJS_PORT ?? DEFAULT_PEERJS_CONFIG.port)
+  const path = (import.meta.env.VITE_PEERJS_PATH as string | undefined) ?? DEFAULT_PEERJS_CONFIG.path
+  const secure = import.meta.env.VITE_PEERJS_SECURE !== 'false'
+  return { host, port, path, secure }
+}
+
+type PeerJsModule = typeof import('peerjs').default
+type PeerInstance = InstanceType<PeerJsModule>
+type DataConn = import('peerjs').DataConnection
+
+function waitPeerOpen(peer: PeerInstance, timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (peer.open) {
+      resolve()
+      return
+    }
+    const timer = window.setTimeout(() => reject(new Error('PeerJS open timeout')), timeoutMs)
+    peer.once('open', () => {
+      window.clearTimeout(timer)
+      resolve()
+    })
+    peer.once('error', (err) => {
+      window.clearTimeout(timer)
+      reject(err)
+    })
+  })
+}
+
+function waitConnOpen(conn: DataConn, timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (conn.open) {
+      resolve()
+      return
+    }
+    const timer = window.setTimeout(() => reject(new Error('PeerJS connection timeout')), timeoutMs)
+    conn.once('open', () => {
+      window.clearTimeout(timer)
+      resolve()
+    })
+    conn.once('error', (err) => {
+      window.clearTimeout(timer)
+      reject(err)
+    })
+  })
+}
+
+/** Same-origin room exchange via localStorage + BroadcastChannel (same browser / dev). */
 export class BroadcastSignalingAdapter implements SignalingAdapter {
   readonly name = 'broadcast' as const
   private codes: string[] = []
@@ -216,14 +272,18 @@ export class FirebaseSignalingAdapter implements SignalingAdapter {
   }
 }
 
-/** PeerJS cloud broker for cross-device signaling without our backend. */
+/**
+ * Free PeerJS cloud broker (0.peerjs.com) — cross-device SDP exchange over
+ * PeerJS DataConnections. This is the default signaling path.
+ */
 export class PeerJSSignalingAdapter implements SignalingAdapter {
   readonly name = 'peerjs' as const
-  private peer: import('peerjs').default | null = null
-  private conn: import('peerjs').DataConnection | null = null
-  private hostCode: string | null = null
+  private peer: PeerInstance | null = null
+  private conn: DataConn | null = null
+  private answerResolve: ((answer: string) => void) | null = null
+  private answerReject: ((err: Error) => void) | null = null
 
-  private async loadPeer(): Promise<typeof import('peerjs').default> {
+  private async loadPeer(): Promise<PeerJsModule> {
     const mod = await import('peerjs')
     return mod.default
   }
@@ -231,135 +291,117 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
   async hostRoom(offer: string, meta: SignalingRoomMeta) {
     const Peer = await this.loadPeer()
     const code = generateRoomCode(4)
-    this.hostCode = code
-    const peer = new Peer(`rg-${code}`, {
-      host: '0.peerjs.com',
-      secure: true,
-      port: 443,
-      path: '/',
-    })
+    const cfg = readPeerJsConfig()
+    const peer = new Peer(`rg-${code}`, cfg)
     this.peer = peer
-    await new Promise<void>((resolve, reject) => {
-      const timer = window.setTimeout(() => reject(new Error('PeerJS host timeout')), 8000)
-      peer.on('open', () => {
-        window.clearTimeout(timer)
-        resolve()
-      })
-      peer.on('error', (err) => {
-        window.clearTimeout(timer)
-        reject(err)
-      })
-    })
+    await waitPeerOpen(peer, 12_000)
+
     peer.on('connection', (conn) => {
       this.conn = conn
-      conn.on('open', () => {
+      void waitConnOpen(conn, 12_000).then(() => {
         conn.send({ type: 'offer', offer, meta })
       })
       conn.on('data', (data: unknown) => {
         const msg = data as { type?: string; answer?: string }
         if (msg.type === 'answer' && msg.answer) {
-          writeRoom(code, { answer: msg.answer })
+          this.answerResolve?.(msg.answer)
+          this.answerResolve = null
+          this.answerReject = null
         }
       })
     })
-    writeRoom(code, { offer, meta })
+
     return { code, joinUrl: buildJoinUrl(code, meta.mode) }
   }
 
-  async guestPublishAnswer(code: string, answer: string) {
-    writeRoom(code, { answer })
-    if (this.conn?.open) {
-      this.conn.send({ type: 'answer', answer })
-    }
+  async guestPublishAnswer(_code: string, answer: string) {
+    if (!this.conn?.open) throw new Error('PeerJS guest connection not open')
+    this.conn.send({ type: 'answer', answer })
   }
 
-  async waitForAnswer(code: string, timeoutMs = 120_000) {
-    try {
-      return await waitForRoomField(code, 'answer', timeoutMs)
-    } catch {
-      if (this.conn) {
-        return new Promise<string>((resolve, reject) => {
-          const timer = window.setTimeout(() => reject(new Error('PeerJS answer timeout')), timeoutMs)
-          this.conn!.on('data', (data: unknown) => {
-            const msg = data as { type?: string; answer?: string }
-            if (msg.type === 'answer' && msg.answer) {
-              window.clearTimeout(timer)
-              resolve(msg.answer)
-            }
-          })
-        })
-      }
-      throw new Error('No PeerJS answer')
+  async waitForAnswer(_code: string, timeoutMs = 120_000) {
+    if (this.answerResolve) {
+      throw new Error('Already waiting for answer')
     }
-  }
-
-  async guestFetchOffer(code: string, timeoutMs = 30_000) {
-    const Peer = await this.loadPeer()
-    const peer = new Peer({ host: '0.peerjs.com', secure: true, port: 443, path: '/' })
-    this.peer = peer
-    await new Promise<void>((resolve, reject) => {
-      const timer = window.setTimeout(() => reject(new Error('PeerJS guest timeout')), 8000)
-      peer.on('open', () => {
-        window.clearTimeout(timer)
-        resolve()
-      })
-      peer.on('error', (err) => {
-        window.clearTimeout(timer)
-        reject(err)
-      })
+    return new Promise<string>((resolve, reject) => {
+      this.answerResolve = resolve
+      this.answerReject = reject
+      window.setTimeout(() => {
+        if (this.answerResolve === resolve) {
+          this.answerResolve = null
+          this.answerReject = null
+          reject(new Error('PeerJS answer timeout'))
+        }
+      }, timeoutMs)
     })
-    const conn = peer.connect(`rg-${code}`)
+  }
+
+  async guestFetchOffer(code: string, timeoutMs = 45_000) {
+    const Peer = await this.loadPeer()
+    const cfg = readPeerJsConfig()
+    const peer = new Peer(cfg)
+    this.peer = peer
+    await waitPeerOpen(peer, 12_000)
+    const conn = peer.connect(`rg-${code}`, { reliable: true })
     this.conn = conn
+    await waitConnOpen(conn, 12_000)
+
     return new Promise<string>((resolve, reject) => {
       const timer = window.setTimeout(() => reject(new Error('PeerJS offer timeout')), timeoutMs)
-      conn.on('open', () => {
-        conn.send({ type: 'guest-ready' })
-      })
       conn.on('data', (data: unknown) => {
         const msg = data as { type?: string; offer?: string }
         if (msg.type === 'offer' && msg.offer) {
           window.clearTimeout(timer)
-          writeRoom(code, { offer: msg.offer })
           resolve(msg.offer)
         }
       })
+      conn.send({ type: 'guest-ready' })
     })
   }
 
   close() {
+    this.answerReject?.(new Error('PeerJS closed'))
+    this.answerResolve = null
+    this.answerReject = null
     this.conn?.close()
     this.peer?.destroy()
     this.conn = null
     this.peer = null
-    if (this.hostCode) {
-      localStorage.removeItem(roomKey(this.hostCode))
-      this.hostCode = null
-    }
   }
+}
+
+const ADAPTER_TIMEOUT_MS: Record<SignalingAdapterName, number> = {
+  peerjs: 15_000,
+  firebase: 8_000,
+  broadcast: 3_000,
+  manual: 0,
 }
 
 export class SignalingAdapterChain {
   private adapters: SignalingAdapter[] = []
   private active: SignalingAdapter | null = null
-  lastAdapter: SignalingAdapterName = 'manual'
+  lastAdapter: SignalingAdapterName = 'peerjs'
   lastError: string | null = null
 
   constructor() {
+    // Free public servers first — no API keys required.
+    this.adapters.push(new PeerJSSignalingAdapter())
+    this.adapters.push(new BroadcastSignalingAdapter())
+
     const firebase = new FirebaseSignalingAdapter()
     if (import.meta.env.VITE_FIREBASE_DATABASE_URL && import.meta.env.VITE_FIREBASE_API_KEY) {
       this.adapters.push(firebase)
     }
-    this.adapters.push(new PeerJSSignalingAdapter())
-    this.adapters.push(new BroadcastSignalingAdapter())
   }
 
-  async hostRoom(offer: string, meta: SignalingRoomMeta, timeoutPerAdapter = 3000) {
+  async hostRoom(offer: string, meta: SignalingRoomMeta) {
     for (const adapter of this.adapters) {
+      const timeoutMs = ADAPTER_TIMEOUT_MS[adapter.name]
       try {
         const result = await Promise.race([
           adapter.hostRoom(offer, meta),
           new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error(`${adapter.name} timeout`)), timeoutPerAdapter),
+            setTimeout(() => reject(new Error(`${adapter.name} timeout`)), timeoutMs),
           ),
         ])
         this.active = adapter
@@ -376,7 +418,13 @@ export class SignalingAdapterChain {
   }
 
   async guestFetchOffer(code: string) {
-    for (const adapter of this.adapters) {
+    // Guest always tries PeerJS first (cross-device default).
+    const order = [
+      this.adapters.find((a) => a.name === 'peerjs'),
+      ...this.adapters.filter((a) => a.name !== 'peerjs'),
+    ].filter(Boolean) as SignalingAdapter[]
+
+    for (const adapter of order) {
       try {
         this.active = adapter
         const offer = await adapter.guestFetchOffer(code)
@@ -428,12 +476,12 @@ export class SignalingAdapterChain {
 
 export function formatSignalingPath(name: SignalingAdapterName): string {
   switch (name) {
+    case 'peerjs':
+      return 'Room code (free PeerJS relay)'
     case 'firebase':
       return 'Room code (Firebase)'
-    case 'peerjs':
-      return 'Room code (PeerJS relay)'
     case 'broadcast':
-      return 'Room code (local browser)'
+      return 'Room code (same browser)'
     case 'manual':
       return 'Manual SDP paste'
   }

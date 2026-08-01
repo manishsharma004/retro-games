@@ -12,6 +12,7 @@ export { buildJoinUrl, generateRoomCode, parseJoinLocation } from './joinUrl'
 export {
   SignalingAdapterChain,
   formatSignalingPath,
+  DEFAULT_PEERJS_CONFIG,
   type SignalingAdapter,
   type SignalingAdapterName,
 } from './signaling'

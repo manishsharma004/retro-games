@@ -50,7 +50,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   const [touchDevice] = useState(() => prefersTouch())
   const [library, setLibrary] = useState<LibraryRom[]>([])
   const autoLoadedRef = useRef(false)
-  const skipAutoLoadRef = useRef(Boolean(initialCoopJoin))
+  const skipAutoLoadRef = useRef(false)
   const coopJoinStartedRef = useRef(false)
   const playerRef = useRef<HTMLDivElement>(null)
   const {
@@ -64,59 +64,9 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   const emu = useEmulator(settings)
   const { launchLibrary } = emu
 
-  const handleBootstrap = useCallback(
-    async (payload: {
-      name: string
-      system: 'nes' | 'snes'
-      rom: Uint8Array
-      state: Uint8Array
-      settings: Partial<EmulatorSettings>
-    }) => {
-      skipAutoLoadRef.current = true
-      autoLoadedRef.current = true
-      setSettings((prev) => ({
-        ...prev,
-        swapAB: payload.settings.swapAB ?? prev.swapAB,
-        allowOpposingDirections:
-          payload.settings.allowOpposingDirections ?? prev.allowOpposingDirections,
-        nesRegion: payload.settings.nesRegion ?? prev.nesRegion,
-        nesTurbo: payload.settings.nesTurbo ?? prev.nesTurbo,
-        snesRegion: payload.settings.snesRegion ?? prev.snesRegion,
-        frameSkip: payload.settings.frameSkip ?? prev.frameSkip,
-        rewindEnable: payload.settings.rewindEnable ?? prev.rewindEnable,
-      }))
-      const ext = payload.system === 'nes' ? 'nes' : 'sfc'
-      emu.launchPeer({
-        name: payload.name,
-        system: payload.system,
-        rom: new Blob([
-          payload.rom.buffer.slice(
-            payload.rom.byteOffset,
-            payload.rom.byteOffset + payload.rom.byteLength,
-          ) as ArrayBuffer,
-        ]),
-        fileName: `${payload.name}.${ext}`,
-        state: new Blob([
-          payload.state.buffer.slice(
-            payload.state.byteOffset,
-            payload.state.byteOffset + payload.state.byteLength,
-          ) as ArrayBuffer,
-        ]),
-        startPaused: true,
-      })
-    },
-    [emu],
-  )
-
   const handleGo = useCallback(() => {
     emu.resume()
   }, [emu])
-
-  const coopRef = useRef<ReturnType<typeof useCoopSession> | null>(null)
-
-  const handleResyncState = useCallback(async (state: Uint8Array, compressed?: boolean) => {
-    await coopRef.current?.importResyncState(state, compressed)
-  }, [])
 
   const peer = usePeerSession({
     settings,
@@ -125,18 +75,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
       if (down) emu.remotePressDown(button, seat)
       else emu.remotePressUp(button, seat)
     },
-    onBootstrap: handleBootstrap,
     onGo: handleGo,
-    onResyncState: handleResyncState,
-    onResyncRequest: () => coopRef.current?.onResyncRequest(),
-    onLinked: () => {
-      if (sessionMode !== 'coop') return
-      window.setTimeout(() => {
-        if (peerRef.current.role !== 'host') return
-        if (peerRef.current.phase !== 'linked') return
-        void coopRef.current?.shareGame().catch(() => {})
-      }, 50)
-    },
     onRumble: (seat, pattern) => {
       if (seat === peerRef.current.seat) {
         try {
@@ -152,17 +91,11 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   peerRef.current = peer
 
   const isHost = peer.role === 'host'
-  const isGuest = peer.role === 'guest'
 
-  const coop = useCoopSession({
+  useCoopSession({
     enabled: sessionMode === 'coop',
     peer,
-    emu,
-    settings,
-    isHost,
-    onRawStateFallback: () => {},
   })
-  coopRef.current = coop
 
   useLocalHost({
     enabled: sessionMode === 'local' && isHost,
@@ -183,17 +116,8 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   useEffect(() => {
     if (!initialCoopJoin || coopJoinStartedRef.current) return
     coopJoinStartedRef.current = true
-    skipAutoLoadRef.current = true
-    autoLoadedRef.current = true
     void peer.joinWithRoomCode(initialCoopJoin, 'coop')
   }, [initialCoopJoin, peer.joinWithRoomCode])
-
-  useEffect(() => {
-    if (isGuest) {
-      skipAutoLoadRef.current = true
-      autoLoadedRef.current = true
-    }
-  }, [isGuest])
 
   const localSeat = peer.seat ?? 1
   const peerPlaying = peer.phase === 'playing'
@@ -316,16 +240,6 @@ export default function App({ initialCoopJoin = null }: AppProps) {
     }
   }, [isPlaying, isFullscreen, exitFullscreen])
 
-  const canHostShareGame = Boolean(
-    isHost &&
-      peer.connectionState === 'connected' &&
-      emu.game &&
-      (emu.status === 'running' || emu.status === 'paused') &&
-      (emu.game.file || emu.game.source === 'demo' || emu.game.source === 'library'),
-  )
-
-  const emuReadyForPeer = emu.status === 'running' || emu.status === 'paused'
-
   const showHostP2Pad =
     sessionMode === 'local' && isHost && hostOnScreenP2 && peer.connectionState === 'connected'
 
@@ -339,7 +253,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
           <h1 className="hero__tagline">Play NES &amp; SNES ROMs in your browser</h1>
           <p className="hero__sub">
             Local files only. Link devices for multiplayer — phones as controllers, remote stream,
-            or low-bandwidth co-op sync.
+            or experimental dual-emulator input sync.
           </p>
           <RomLoader
             disabled={emu.status === 'loading'}
@@ -624,21 +538,12 @@ export default function App({ initialCoopJoin = null }: AppProps) {
         signalingLabel={peer.signalingLabel}
         connectionPathLabel={peer.connectionPathLabel}
         useManualSignaling={peer.useManualSignaling}
-        transfer={peer.transfer}
         error={peer.error}
-        remoteReady={peer.remoteReady}
-        canHostShareGame={canHostShareGame}
-        emuReady={emuReadyForPeer}
         hostOnScreenP2={hostOnScreenP2}
         onHostOnScreenP2Change={setHostOnScreenP2}
         onCreateHost={() => peer.createHostOffer(sessionMode)}
         onAcceptAnswer={(answer) => peer.acceptGuestAnswer(answer)}
         onJoinOffer={(offer) => peer.joinWithOffer(offer, sessionMode)}
-        onShareGame={() => coop.shareGame()}
-        onReady={() => peer.sendReady()}
-        onGo={() => peer.sendGo()}
-        onResync={() => coop.pushResync()}
-        onRequestResync={() => peer.requestResync()}
         onDisconnect={() => peer.disconnect()}
         onOpenControllers={() => {
           setPeerOpen(false)

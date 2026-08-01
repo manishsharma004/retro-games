@@ -254,6 +254,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
               if (modeRef.current === 'local' || modeRef.current === 'remote') {
                 updatePhase('playing')
                 optionsRef.current.onGo?.()
+              } else if (modeRef.current === 'coop') {
+                updatePhase('playing')
               }
             }
             optionsRef.current.onLinked?.()

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import { copySignalString } from '../lib/peer'
 import type { SessionMode } from '../lib/peer/protocol'
-import type { PeerPhase } from '../hooks/usePeerSession'
+import type { PeerPhase, PeerTransferStatus } from '../hooks/usePeerSession'
 import type { PeerConnectionState, PeerRole, PeerSeat } from '../lib/peer'
 
 interface PeerLobbyProps {
@@ -20,12 +20,19 @@ interface PeerLobbyProps {
   signalingLabel: string
   connectionPathLabel: string
   useManualSignaling: boolean
+  transfer: PeerTransferStatus
   error: string | null
+  remoteReady: boolean
+  canHostShareGame: boolean
+  emuReady: boolean
   hostOnScreenP2: boolean
   onHostOnScreenP2Change: (on: boolean) => void
   onCreateHost: () => void | Promise<void>
   onAcceptAnswer: (answer: string) => void | Promise<void>
   onJoinOffer: (offer: string) => void | Promise<void>
+  onShareGame: () => void | Promise<void>
+  onReady: () => void
+  onGo: () => void
   onDisconnect: () => void
   onOpenControllers?: () => void
 }
@@ -45,12 +52,19 @@ export function PeerLobby({
   signalingLabel,
   connectionPathLabel,
   useManualSignaling,
+  transfer,
   error,
+  remoteReady,
+  canHostShareGame,
+  emuReady,
   hostOnScreenP2,
   onHostOnScreenP2Change,
   onCreateHost,
   onAcceptAnswer,
   onJoinOffer,
+  onShareGame,
+  onReady,
+  onGo,
   onDisconnect,
   onOpenControllers,
 }: PeerLobbyProps) {
@@ -102,6 +116,9 @@ export function PeerLobby({
 
   const signalKind: 'offer' | 'answer' | null =
     phase === 'host-offer' ? 'offer' : phase === 'guest-answer' ? 'answer' : null
+
+  const transferPct =
+    transfer.total > 0 ? Math.min(100, Math.round((transfer.received / transfer.total) * 100)) : 0
 
   const showCoopFlow = sessionMode === 'coop'
   const showManualExchange =
@@ -268,7 +285,7 @@ export function PeerLobby({
                     checked={sessionMode === 'coop'}
                     onChange={() => onSessionModeChange('coop')}
                   />
-                  <span>Dual-emulator (input sync only — load same ROM on each device)</span>
+                  <span>Dual-emulator (ROM setup, then input sync)</span>
                 </label>
                 <label className="peer-lobby__mode">
                   <input
@@ -413,21 +430,56 @@ export function PeerLobby({
               Mode: <strong>{sessionMode}</strong> · Role: <strong>{role ?? '—'}</strong> · P
               {seat ?? '—'} · {connectionState}
             </p>
-            {phase === 'linked' && showCoopFlow && (
-              <p className="peer-lobby__hint">
-                Linked — load the <strong>same ROM</strong> on both devices. Only controller inputs
-                are shared; games may drift out of sync.
-              </p>
+            {phase === 'linked' && role === 'host' && showCoopFlow && (
+              <>
+                {canHostShareGame ? (
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    disabled={busy}
+                    onClick={() => void withBusy(onShareGame)}
+                  >
+                    Share ROM &amp; load game
+                  </button>
+                ) : (
+                  <p className="peer-lobby__hint">Load a ROM on this device, then share.</p>
+                )}
+              </>
             )}
             {phase === 'linked' && role === 'host' && !showCoopFlow && (
               <p className="peer-lobby__hint">
                 Linked — {sessionMode === 'local' ? 'waiting for controller input' : 'starting stream…'}
               </p>
             )}
+            {phase === 'linked' && role === 'guest' && showCoopFlow && (
+              <p className="peer-lobby__hint">Waiting for host to share ROM…</p>
+            )}
+            {phase === 'transferring' && (
+              <p>
+                Transferring {transfer.kind ?? 'data'}… {transferPct}%
+              </p>
+            )}
+            {phase === 'ready-wait' && showCoopFlow && (
+              <div className="peer-lobby__row">
+                <button type="button" className="btn btn--ghost" disabled={!emuReady} onClick={onReady}>
+                  Ready
+                </button>
+                {role === 'host' && (
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    disabled={!remoteReady || !emuReady}
+                    onClick={onGo}
+                  >
+                    Go
+                  </button>
+                )}
+              </div>
+            )}
             {phase === 'playing' && showCoopFlow && (
               <p className="peer-lobby__hint">
-                Input sync active — P{seat} on this device. Desync is expected without save-state
-                sync.
+                Input sync active — P{seat} on this device. Games may drift without ongoing
+                state sync.
               </p>
             )}
           </div>

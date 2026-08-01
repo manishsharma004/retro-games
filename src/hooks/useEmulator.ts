@@ -22,6 +22,8 @@ export interface ActiveGame {
   source: 'file' | 'demo' | 'library' | 'peer'
   file?: File
   libraryFile?: string
+  /** Locked 60 Hz audio-sync timing for dual-emulator co-op. */
+  coopMode?: boolean
 }
 
 interface PendingLaunch {
@@ -29,6 +31,10 @@ interface PendingLaunch {
   rom: File | string
   state?: Blob
   startPaused?: boolean
+}
+
+function isCoopLaunch(game: ActiveGame): boolean {
+  return Boolean(game.coopMode || game.source === 'peer')
 }
 
 export interface UseEmulatorResult {
@@ -64,6 +70,8 @@ export interface UseEmulatorResult {
   releaseAllInputs: () => void
   isRunning: () => boolean
   relaunchWithSettings: () => void
+  /** Relaunch with co-op timing config (host, before sharing ROM). */
+  applyCoopTiming: () => Promise<void>
   getNostalgist: () => Nostalgist | null
 }
 
@@ -85,6 +93,10 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
   const [game, setGame] = useState<ActiveGame | null>(null)
   const [pending, setPending] = useState<PendingLaunch | null>(null)
   const statusRef = useRef(status)
+  const launchWaiterRef = useRef<{
+    resolve: () => void
+    reject: (err: Error) => void
+  } | null>(null)
 
   settingsRef.current = settings
   statusRef.current = status
@@ -147,6 +159,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
       try {
         const current = settingsRef.current
         const system = SYSTEMS[pending.game.system]
+        const coop = isCoopLaunch(pending.game)
 
         prepareResponsiveCanvas(canvas)
 
@@ -166,8 +179,8 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
           },
           shader: current.shader || undefined,
           cache: { core: true, shader: true },
-          retroarchConfig: buildRetroarchConfig(current),
-          retroarchCoreConfig: buildCoreConfig(pending.game.system, current),
+          retroarchConfig: buildRetroarchConfig(current, { coop }),
+          retroarchCoreConfig: buildCoreConfig(pending.game.system, current, { coop }),
         })
 
         if (cancelled) {
@@ -186,10 +199,15 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
         } else {
           setStatus('running')
         }
+        launchWaiterRef.current?.resolve()
+        launchWaiterRef.current = null
       } catch (err) {
         console.error(err)
+        const message = err instanceof Error ? err.message : 'Failed to launch ROM'
+        launchWaiterRef.current?.reject(new Error(message))
+        launchWaiterRef.current = null
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to launch ROM')
+          setError(message)
           setStatus('error')
           cleanup()
         }
@@ -295,6 +313,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
           core: SYSTEMS[opts.system].core,
           source: 'peer',
           file,
+          coopMode: true,
         },
         rom: file,
         state: opts.state,
@@ -501,6 +520,55 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     else if (active.file) launchFile(active.file)
   }, [launchDemo, launchFile])
 
+  const waitForLaunch = useCallback(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        launchWaiterRef.current = { resolve, reject }
+        window.setTimeout(() => {
+          if (launchWaiterRef.current) {
+            launchWaiterRef.current.reject(new Error('Emulator launch timed out'))
+            launchWaiterRef.current = null
+          }
+        }, 90_000)
+      }),
+    [],
+  )
+
+  const applyCoopTiming = useCallback(async () => {
+    const active = gameRef.current
+    if (!active || active.coopMode) return
+
+    const stateBlob = await exportStateBlob({ keepPaused: true })
+    if (!stateBlob) throw new Error('Could not capture save state for co-op timing')
+
+    const coopGame: ActiveGame = { ...active, coopMode: true }
+
+    const launch = (rom: File | string) => {
+      queueLaunch({
+        game: coopGame,
+        rom,
+        state: stateBlob,
+        startPaused: true,
+      })
+    }
+
+    if (active.source === 'demo') {
+      launch('flappybird.nes')
+    } else if (active.file) {
+      launch(active.file)
+    } else if (active.libraryFile) {
+      const res = await fetch(romUrl(active.libraryFile))
+      if (!res.ok) throw new Error(`Could not load ${active.libraryFile}`)
+      const blob = await res.blob()
+      const file = new File([blob], active.libraryFile, { type: 'application/octet-stream' })
+      launch(file)
+    } else {
+      throw new Error('ROM unavailable for co-op timing relaunch')
+    }
+
+    await waitForLaunch()
+  }, [exportStateBlob, queueLaunch, waitForLaunch])
+
   const getNostalgist = useCallback(() => nostalgistRef.current, [])
 
   return {
@@ -529,6 +597,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     releaseAllInputs,
     isRunning,
     relaunchWithSettings,
+    applyCoopTiming,
     getNostalgist,
   }
 }

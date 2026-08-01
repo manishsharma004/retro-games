@@ -1,11 +1,14 @@
 import type { SystemId } from '../cores'
-import type { EmulatorSettings } from '../settings'
+import { coopTimingSettings, type EmulatorSettings } from '../settings'
 
 export type PeerSeat = 1 | 2 | 3 | 4
 
 export type PeerRole = 'host' | 'guest'
 
 export type SessionMode = 'local' | 'remote' | 'coop'
+
+/** Wall-clock lead time so both peers schedule resume at the same instant. */
+export const COOP_GO_DELAY_MS = 400
 
 export interface PeerSyncSettings {
   swapAB: boolean
@@ -15,17 +18,20 @@ export interface PeerSyncSettings {
   snesRegion: EmulatorSettings['snesRegion']
   frameSkip: number
   rewindEnable: boolean
+  videoVsync: boolean
 }
 
 export function pickSyncSettings(settings: EmulatorSettings): PeerSyncSettings {
+  const coop = coopTimingSettings(settings)
   return {
-    swapAB: settings.swapAB,
-    allowOpposingDirections: settings.allowOpposingDirections,
-    nesRegion: settings.nesRegion,
-    nesTurbo: settings.nesTurbo,
-    snesRegion: settings.snesRegion,
-    frameSkip: settings.frameSkip,
-    rewindEnable: settings.rewindEnable,
+    swapAB: coop.swapAB,
+    allowOpposingDirections: coop.allowOpposingDirections,
+    nesRegion: coop.nesRegion,
+    nesTurbo: coop.nesTurbo,
+    snesRegion: coop.snesRegion,
+    frameSkip: coop.frameSkip,
+    rewindEnable: coop.rewindEnable,
+    videoVsync: coop.videoVsync,
   }
 }
 

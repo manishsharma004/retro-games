@@ -26,7 +26,7 @@ import {
   type ControllerBindings,
 } from './lib/gamepad'
 import { fetchLibrary, type LibraryRom } from './lib/library'
-import { loadSettings, saveSettings, type EmulatorSettings } from './lib/settings'
+import { coopTimingSettings, loadSettings, saveSettings, type EmulatorSettings } from './lib/settings'
 import './styles/app.css'
 
 function prefersTouch(): boolean {
@@ -75,17 +75,20 @@ export default function App({ initialCoopJoin = null }: AppProps) {
     }) => {
       skipAutoLoadRef.current = true
       autoLoadedRef.current = true
-      setSettings((prev) => ({
-        ...prev,
-        swapAB: payload.settings.swapAB ?? prev.swapAB,
-        allowOpposingDirections:
-          payload.settings.allowOpposingDirections ?? prev.allowOpposingDirections,
-        nesRegion: payload.settings.nesRegion ?? prev.nesRegion,
-        nesTurbo: payload.settings.nesTurbo ?? prev.nesTurbo,
-        snesRegion: payload.settings.snesRegion ?? prev.snesRegion,
-        frameSkip: payload.settings.frameSkip ?? prev.frameSkip,
-        rewindEnable: payload.settings.rewindEnable ?? prev.rewindEnable,
-      }))
+      setSettings((prev) =>
+        coopTimingSettings({
+          ...prev,
+          swapAB: payload.settings.swapAB ?? prev.swapAB,
+          allowOpposingDirections:
+            payload.settings.allowOpposingDirections ?? prev.allowOpposingDirections,
+          nesRegion: payload.settings.nesRegion ?? prev.nesRegion,
+          nesTurbo: payload.settings.nesTurbo ?? prev.nesTurbo,
+          snesRegion: payload.settings.snesRegion ?? prev.snesRegion,
+          frameSkip: payload.settings.frameSkip ?? prev.frameSkip,
+          rewindEnable: payload.settings.rewindEnable ?? prev.rewindEnable,
+          videoVsync: payload.settings.videoVsync ?? prev.videoVsync,
+        }),
+      )
       const ext = payload.system === 'nes' ? 'nes' : 'sfc'
       emu.launchPeer({
         name: payload.name,
@@ -109,8 +112,15 @@ export default function App({ initialCoopJoin = null }: AppProps) {
     [emu],
   )
 
-  const handleGo = useCallback(() => {
-    emu.resume()
+  const handleGo = useCallback((resumeAt?: number) => {
+    const run = () => emu.resume()
+    if (!resumeAt) {
+      run()
+      return
+    }
+    const delay = resumeAt - Date.now()
+    if (delay <= 0) run()
+    else window.setTimeout(run, delay)
   }, [emu])
 
   const coopRef = useRef<ReturnType<typeof useCoopSession> | null>(null)

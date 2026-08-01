@@ -168,6 +168,7 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
   const handleResyncState = useCallback(
     async (data: Uint8Array, compressed = false) => {
       if (!enabled) return
+      // Capture run state before import even if resync-start was delayed/reordered.
       pauseForResync()
       setImporting(true)
       try {

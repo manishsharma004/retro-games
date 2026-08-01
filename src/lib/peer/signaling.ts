@@ -14,6 +14,8 @@ export interface SignalingAdapter {
   guestPublishAnswer(code: string, answer: string): Promise<void>
   waitForAnswer(code: string, timeoutMs?: number): Promise<string>
   guestFetchOffer(code: string, timeoutMs?: number): Promise<string>
+  sendSessionMessage?(data: unknown): void
+  onSessionMessage?(handler: (data: unknown) => void): () => void
   close(opts?: { rejectPending?: boolean }): void
 }
 
@@ -286,6 +288,46 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
   private answerTimer: number | null = null
   private hostCode: string | null = null
   private disconnecting = false
+  private sessionHandlers = new Set<(data: unknown) => void>()
+
+  private handleConnData(data: unknown, code: string) {
+    const msg = data as {
+      type?: string
+      answer?: string
+      offer?: string
+      sdp?: string
+    }
+    if (msg.type === 'answer' && msg.answer) {
+      writeRoom(code, { answer: msg.answer })
+      this.deliverAnswer(msg.answer)
+      return
+    }
+    if (msg.type === 'ice-reoffer' && msg.sdp) {
+      this.emitSessionMessage(msg)
+      return
+    }
+    if (msg.type === 'ice-reanswer' && msg.sdp) {
+      this.emitSessionMessage(msg)
+      return
+    }
+    if (msg.type === 'offer' && msg.offer) {
+      this.emitSessionMessage(msg)
+    }
+  }
+
+  private emitSessionMessage(data: unknown) {
+    for (const handler of this.sessionHandlers) handler(data)
+  }
+
+  sendSessionMessage(data: unknown) {
+    if (!this.conn?.open) return
+    this.conn.send(data)
+  }
+
+  onSessionMessage(handler: (data: unknown) => void) {
+    this.sessionHandlers.add(handler)
+    return () => this.sessionHandlers.delete(handler)
+  }
 
   private deliverAnswer(answer: string) {
     if (this.answerResolve) {
@@ -352,11 +394,7 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
         conn.send({ type: 'offer', offer, meta })
       })
       conn.on('data', (data: unknown) => {
-        const msg = data as { type?: string; answer?: string }
-        if (msg.type === 'answer' && msg.answer) {
-          writeRoom(code, { answer: msg.answer })
-          this.deliverAnswer(msg.answer)
-        }
+        this.handleConnData(data, code)
       })
     })
 
@@ -408,11 +446,13 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     return new Promise<string>((resolve, reject) => {
       const timer = window.setTimeout(() => reject(new Error('PeerJS offer timeout')), timeoutMs)
       conn.on('data', (data: unknown) => {
-        const msg = data as { type?: string; offer?: string }
+        const msg = data as { type?: string; offer?: string; sdp?: string }
         if (msg.type === 'offer' && msg.offer) {
           window.clearTimeout(timer)
           resolve(msg.offer)
+          return
         }
+        this.handleConnData(data, normalized)
       })
       void waitConnOpen(conn, 12_000)
         .then(() => conn.send({ type: 'guest-ready' }))
@@ -430,6 +470,7 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     }
     this.clearAnswerWait()
     this.pendingAnswer = null
+    this.sessionHandlers.clear()
     this.conn?.close()
     this.peer?.destroy()
     this.conn = null
@@ -538,6 +579,19 @@ export class SignalingAdapterChain {
       } catch {
         adapter.close()
       }
+    }
+  }
+
+  sendSessionMessage(data: unknown) {
+    this.active?.sendSessionMessage?.(data)
+  }
+
+  onSessionMessage(handler: (data: unknown) => void) {
+    const unsubs = this.adapters
+      .map((adapter) => adapter.onSessionMessage?.(handler))
+      .filter(Boolean) as Array<() => void>
+    return () => {
+      for (const unsub of unsubs) unsub()
     }
   }
 

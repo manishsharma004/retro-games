@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   PeerConnection,
+  formatConnectionPath,
   pickSyncSettings,
+  type ConnectionPath,
+  type IceTier,
   type PeerConnectionState,
   type PeerRole,
   type PeerSeat,
@@ -72,6 +75,9 @@ export interface UsePeerSessionResult {
   signalingPath: SignalingAdapterName
   signalingLabel: string
   useManualSignaling: boolean
+  connectionPath: ConnectionPath
+  connectionPathLabel: string
+  iceTier: IceTier
   remoteStream: MediaStream | null
   transfer: PeerTransferStatus
   error: string | null
@@ -125,6 +131,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   const resyncCompressedRef = useRef(false)
   const hostGenerationRef = useRef(0)
   const hostOfferInFlightRef = useRef(false)
+  const signalingSessionUnsubRef = useRef<(() => void) | null>(null)
 
   const [phase, setPhase] = useState<PeerPhase>('idle')
   const [role, setRole] = useState<PeerRole | null>(null)
@@ -136,6 +143,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   const [joinUrl, setJoinUrl] = useState<string | null>(null)
   const [signalingPath, setSignalingPath] = useState<SignalingAdapterName>('peerjs')
   const [useManualSignaling, setUseManualSignaling] = useState(false)
+  const [connectionPath, setConnectionPath] = useState<ConnectionPath>('unknown')
+  const [iceTier, setIceTier] = useState<IceTier>('local')
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
   const [transfer, setTransfer] = useState<PeerTransferStatus>({
     kind: null,
@@ -162,6 +171,55 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     }
   }, [])
 
+  const publishRenegotiation = useCallback((type: 'ice-reoffer' | 'ice-reanswer', sdp: string) => {
+    const conn = connRef.current
+    const chain = signalingRef.current
+    const payload = { type, sdp }
+    if (conn?.connected) {
+      try {
+        conn.sendControl(payload)
+        return
+      } catch {
+        // fall through to signaling channel
+      }
+    }
+    chain?.sendSessionMessage(payload)
+  }, [])
+
+  const handleRenegotiationOffer = useCallback(
+    async (sdp: string) => {
+      const conn = connRef.current
+      if (!conn) return
+      try {
+        const answer = await conn.acceptRenegotiationOffer(sdp)
+        publishRenegotiation('ice-reanswer', answer)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'ICE renegotiation failed')
+      }
+    },
+    [publishRenegotiation],
+  )
+
+  const handleRenegotiationAnswer = useCallback(async (sdp: string) => {
+    try {
+      await connRef.current?.acceptRenegotiationAnswer(sdp)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'ICE renegotiation failed')
+    }
+  }, [])
+
+  const wireSignalingSession = useCallback(
+    (chain: SignalingAdapterChain) => {
+      signalingSessionUnsubRef.current?.()
+      signalingSessionUnsubRef.current = chain.onSessionMessage((data) => {
+        const msg = data as { type?: string; sdp?: string }
+        if (msg.type === 'ice-reoffer' && msg.sdp) void handleRenegotiationOffer(msg.sdp)
+        if (msg.type === 'ice-reanswer' && msg.sdp) void handleRenegotiationAnswer(msg.sdp)
+      })
+    },
+    [handleRenegotiationAnswer, handleRenegotiationOffer],
+  )
+
   const createConnection = useCallback(() => {
     connRef.current?.close()
     bootstrapDoneRef.current = false
@@ -171,6 +229,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     remoteReadyRef.current = false
     setRemoteReady(false)
     setRemoteStream(null)
+    setConnectionPath('unknown')
+    setIceTier('local')
 
     const conn = new PeerConnection({
       onState: (state) => {
@@ -214,6 +274,15 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       onSignalRefresh: (signal) => {
         setLocalSignal(signal)
         if (roleRef.current === 'guest') updatePhase('guest-answer')
+      },
+      onRenegotiationOffer: (signal) => {
+        publishRenegotiation('ice-reoffer', signal)
+      },
+      onIceTierChange: (tier) => {
+        setIceTier(tier)
+      },
+      onConnectionPath: (path) => {
+        setConnectionPath(path)
       },
       onError: (err) => {
         setError(err.message)
@@ -262,6 +331,10 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           }
         } else if (msg.type === 'pong') {
           optionsRef.current.onLatency?.(Date.now() - msg.t)
+        } else if (msg.type === 'ice-reoffer') {
+          void handleRenegotiationOffer(msg.sdp)
+        } else if (msg.type === 'ice-reanswer') {
+          void handleRenegotiationAnswer(msg.sdp)
         }
       },
       onTransferProgress: ({ kind, received, total }) => {
@@ -302,7 +375,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     })
     connRef.current = conn
     return conn
-  }, [sendHello, updatePhase])
+  }, [handleRenegotiationAnswer, handleRenegotiationOffer, publishRenegotiation, sendHello, updatePhase])
 
   useEffect(() => {
     return () => {
@@ -344,6 +417,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         signalingRef.current?.close()
         const chain = new SignalingAdapterChain()
         signalingRef.current = chain
+        wireSignalingSession(chain)
 
         const room = await chain.hostRoom(offer, { mode })
         if (generation !== hostGenerationRef.current) return
@@ -376,7 +450,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         hostOfferInFlightRef.current = false
       }
     },
-    [createConnection, updatePhase],
+    [createConnection, updatePhase, wireSignalingSession],
   )
 
   const acceptGuestAnswer = useCallback(
@@ -431,6 +505,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         signalingRef.current?.close()
         const chain = new SignalingAdapterChain()
         signalingRef.current = chain
+        wireSignalingSession(chain)
 
         try {
           const offer = await chain.guestFetchOffer(normalized)
@@ -457,7 +532,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         }
       }
     },
-    [createConnection, updatePhase],
+    [createConnection, updatePhase, wireSignalingSession],
   )
 
   const sendBootstrap = useCallback(
@@ -545,6 +620,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   const disconnect = useCallback(() => {
     hostGenerationRef.current += 1
     hostOfferInFlightRef.current = false
+    signalingSessionUnsubRef.current?.()
+    signalingSessionUnsubRef.current = null
     signalingRef.current?.close({ rejectPending: true })
     signalingRef.current = null
     connRef.current?.close()
@@ -559,6 +636,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     setJoinUrl(null)
     setRemoteStream(null)
     setUseManualSignaling(false)
+    setConnectionPath('unknown')
+    setIceTier('local')
     updatePhase('idle')
     setError(null)
     setTransfer({ kind: null, received: 0, total: 0 })
@@ -578,6 +657,9 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     signalingPath,
     signalingLabel: formatSignalingPath(signalingPath),
     useManualSignaling,
+    connectionPath,
+    connectionPathLabel: formatConnectionPath(connectionPath),
+    iceTier,
     remoteStream,
     transfer,
     error,

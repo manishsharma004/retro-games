@@ -622,6 +622,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
         roomCode={peer.roomCode}
         joinUrl={peer.joinUrl}
         signalingLabel={peer.signalingLabel}
+        connectionPathLabel={peer.connectionPathLabel}
         useManualSignaling={peer.useManualSignaling}
         transfer={peer.transfer}
         error={peer.error}

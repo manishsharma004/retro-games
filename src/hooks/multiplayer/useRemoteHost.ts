@@ -53,6 +53,6 @@ export function useRemoteHost({ enabled, peer, emu, isHost, onVideoOnly }: UseRe
     captureFps,
     canCapture: supportsCanvasCapture(),
     network: readNetworkQuality(),
-    iceTier: getIceConfig().tier,
+    iceTier: getIceConfig().connectivityTier,
   }
 }

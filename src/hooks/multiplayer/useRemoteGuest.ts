@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+import type { LatencyProfile } from '../../lib/peer'
 import type { UsePeerSessionResult } from '../usePeerSession'
 import type { ModeHookBase } from './types'
 
@@ -6,8 +7,19 @@ export interface UseRemoteGuestOptions extends ModeHookBase {
   peer: UsePeerSessionResult
 }
 
+export interface UseRemoteGuestResult {
+  videoRef: RefObject<HTMLVideoElement | null>
+  needsTap: boolean
+  hasVideo: boolean
+  unmute: () => void
+  latencyMs: number | null
+  latencyProfile: LatencyProfile
+  onPress: (button: string) => void
+  onRelease: (button: string) => void
+}
+
 /** Guest remote mode: display video stream and send input. */
-export function useRemoteGuest({ enabled, peer }: UseRemoteGuestOptions) {
+export function useRemoteGuest({ enabled, peer }: UseRemoteGuestOptions): UseRemoteGuestResult {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [needsTap, setNeedsTap] = useState(false)
   const [hasVideo, setHasVideo] = useState(false)

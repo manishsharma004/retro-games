@@ -54,8 +54,8 @@ export interface UseEmulatorResult {
   toggleFastForward: () => void
   saveState: () => Promise<void>
   loadState: () => Promise<void>
-  exportStateBlob: () => Promise<Blob | null>
-  importStateBlob: (state: Blob) => Promise<void>
+  exportStateBlob: (options?: { keepPaused?: boolean }) => Promise<Blob | null>
+  importStateBlob: (state: Blob, options?: { keepPaused?: boolean }) => Promise<void>
   getRomBytes: () => Promise<Uint8Array | null>
   pressDown: (button: string, player?: number) => void
   pressUp: (button: string, player?: number) => void
@@ -403,7 +403,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     }
   }, [])
 
-  const exportStateBlob = useCallback(async () => {
+  const exportStateBlob = useCallback(async (options?: { keepPaused?: boolean }) => {
     const emu = nostalgistRef.current
     if (!emu || stateIoBusyRef.current) return null
     stateIoBusyRef.current = true
@@ -414,7 +414,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
       const { state } = await emu.saveState()
       return state
     } finally {
-      if (wasRunning && nostalgistRef.current === emu) {
+      if (wasRunning && !options?.keepPaused && nostalgistRef.current === emu) {
         emu.resume()
         setStatus('running')
       }
@@ -422,7 +422,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     }
   }, [releaseAllInputs])
 
-  const importStateBlob = useCallback(async (state: Blob) => {
+  const importStateBlob = useCallback(async (state: Blob, options?: { keepPaused?: boolean }) => {
     const emu = nostalgistRef.current
     if (!emu || stateIoBusyRef.current) return
     stateIoBusyRef.current = true
@@ -433,7 +433,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
       await emu.loadState(state)
       releaseAllInputs()
     } finally {
-      if (wasRunning && nostalgistRef.current === emu) {
+      if (wasRunning && !options?.keepPaused && nostalgistRef.current === emu) {
         emu.resume()
         setStatus('running')
       }

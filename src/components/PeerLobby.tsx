@@ -521,8 +521,8 @@ export function PeerLobby({
             {phase === 'playing' && showCoopFlow && (
               <>
                 <p className="peer-lobby__hint">
-                  Input sync active — P{seat} on this device. Emulators may drift over time; use
-                  manual state sync when needed.
+                  Input sync active — P{seat} on this device. Emulators may drift over time; state
+                  sync pauses both devices, transfers the host save state, then resumes together.
                 </p>
                 {onSyncGameState && (
                   <div className="peer-lobby__row">

@@ -157,6 +157,10 @@ export default function App({ initialCoopJoin = null }: AppProps) {
       if (sessionMode !== 'coop') return
       coopRef.current?.handleResyncStart()
     },
+    onResyncDone: () => {
+      if (sessionMode !== 'coop') return
+      coopRef.current?.handleResyncDone()
+    },
   })
 
   const peerRef = useRef(peer)

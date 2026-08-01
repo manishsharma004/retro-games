@@ -30,3 +30,11 @@ export {
   type SessionMode,
 } from './protocol'
 export { copySignalString, shareSignalString } from './share'
+export {
+  classifyLatency,
+  formatLatency,
+  getLatencyProfile,
+  smoothLatency,
+  type LatencyProfile,
+  type LatencyTier,
+} from './latency'

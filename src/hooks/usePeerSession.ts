@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   PeerConnection,
   formatConnectionPath,
+  getLatencyProfile,
   pickSyncSettings,
+  smoothLatency,
   type ConnectionPath,
   type IceTier,
+  type LatencyProfile,
   type PeerConnectionState,
   type PeerRole,
   type PeerSeat,
@@ -84,6 +87,10 @@ export interface UsePeerSessionResult {
   transfer: PeerTransferStatus
   error: string | null
   remoteReady: boolean
+  /** Round-trip latency (EMA-smoothed); null until first pong. */
+  latencyMs: number | null
+  /** Tier, advice, and mode-specific thresholds derived from latency. */
+  latencyProfile: LatencyProfile
   /** Seat claimed by the remote peer (for mutual exclusion). */
   remoteSeat: PeerSeat | null
   pickSeat: (seat: 1 | 2) => boolean
@@ -163,7 +170,13 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   })
   const [error, setError] = useState<string | null>(null)
   const [remoteReady, setRemoteReady] = useState(false)
+  const [latencyMs, setLatencyMs] = useState<number | null>(null)
   const [remoteSeat, setRemoteSeat] = useState<PeerSeat | null>(null)
+
+  const latencyProfile = useMemo(
+    () => getLatencyProfile(latencyMs, sessionMode, connectionPath),
+    [latencyMs, sessionMode, connectionPath],
+  )
 
   const updatePhase = useCallback((next: PeerPhase) => {
     phaseRef.current = next
@@ -395,7 +408,9 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
             // ignore
           }
         } else if (msg.type === 'pong') {
-          optionsRef.current.onLatency?.(Date.now() - msg.t)
+          const sample = Date.now() - msg.t
+          setLatencyMs((prev) => smoothLatency(prev, sample))
+          optionsRef.current.onLatency?.(sample)
         } else if (msg.type === 'ice-reoffer') {
           void handleRenegotiationOffer(msg.sdp, msg.tier)
         } else if (msg.type === 'ice-reanswer') {
@@ -670,6 +685,14 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     }
   }, [])
 
+  useEffect(() => {
+    if (connectionState !== 'connected') return
+    const ping = () => sendPing(Date.now())
+    ping()
+    const id = window.setInterval(ping, latencyProfile.pingIntervalMs)
+    return () => window.clearInterval(id)
+  }, [connectionState, latencyProfile.pingIntervalMs, sendPing])
+
   const sendResyncState = useCallback(async (state: Uint8Array, compressed = false) => {
     const conn = connRef.current
     if (!conn?.connected) return
@@ -727,6 +750,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     setTransfer({ kind: null, received: 0, total: 0 })
     setConnectionState('idle')
     setRemoteReady(false)
+    setLatencyMs(null)
   }, [updatePhase])
 
   return {
@@ -748,6 +772,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     transfer,
     error,
     remoteReady,
+    latencyMs,
+    latencyProfile,
     remoteSeat,
     pickSeat,
     isSeatAvailable,

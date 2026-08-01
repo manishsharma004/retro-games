@@ -20,13 +20,22 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
   const [syncPending, setSyncPending] = useState(false)
   const [pushing, setPushing] = useState(false)
   const [importing, setImporting] = useState(false)
+  const [, setSyncTick] = useState(0)
   const wasRunningBeforeResyncRef = useRef(false)
+  const lastStateSyncAtRef = useRef(Date.now())
 
   useEffect(() => {
     if (!syncPending) return
     const timer = window.setTimeout(() => setSyncPending(false), 90_000)
     return () => window.clearTimeout(timer)
   }, [syncPending])
+
+  useEffect(() => {
+    if (!enabled || peer.phase !== 'playing') return
+    if (peer.latencyProfile.coopSyncIntervalMs === null) return
+    const id = window.setInterval(() => setSyncTick((t) => t + 1), 15_000)
+    return () => window.clearInterval(id)
+  }, [enabled, peer.phase, peer.latencyProfile.coopSyncIntervalMs])
 
   const pauseForResync = useCallback(() => {
     if (!enabled) return
@@ -73,6 +82,7 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
       state,
       libraryFile: emu.game.libraryFile,
     })
+    lastStateSyncAtRef.current = Date.now()
   }, [enabled, isHost, emu, peer])
 
   const pushGameState = useCallback(async () => {
@@ -93,6 +103,7 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
       const raw = new Uint8Array(await blob.arrayBuffer())
       const { payload, compressed } = compressStateBlob(raw)
       await peer.sendResyncState(payload, compressed)
+      lastStateSyncAtRef.current = Date.now()
     } catch (err) {
       abortResync()
       throw err
@@ -130,6 +141,7 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
         await emu.importStateBlob(blob, { keepPaused: true })
         peer.sendResyncDone()
         resumeAfterResync()
+        lastStateSyncAtRef.current = Date.now()
       } catch (err) {
         console.error(err)
         abortResync()
@@ -151,6 +163,12 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
 
   const stateSyncBusy = pushing || syncPending || importing
 
+  const suggestStateSync =
+    enabled &&
+    peer.phase === 'playing' &&
+    peer.latencyProfile.coopSyncIntervalMs !== null &&
+    Date.now() - lastStateSyncAtRef.current > peer.latencyProfile.coopSyncIntervalMs
+
   return {
     shareGame,
     syncGameState,
@@ -160,5 +178,6 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
     handleResyncState,
     syncPending,
     stateSyncBusy,
+    suggestStateSync,
   }
 }

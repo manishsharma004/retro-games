@@ -244,11 +244,17 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   )
 
   const publishRenegotiation = useCallback(
-    (type: 'ice-reoffer' | 'ice-reanswer', sdp: string, tier?: IceTier) => {
+    (
+      type: 'ice-reoffer' | 'ice-reanswer' | 'media-reoffer' | 'media-reanswer',
+      sdp: string,
+      tier?: IceTier,
+    ) => {
       const conn = connRef.current
       const chain = signalingRef.current
       const payload =
-        type === 'ice-reoffer' ? { type, sdp, tier: tier ?? 'relay' } : { type, sdp }
+        type === 'ice-reoffer'
+          ? { type, sdp, tier: tier ?? 'relay' }
+          : { type, sdp }
       if (conn?.connected) {
         try {
           conn.sendControl(payload)
@@ -284,6 +290,28 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     }
   }, [])
 
+  const handleMediaRenegotiationOffer = useCallback(
+    async (sdp: string) => {
+      const conn = connRef.current
+      if (!conn) return
+      try {
+        const answer = await conn.acceptMediaRenegotiationOffer(sdp)
+        publishRenegotiation('media-reanswer', answer)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Video stream negotiation failed')
+      }
+    },
+    [publishRenegotiation],
+  )
+
+  const handleMediaRenegotiationAnswer = useCallback(async (sdp: string) => {
+    try {
+      await connRef.current?.acceptMediaRenegotiationAnswer(sdp)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Video stream negotiation failed')
+    }
+  }, [])
+
   const wireSignalingSession = useCallback(
     (chain: SignalingAdapterChain) => {
       signalingSessionUnsubRef.current?.()
@@ -291,9 +319,16 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         const msg = data as { type?: string; sdp?: string; tier?: IceTier }
         if (msg.type === 'ice-reoffer' && msg.sdp) void handleRenegotiationOffer(msg.sdp, msg.tier)
         if (msg.type === 'ice-reanswer' && msg.sdp) void handleRenegotiationAnswer(msg.sdp)
+        if (msg.type === 'media-reoffer' && msg.sdp) void handleMediaRenegotiationOffer(msg.sdp)
+        if (msg.type === 'media-reanswer' && msg.sdp) void handleMediaRenegotiationAnswer(msg.sdp)
       })
     },
-    [handleRenegotiationAnswer, handleRenegotiationOffer],
+    [
+      handleRenegotiationAnswer,
+      handleRenegotiationOffer,
+      handleMediaRenegotiationAnswer,
+      handleMediaRenegotiationOffer,
+    ],
   )
 
   const createConnection = useCallback(() => {
@@ -421,6 +456,10 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           void handleRenegotiationOffer(msg.sdp, msg.tier)
         } else if (msg.type === 'ice-reanswer') {
           void handleRenegotiationAnswer(msg.sdp)
+        } else if (msg.type === 'media-reoffer') {
+          void handleMediaRenegotiationOffer(msg.sdp)
+        } else if (msg.type === 'media-reanswer') {
+          void handleMediaRenegotiationAnswer(msg.sdp)
         }
       },
       onTransferProgress: ({ kind, received, total }) => {
@@ -468,7 +507,16 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     })
     connRef.current = conn
     return conn
-  }, [applyRemoteSeat, handleRenegotiationAnswer, handleRenegotiationOffer, publishRenegotiation, sendHello, updatePhase])
+  }, [
+    applyRemoteSeat,
+    handleRenegotiationAnswer,
+    handleRenegotiationOffer,
+    handleMediaRenegotiationAnswer,
+    handleMediaRenegotiationOffer,
+    publishRenegotiation,
+    sendHello,
+    updatePhase,
+  ])
 
   useEffect(() => {
     return () => {
@@ -730,11 +778,18 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     }
   }, [])
 
-  const attachMediaStream = useCallback(async (stream: MediaStream) => {
-    const conn = connRef.current
-    if (!conn) throw new Error('No connection')
-    conn.addMediaStream(stream)
-  }, [])
+  const attachMediaStream = useCallback(
+    async (stream: MediaStream) => {
+      const conn = connRef.current
+      if (!conn) throw new Error('No connection')
+      const needsRenegotiation = conn.addMediaStream(stream)
+      if (needsRenegotiation && roleRef.current === 'host') {
+        const sdp = await conn.createMediaRenegotiationOffer()
+        publishRenegotiation('media-reoffer', sdp)
+      }
+    },
+    [publishRenegotiation],
+  )
 
   const getConnection = useCallback(() => connRef.current, [])
 

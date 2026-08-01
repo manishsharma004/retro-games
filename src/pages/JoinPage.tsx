@@ -178,10 +178,27 @@ export function JoinPage({ initialRoom, initialMode }: JoinPageProps) {
               playsInline
               muted
             />
+            {!remoteGuest.hasVideo && peer.connectionState === 'connected' && (
+              <p className="join-page__hint">Waiting for host video stream…</p>
+            )}
             {remoteGuest.needsTap && (
               <button type="button" className="btn btn--primary join-page__unmute" onClick={remoteGuest.unmute}>
                 Tap to start video
               </button>
+            )}
+            {peer.phase === 'playing' && (
+              <VirtualController
+                system="nes"
+                onPress={remoteGuest.onPress}
+                onRelease={remoteGuest.onRelease}
+                visible
+                dpadMode="dpad"
+                overlay={false}
+                size="large"
+                scaleBoost={1.2}
+                opacity={0.92}
+                layout={DEFAULT_LAYOUT}
+              />
             )}
           </>
         )}

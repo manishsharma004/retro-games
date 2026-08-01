@@ -131,6 +131,10 @@ export function RemotePlayGuestView({
   }, [autoFullscreen])
 
   useEffect(() => {
+    if (remoteGuest.hasVideo) peer.clearHostNotice()
+  }, [remoteGuest.hasVideo, peer.clearHostNotice])
+
+  useEffect(() => {
     if (!peerPlaying || !remoteGuest.hasVideo || isFullscreen) return
     if (autoFullscreen && touchDevice) {
       void enterFullscreen()
@@ -361,6 +365,12 @@ export function RemotePlayGuestView({
             {!remoteGuest.hasVideo && peer.connectionState === 'connected' && (
               <div className="play-overlay">
                 <p>Waiting for host video stream…</p>
+              </div>
+            )}
+            {peer.error === 'Host ended the game' && (
+              <div className="play-overlay play-overlay--dim">
+                <p className="play-overlay__title">Host ended the game</p>
+                <p>Waiting for the host to load a new ROM…</p>
               </div>
             )}
             {remoteGuest.needsTap && (

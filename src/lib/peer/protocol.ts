@@ -52,7 +52,7 @@ export type ControlMessage =
   | { type: 'resync-done' }
   | { type: 'ping'; t: number }
   | { type: 'pong'; t: number }
-  | { type: 'ice-reoffer'; sdp: string }
+  | { type: 'ice-reoffer'; sdp: string; tier?: 'local' | 'relay' }
   | { type: 'ice-reanswer'; sdp: string }
 
 /** Binary chunk header: magic(2) + type(1) + id(2) + index(2) + count(2) = 9 bytes */

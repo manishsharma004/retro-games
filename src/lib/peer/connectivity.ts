@@ -55,8 +55,8 @@ function turnServers(): RTCIceServer[] {
 }
 
 /**
- * Local tier: STUN only — prefers host (LAN/Wi‑Fi) candidates after SDP handshake.
- * Relay tier: STUN + TURN — fallback when direct path cannot be established.
+ * Local tier: STUN only — tries LAN host candidates and direct internet (STUN/srflx).
+ * Relay tier: STUN + TURN — fallback when peers are on different networks / strict NAT.
  */
 export function getIceConfig(tier: IceTier = 'local'): IceConfig {
   const relay = turnServers()
@@ -73,7 +73,7 @@ export function formatConnectionPath(path: ConnectionPath): string {
     case 'local':
       return 'Local Wi‑Fi / LAN'
     case 'stun':
-      return 'Direct (STUN)'
+      return 'Direct (internet)'
     case 'relay':
       return 'Relay (TURN)'
     case 'unknown':

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { LatencyBadge } from '../components/LatencyBadge'
+import { RemotePlayGuestView } from '../components/RemotePlayGuestView'
 import { VirtualController } from '../components/VirtualController'
 import { usePeerSession } from '../hooks/usePeerSession'
 import { useLocalGuest } from '../hooks/multiplayer/useLocalGuest'
@@ -140,76 +141,51 @@ export function JoinPage({ initialRoom, initialMode }: JoinPageProps) {
   }
 
   if (mode === 'remote') {
+    if (joined) {
+      return (
+        <RemotePlayGuestView
+          peer={peer}
+          remoteGuest={remoteGuest}
+          roomCode={roomInput.trim()}
+          onLeave={() => {
+            joinStartedRef.current = false
+            setJoined(false)
+          }}
+        />
+      )
+    }
+
     return (
-      <div className="join-page join-page--stream">
-        <header className="join-page__header">
-          <h1>Remote play</h1>
-          <p className="join-page__status">
-            {peer.phase} · {peer.connectionState}
-            {peer.connectionState === 'connected' && (
-              <>
-                {' '}
-                · <LatencyBadge profile={peer.latencyProfile} connected showAdvice />
-              </>
-            )}
-            {peer.error ? ` · ${peer.error}` : ''}
+      <div className="app join-page join-page--remote-lobby">
+        <div className="atmosphere" aria-hidden="true" />
+        <header className="hero hero--compact">
+          <p className="hero__brand">Retro Games</p>
+          <h1 className="hero__tagline">Remote play</h1>
+          <p className="hero__sub">
+            Watch the host&apos;s screen and control the game from this device.
           </p>
-        </header>
-        {!joined ? (
-          <div className="join-page__form">
-            <label>
-              Room code
+          <div className="join-page__form join-page__form--hero">
+            <label className="field">
+              <span>Room code</span>
               <input
                 className="join-page__input"
                 value={roomInput}
                 onChange={(e) => setRoomInput(e.target.value.toUpperCase())}
+                placeholder="5829"
+                maxLength={6}
               />
             </label>
-            <button type="button" className="btn btn--primary" onClick={() => setJoined(true)}>
+            <button
+              type="button"
+              className="btn btn--primary"
+              disabled={!roomInput.trim()}
+              onClick={() => setJoined(true)}
+            >
               Watch &amp; play
             </button>
+            {peer.error && <p className="join-page__error">{peer.error}</p>}
           </div>
-        ) : (
-          <div className="join-page__stream-body">
-            <div className="join-page__stage">
-              <video
-                ref={remoteGuest.videoRef}
-                className="join-page__video"
-                autoPlay
-                playsInline
-                muted
-              />
-              {!remoteGuest.hasVideo && peer.connectionState === 'connected' && (
-                <p className="join-page__hint join-page__stage-hint">
-                  Waiting for host video stream…
-                </p>
-              )}
-              {remoteGuest.needsTap && (
-                <button
-                  type="button"
-                  className="btn btn--primary join-page__unmute"
-                  onClick={remoteGuest.unmute}
-                >
-                  Tap to start video
-                </button>
-              )}
-            </div>
-            {peer.phase === 'playing' && (
-              <VirtualController
-                system="nes"
-                onPress={remoteGuest.onPress}
-                onRelease={remoteGuest.onRelease}
-                visible
-                dpadMode="dpad"
-                overlay={false}
-                size="large"
-                scaleBoost={1.2}
-                opacity={0.92}
-                layout={DEFAULT_LAYOUT}
-              />
-            )}
-          </div>
-        )}
+        </header>
       </div>
     )
   }

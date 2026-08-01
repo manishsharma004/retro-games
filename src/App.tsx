@@ -599,14 +599,20 @@ export default function App({ initialCoopJoin = null }: AppProps) {
         bindings={controllerBindings}
         onChange={setControllerBindings}
         peerSeat={peerActive && (localSeat === 1 || localSeat === 2) ? localSeat : null}
-        remoteSeat={sessionMode === 'coop' && peerActive ? peer.remoteSeat : null}
+        remoteSeat={
+          (sessionMode === 'coop' || sessionMode === 'local') && peerActive
+            ? peer.remoteSeat
+            : null
+        }
         onPickSeat={
-          sessionMode === 'coop' && peer.connectionState === 'connected'
+          (sessionMode === 'coop' || sessionMode === 'local') &&
+          peer.connectionState === 'connected'
             ? peer.pickSeat
             : undefined
         }
         isSeatAvailable={
-          sessionMode === 'coop' && peer.connectionState === 'connected'
+          (sessionMode === 'coop' || sessionMode === 'local') &&
+          peer.connectionState === 'connected'
             ? peer.isSeatAvailable
             : undefined
         }

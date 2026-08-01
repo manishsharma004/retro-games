@@ -31,6 +31,9 @@ export function JoinPage({ initialRoom, initialMode }: JoinPageProps) {
     peer,
   })
 
+  const showSeatPicker =
+    mode === 'local' && peer.connectionState === 'connected'
+
   const remoteGuest = useRemoteGuest({
     enabled: mode === 'remote' && joined,
     peer,
@@ -46,7 +49,7 @@ export function JoinPage({ initialRoom, initialMode }: JoinPageProps) {
     return (
       <div className="join-page join-page--controller">
         <header className="join-page__header">
-          <h1>Player {localGuest.seat}</h1>
+          <h1>Player {localGuest.seat ?? peer.seat ?? '—'}</h1>
           <p className="join-page__status">
             {peer.phase === 'connecting' && 'Connecting to room…'}
             {peer.phase === 'guest-answer' && 'Waiting for host to accept…'}
@@ -81,18 +84,48 @@ export function JoinPage({ initialRoom, initialMode }: JoinPageProps) {
             {peer.error && <p className="join-page__error">{peer.error}</p>}
           </div>
         ) : (
-          <VirtualController
-            system="nes"
-            onPress={localGuest.onPress}
-            onRelease={localGuest.onRelease}
-            visible
-            dpadMode="dpad"
-            overlay={false}
-            size="large"
-            scaleBoost={1.2}
-            opacity={0.92}
-            layout={DEFAULT_LAYOUT}
-          />
+          <>
+            {showSeatPicker && (
+              <div className="join-page__seats" role="radiogroup" aria-label="Player slot">
+                <p className="join-page__label">Your controller</p>
+                {([1, 2] as const).map((player) => {
+                  const taken = !peer.isSeatAvailable(player)
+                  const checked = peer.seat === player
+                  return (
+                    <label key={player} className="join-page__seat">
+                      <input
+                        type="radio"
+                        name="join-player-slot"
+                        checked={checked}
+                        disabled={taken && !checked}
+                        onChange={() => peer.pickSeat(player)}
+                      />
+                      <span>
+                        Player {player}
+                        {checked ? ' (you)' : ''}
+                        {taken && !checked ? ' (taken)' : ''}
+                      </span>
+                    </label>
+                  )
+                })}
+                {peer.remoteSeat && peer.seat && peer.remoteSeat !== peer.seat && (
+                  <p className="join-page__hint">Other device is Player {peer.remoteSeat}.</p>
+                )}
+              </div>
+            )}
+            <VirtualController
+              system="nes"
+              onPress={localGuest.onPress}
+              onRelease={localGuest.onRelease}
+              visible
+              dpadMode="dpad"
+              overlay={false}
+              size="large"
+              scaleBoost={1.2}
+              opacity={0.92}
+              layout={DEFAULT_LAYOUT}
+            />
+          </>
         )}
         {joined && peer.error && <p className="join-page__error">{peer.error}</p>}
       </div>

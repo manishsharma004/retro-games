@@ -128,7 +128,7 @@ export function PeerLobby({
 
   const showCoopFlow = sessionMode === 'coop'
   const showSeatPicker =
-    showCoopFlow &&
+    (sessionMode === 'coop' || sessionMode === 'local') &&
     connectionState === 'connected' &&
     Boolean(onPickSeat && isSeatAvailable)
   const showManualExchange =
@@ -457,12 +457,15 @@ export function PeerLobby({
                       />
                       <span>
                         Player {player}
+                        {checked ? ' (you)' : ''}
                         {taken && !checked ? ' (taken)' : ''}
-                        {remoteSeat === player && checked ? ' · you' : ''}
                       </span>
                     </label>
                   )
                 })}
+                {remoteSeat && seat && remoteSeat !== seat && (
+                  <p className="peer-lobby__hint">Other device is Player {remoteSeat}.</p>
+                )}
               </div>
             )}
             {phase === 'linked' && role === 'host' && showCoopFlow && (

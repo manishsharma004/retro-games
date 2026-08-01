@@ -179,6 +179,9 @@ export default function App({ initialCoopJoin = null }: AppProps) {
       if (sessionMode !== 'coop') return
       coopRef.current?.handleResyncDone(resumeAt)
     },
+    onHostExit: () => {
+      emu.exit()
+    },
   })
 
   const peerRef = useRef(peer)
@@ -234,6 +237,18 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   const localSeat = resolveLocalSeat()
   const peerPlaying = peer.phase === 'playing'
   const peerActive = peer.role !== null && peer.phase !== 'idle' && peer.phase !== 'error'
+
+  const handleExitGame = useCallback(() => {
+    if (
+      peer.role === 'host' &&
+      peer.connectionState === 'connected' &&
+      peer.phase !== 'idle' &&
+      peer.phase !== 'error'
+    ) {
+      peer.sendHostExit()
+    }
+    emu.exit()
+  }, [peer, emu])
 
   const { queueLocalInput, applyRemoteInput } = useCoopInputDelay({
     enabled: sessionMode === 'coop' && peerPlaying,
@@ -593,7 +608,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
                   Pad layout
                 </button>
               )}
-              <button type="button" className="btn btn--ghost" onClick={emu.exit}>
+              <button type="button" className="btn btn--ghost" onClick={handleExitGame}>
                 Exit
               </button>
             </div>

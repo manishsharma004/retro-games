@@ -60,6 +60,7 @@ interface UsePeerSessionOptions {
   onRemoteInput?: (seat: PeerSeat, button: string, down: boolean, executeAt?: number) => void
   onBootstrap?: (payload: PeerBootstrapPayload) => void | Promise<void>
   onGo?: (resumeAt?: number) => void
+  onHostExit?: () => void
   onResyncState?: (state: Uint8Array, compressed?: boolean) => void | Promise<void>
   onResyncRequest?: () => void
   onResyncStart?: () => void
@@ -113,6 +114,7 @@ export interface UsePeerSessionResult {
   }) => Promise<void>
   sendReady: () => void
   sendGo: () => void
+  sendHostExit: () => void
   sendInput: (button: string, down: boolean, executeAt?: number) => void
   sendPing: (t: number) => void
   sendResyncState: (state: Uint8Array, compressed?: boolean) => Promise<void>
@@ -121,6 +123,7 @@ export interface UsePeerSessionResult {
   attachMediaStream: (stream: MediaStream) => Promise<void>
   getConnection: () => PeerConnection | null
   disconnect: () => void
+  clearHostNotice: () => void
   /** Current seat from ref (always in sync with sendInput). */
   getSeat: () => PeerSeat | null
 }
@@ -412,6 +415,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         } else if (msg.type === 'seat-pick') {
           applyRemoteSeat(msg.seat, conn)
         } else if (msg.type === 'bootstrap') {
+          setError(null)
           bootstrapDoneRef.current = false
           romBufRef.current = null
           stateBufRef.current = null
@@ -433,8 +437,15 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           remoteReadyRef.current = true
           setRemoteReady(true)
         } else if (msg.type === 'go') {
+          setError(null)
           updatePhase('playing')
           optionsRef.current.onGo?.(msg.at)
+        } else if (msg.type === 'host-exit') {
+          updatePhase('linked')
+          if (roleRef.current === 'guest') {
+            setError('Host ended the game')
+            optionsRef.current.onHostExit?.()
+          }
         } else if (msg.type === 'resync-request') {
           optionsRef.current.onResyncRequest?.()
         } else if (msg.type === 'resync-start') {
@@ -720,6 +731,17 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     optionsRef.current.onGo?.(at)
   }, [updatePhase])
 
+  const sendHostExit = useCallback(() => {
+    const conn = connRef.current
+    if (!conn?.connected || roleRef.current !== 'host') return
+    try {
+      conn.sendControl({ type: 'host-exit' })
+      updatePhase('linked')
+    } catch {
+      // ignore
+    }
+  }, [updatePhase])
+
   const sendInput = useCallback((button: string, down: boolean, executeAt?: number) => {
     const conn = connRef.current
     const s = seatRef.current
@@ -795,6 +817,10 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
 
   const getSeat = useCallback(() => seatRef.current, [])
 
+  const clearHostNotice = useCallback(() => {
+    setError((prev) => (prev === 'Host ended the game' ? null : prev))
+  }, [])
+
   const disconnect = useCallback(() => {
     hostGenerationRef.current += 1
     hostOfferInFlightRef.current = false
@@ -858,6 +884,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     sendBootstrap,
     sendReady,
     sendGo,
+    sendHostExit,
     sendInput,
     sendPing,
     sendResyncState,
@@ -866,6 +893,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     attachMediaStream,
     getConnection,
     disconnect,
+    clearHostNotice,
     getSeat,
   }
 }

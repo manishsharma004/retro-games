@@ -41,6 +41,7 @@ export type ControlMessage =
   | { type: 'seat-pick'; seat: PeerSeat }
   | { type: 'ready' }
   | { type: 'go'; at: number }
+  | { type: 'host-exit' }
   | {
       type: 'bootstrap'
       name: string

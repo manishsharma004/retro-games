@@ -34,6 +34,9 @@ interface PeerLobbyProps {
   onReady: () => void
   onGo: () => void
   onDisconnect: () => void
+  remoteSeat?: PeerSeat | null
+  onPickSeat?: (seat: 1 | 2) => void
+  isSeatAvailable?: (seat: 1 | 2) => boolean
   onOpenControllers?: () => void
 }
 
@@ -66,6 +69,9 @@ export function PeerLobby({
   onReady,
   onGo,
   onDisconnect,
+  remoteSeat = null,
+  onPickSeat,
+  isSeatAvailable,
   onOpenControllers,
 }: PeerLobbyProps) {
   const [pasteValue, setPasteValue] = useState('')
@@ -121,6 +127,10 @@ export function PeerLobby({
     transfer.total > 0 ? Math.min(100, Math.round((transfer.received / transfer.total) * 100)) : 0
 
   const showCoopFlow = sessionMode === 'coop'
+  const showSeatPicker =
+    showCoopFlow &&
+    connectionState === 'connected' &&
+    Boolean(onPickSeat && isSeatAvailable)
   const showManualExchange =
     manualOpen ||
     useManualSignaling ||
@@ -430,6 +440,31 @@ export function PeerLobby({
               Mode: <strong>{sessionMode}</strong> · Role: <strong>{role ?? '—'}</strong> · P
               {seat ?? '—'} · {connectionState}
             </p>
+            {showSeatPicker && (
+              <div className="peer-lobby__modes" role="radiogroup" aria-label="Player slot">
+                <p className="peer-lobby__label">Your controller</p>
+                {([1, 2] as const).map((player) => {
+                  const taken = !isSeatAvailable!(player)
+                  const checked = seat === player
+                  return (
+                    <label key={player} className="peer-lobby__mode">
+                      <input
+                        type="radio"
+                        name="player-slot"
+                        checked={checked}
+                        disabled={taken && !checked}
+                        onChange={() => onPickSeat!(player)}
+                      />
+                      <span>
+                        Player {player}
+                        {taken && !checked ? ' (taken)' : ''}
+                        {remoteSeat === player && checked ? ' · you' : ''}
+                      </span>
+                    </label>
+                  )
+                })}
+              </div>
+            )}
             {phase === 'linked' && role === 'host' && showCoopFlow && (
               <>
                 {canHostShareGame ? (

@@ -82,6 +82,10 @@ export interface UsePeerSessionResult {
   transfer: PeerTransferStatus
   error: string | null
   remoteReady: boolean
+  /** Seat claimed by the remote peer (for mutual exclusion). */
+  remoteSeat: PeerSeat | null
+  pickSeat: (seat: 1 | 2) => boolean
+  isSeatAvailable: (seat: 1 | 2) => boolean
   createHostOffer: (mode?: SessionMode) => Promise<void>
   acceptGuestAnswer: (answer: string) => Promise<void>
   joinWithOffer: (offer: string, mode?: SessionMode) => Promise<void>
@@ -113,6 +117,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   const signalingRef = useRef<SignalingAdapterChain | null>(null)
   const roleRef = useRef<PeerRole | null>(null)
   const seatRef = useRef<PeerSeat | null>(null)
+  const remoteSeatRef = useRef<PeerSeat | null>(null)
   const modeRef = useRef<SessionMode>(options.sessionMode ?? 'local')
   const bootstrapDoneRef = useRef(false)
   const bootstrapMetaRef = useRef<{
@@ -153,6 +158,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   })
   const [error, setError] = useState<string | null>(null)
   const [remoteReady, setRemoteReady] = useState(false)
+  const [remoteSeat, setRemoteSeat] = useState<PeerSeat | null>(null)
 
   const updatePhase = useCallback((next: PeerPhase) => {
     phaseRef.current = next
@@ -170,6 +176,49 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       // ignore
     }
   }, [])
+
+  const applyRemoteSeat = useCallback((seat: PeerSeat, conn: PeerConnection) => {
+    if (seat === seatRef.current) {
+      const other = (seat === 1 ? 2 : 1) as PeerSeat
+      seatRef.current = other
+      setSeat(other)
+      try {
+        conn.sendControl({ type: 'seat-pick', seat: other })
+        sendHello(conn)
+      } catch {
+        // ignore
+      }
+    }
+    remoteSeatRef.current = seat
+    setRemoteSeat(seat)
+  }, [sendHello])
+
+  const isSeatAvailable = useCallback((seat: 1 | 2) => {
+    return remoteSeatRef.current !== seat
+  }, [])
+
+  const pickSeat = useCallback(
+    (seat: 1 | 2) => {
+      if (remoteSeatRef.current === seat) {
+        setError(`Player ${seat} is taken by the other device`)
+        return false
+      }
+      setError(null)
+      seatRef.current = seat
+      setSeat(seat)
+      const conn = connRef.current
+      if (conn?.connected) {
+        try {
+          conn.sendControl({ type: 'seat-pick', seat })
+          sendHello(conn)
+        } catch {
+          // ignore
+        }
+      }
+      return true
+    },
+    [sendHello],
+  )
 
   const publishRenegotiation = useCallback(
     (type: 'ice-reoffer' | 'ice-reanswer', sdp: string, tier?: IceTier) => {
@@ -300,7 +349,10 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         if (msg.type === 'hello') {
           modeRef.current = msg.mode
           setSessionMode(msg.mode)
+          applyRemoteSeat(msg.seat, conn)
           optionsRef.current.onHello?.(msg.mode, msg.seat)
+        } else if (msg.type === 'seat-pick') {
+          applyRemoteSeat(msg.seat, conn)
         } else if (msg.type === 'bootstrap') {
           bootstrapDoneRef.current = false
           romBufRef.current = null
@@ -379,7 +431,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     })
     connRef.current = conn
     return conn
-  }, [handleRenegotiationAnswer, handleRenegotiationOffer, publishRenegotiation, sendHello, updatePhase])
+  }, [applyRemoteSeat, handleRenegotiationAnswer, handleRenegotiationOffer, publishRenegotiation, sendHello, updatePhase])
 
   useEffect(() => {
     return () => {
@@ -632,9 +684,11 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     connRef.current = null
     roleRef.current = null
     seatRef.current = null
+    remoteSeatRef.current = null
     bootstrapDoneRef.current = false
     setRole(null)
     setSeat(null)
+    setRemoteSeat(null)
     setLocalSignal('')
     setRoomCode(null)
     setJoinUrl(null)
@@ -668,6 +722,9 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     transfer,
     error,
     remoteReady,
+    remoteSeat,
+    pickSeat,
+    isSeatAvailable,
     createHostOffer,
     acceptGuestAnswer,
     joinWithOffer,

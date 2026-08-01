@@ -599,6 +599,17 @@ export default function App({ initialCoopJoin = null }: AppProps) {
         bindings={controllerBindings}
         onChange={setControllerBindings}
         peerSeat={peerActive && (localSeat === 1 || localSeat === 2) ? localSeat : null}
+        remoteSeat={sessionMode === 'coop' && peerActive ? peer.remoteSeat : null}
+        onPickSeat={
+          sessionMode === 'coop' && peer.connectionState === 'connected'
+            ? peer.pickSeat
+            : undefined
+        }
+        isSeatAvailable={
+          sessionMode === 'coop' && peer.connectionState === 'connected'
+            ? peer.isSeatAvailable
+            : undefined
+        }
       />
 
       <PeerLobby
@@ -630,6 +641,9 @@ export default function App({ initialCoopJoin = null }: AppProps) {
         onReady={() => peer.sendReady()}
         onGo={() => peer.sendGo()}
         onDisconnect={() => peer.disconnect()}
+        remoteSeat={peer.remoteSeat}
+        onPickSeat={peer.pickSeat}
+        isSeatAvailable={peer.isSeatAvailable}
         onOpenControllers={() => {
           setPeerOpen(false)
           setControllersOpen(true)

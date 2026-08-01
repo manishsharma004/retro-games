@@ -73,7 +73,7 @@ export function AdvancedSettings({
               </label>
               <p className="settings-hint">
                 On phones, fullscreen hides the toolbar and overlays controls on the stream.
-                Double-tap the game to toggle fullscreen.
+                Double-tap the game to enter fullscreen (use ✕ to exit).
               </p>
             </section>
           )}

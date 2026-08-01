@@ -10,7 +10,6 @@ export interface UseRemoteGuestOptions extends ModeHookBase {
 export function useRemoteGuest({ enabled, peer }: UseRemoteGuestOptions) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [needsTap, setNeedsTap] = useState(false)
-  const [latencyMs, setLatencyMs] = useState<number | null>(null)
 
   useEffect(() => {
     if (!enabled) return
@@ -28,25 +27,12 @@ export function useRemoteGuest({ enabled, peer }: UseRemoteGuestOptions) {
     void video.play().then(() => setNeedsTap(false))
   }, [])
 
-  useEffect(() => {
-    if (!enabled || peer.phase !== 'playing') return
-    const id = window.setInterval(() => {
-      const t = Date.now()
-      try {
-        peer.sendPing(t)
-      } catch {
-        // ignore
-      }
-    }, 3000)
-    return () => window.clearInterval(id)
-  }, [enabled, peer])
-
   return {
     videoRef,
     needsTap,
     unmute,
-    latencyMs,
-    setLatencyMs,
+    latencyMs: peer.latencyMs,
+    latencyProfile: peer.latencyProfile,
     onPress: (button: string) => peer.sendInput(button, true),
     onRelease: (button: string) => peer.sendInput(button, false),
   }

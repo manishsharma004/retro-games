@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { LatencyBadge } from '../components/LatencyBadge'
 import { VirtualController } from '../components/VirtualController'
 import { usePeerSession } from '../hooks/usePeerSession'
 import { useLocalGuest } from '../hooks/multiplayer/useLocalGuest'
@@ -59,6 +60,12 @@ export function JoinPage({ initialRoom, initialMode }: JoinPageProps) {
               peer.phase !== 'guest-answer' &&
               'Not connected'}
             {peer.signalingLabel ? ` · ${peer.signalingLabel}` : ''}
+            {peer.connectionState === 'connected' && (
+              <>
+                {' '}
+                · <LatencyBadge profile={peer.latencyProfile} connected showAdvice />
+              </>
+            )}
           </p>
         </header>
         {!joined ? (
@@ -139,6 +146,12 @@ export function JoinPage({ initialRoom, initialMode }: JoinPageProps) {
           <h1>Remote play</h1>
           <p className="join-page__status">
             {peer.phase} · {peer.connectionState}
+            {peer.connectionState === 'connected' && (
+              <>
+                {' '}
+                · <LatencyBadge profile={peer.latencyProfile} connected showAdvice />
+              </>
+            )}
             {peer.error ? ` · ${peer.error}` : ''}
           </p>
         </header>

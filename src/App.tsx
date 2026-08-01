@@ -3,6 +3,7 @@ import { AdvancedSettings } from './components/AdvancedSettings'
 import { ControllerPanel } from './components/ControllerPanel'
 import { EmulatorScreen } from './components/EmulatorScreen'
 import { GamepadStatus } from './components/GamepadStatus'
+import { LatencyBadge } from './components/LatencyBadge'
 import { PeerLobby } from './components/PeerLobby'
 import { RomLoader } from './components/RomLoader'
 import { VirtualController } from './components/VirtualController'
@@ -429,9 +430,20 @@ export default function App({ initialCoopJoin = null }: AppProps) {
                 </span>
               )}
               {peer.role && (
-                <span className="toolbar__peer" title="Multiplayer session">
-                  {sessionMode} · P{peer.seat} · {peer.phase}
-                </span>
+                <>
+                  <span className="toolbar__peer" title="Multiplayer session">
+                    {sessionMode} · P{peer.seat} · {peer.phase}
+                  </span>
+                  <LatencyBadge
+                    profile={peer.latencyProfile}
+                    connected={peer.connectionState === 'connected'}
+                    detail={
+                      sessionMode === 'remote' && isHost && peer.latencyProfile.streamFps < 60
+                        ? `${peer.latencyProfile.streamFps} FPS`
+                        : null
+                    }
+                  />
+                </>
               )}
             </div>
             <div className="toolbar__actions">
@@ -695,6 +707,8 @@ export default function App({ initialCoopJoin = null }: AppProps) {
             : undefined
         }
         stateSyncBusy={coop.stateSyncBusy}
+        latencyProfile={peer.latencyProfile}
+        suggestStateSync={coop.suggestStateSync}
         onOpenControllers={() => {
           setPeerOpen(false)
           setControllersOpen(true)

@@ -1,10 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import {
-  getIceConfig,
-  readNetworkQuality,
-  suggestedCaptureFps,
-  supportsCanvasCapture,
-} from '../../lib/peer/connectivity'
+import { getIceConfig, readNetworkQuality, supportsCanvasCapture } from '../../lib/peer/connectivity'
 import type { UsePeerSessionResult } from '../usePeerSession'
 import type { UseEmulatorResult } from '../useEmulator'
 import type { ModeHookBase } from './types'
@@ -20,7 +15,7 @@ export interface UseRemoteHostOptions extends ModeHookBase {
 export function useRemoteHost({ enabled, peer, emu, isHost, onVideoOnly }: UseRemoteHostOptions) {
   const streamRef = useRef<MediaStream | null>(null)
   const [videoOnly, setVideoOnly] = useState(false)
-  const [captureFps, setCaptureFps] = useState(60)
+  const captureFps = peer.latencyProfile.streamFps
 
   useEffect(() => {
     if (!enabled || !isHost) return
@@ -32,9 +27,7 @@ export function useRemoteHost({ enabled, peer, emu, isHost, onVideoOnly }: UseRe
     const target = nostalgist?.getCanvas?.() ?? canvas
     if (!target) return
 
-    const fps = suggestedCaptureFps()
-    setCaptureFps(fps)
-    const stream = target.captureStream(fps)
+    const stream = target.captureStream(captureFps)
     streamRef.current = stream
 
     void peer.attachMediaStream(stream).catch(() => {
@@ -46,7 +39,7 @@ export function useRemoteHost({ enabled, peer, emu, isHost, onVideoOnly }: UseRe
       stream.getTracks().forEach((t) => t.stop())
       streamRef.current = null
     }
-  }, [enabled, isHost, peer.phase, emu, peer, onVideoOnly])
+  }, [enabled, isHost, peer.phase, peer.attachMediaStream, emu, onVideoOnly, captureFps])
 
   return {
     videoOnly,
@@ -54,5 +47,6 @@ export function useRemoteHost({ enabled, peer, emu, isHost, onVideoOnly }: UseRe
     canCapture: supportsCanvasCapture(),
     network: readNetworkQuality(),
     iceTier: getIceConfig().connectivityTier,
+    latencyMs: peer.latencyMs,
   }
 }

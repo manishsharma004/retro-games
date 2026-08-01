@@ -2264,6 +2264,60 @@ body.rg-faux-fullscreen {
   white-space: nowrap;
 }
 
+.latency-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.68rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.12rem 0.5rem;
+  white-space: nowrap;
+}
+
+.latency-badge__label {
+  font-variant-numeric: tabular-nums;
+}
+
+.latency-badge__detail {
+  opacity: 0.85;
+  font-size: 0.62rem;
+}
+
+.latency-badge__advice {
+  font-size: 0.62rem;
+  opacity: 0.9;
+}
+
+.latency-badge--excellent {
+  color: #7dffb0;
+  border-color: rgba(125, 255, 176, 0.35);
+}
+
+.latency-badge--good {
+  color: #9ee8b8;
+  border-color: rgba(158, 232, 184, 0.35);
+}
+
+.latency-badge--fair {
+  color: #f0d878;
+  border-color: rgba(240, 216, 120, 0.35);
+}
+
+.latency-badge--poor {
+  color: #f0a060;
+  border-color: rgba(240, 160, 96, 0.35);
+}
+
+.latency-badge--bad {
+  color: #f08080;
+  border-color: rgba(240, 128, 128, 0.35);
+}
+
+.latency-badge--unknown {
+  color: var(--muted);
+}
+
 .peer-lobby {
   position: fixed;
   inset: 0;

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
-import { copySignalString } from '../lib/peer'
+import { LatencyBadge } from './LatencyBadge'
+import { copySignalString, type LatencyProfile } from '../lib/peer'
 import type { SessionMode } from '../lib/peer/protocol'
 import type { PeerPhase, PeerTransferStatus } from '../hooks/usePeerSession'
 import type { PeerConnectionState, PeerRole, PeerSeat } from '../lib/peer'
@@ -39,6 +40,8 @@ interface PeerLobbyProps {
   isSeatAvailable?: (seat: 1 | 2) => boolean
   onSyncGameState?: () => void | Promise<void>
   stateSyncBusy?: boolean
+  latencyProfile?: LatencyProfile
+  suggestStateSync?: boolean
   onOpenControllers?: () => void
 }
 
@@ -76,6 +79,8 @@ export function PeerLobby({
   isSeatAvailable,
   onSyncGameState,
   stateSyncBusy = false,
+  latencyProfile,
+  suggestStateSync = false,
   onOpenControllers,
 }: PeerLobbyProps) {
   const [pasteValue, setPasteValue] = useState('')
@@ -357,6 +362,12 @@ export function PeerLobby({
         {phase !== 'idle' && connectionPathLabel && connectionPathLabel !== 'Connecting…' && (
           <p className="peer-lobby__fallback">
             Data path: <strong>{connectionPathLabel}</strong>
+            {connectionState === 'connected' && latencyProfile && (
+              <>
+                {' '}
+                · <LatencyBadge profile={latencyProfile} connected showAdvice />
+              </>
+            )}
           </p>
         )}
 
@@ -524,6 +535,11 @@ export function PeerLobby({
                   Input sync active — P{seat} on this device. Emulators may drift over time; state
                   sync pauses both devices, transfers the host save state, then resumes together.
                 </p>
+                {suggestStateSync && latencyProfile?.advice && (
+                  <p className="peer-lobby__hint peer-lobby__hint--warn">
+                    {latencyProfile.advice}
+                  </p>
+                )}
                 {onSyncGameState && (
                   <div className="peer-lobby__row">
                     <button

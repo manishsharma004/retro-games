@@ -15,6 +15,10 @@ interface AdvancedSettingsProps {
   gamepadCount: number
   onOpenControllers?: () => void
   onOpenLayoutEditor?: () => void
+  /** Remote play guest: show stream-specific options. */
+  remoteGuest?: boolean
+  autoFullscreen?: boolean
+  onAutoFullscreenChange?: (value: boolean) => void
 }
 
 export function AdvancedSettings({
@@ -30,6 +34,9 @@ export function AdvancedSettings({
   gamepadCount,
   onOpenControllers,
   onOpenLayoutEditor,
+  remoteGuest = false,
+  autoFullscreen = false,
+  onAutoFullscreenChange,
 }: AdvancedSettingsProps) {
   if (!open) return null
 
@@ -53,6 +60,24 @@ export function AdvancedSettings({
         </header>
 
         <div className="settings-panel__body">
+          {remoteGuest && onAutoFullscreenChange && (
+            <section className="settings-section">
+              <h3>Remote play</h3>
+              <label className="field field--row">
+                <span>Start in fullscreen</span>
+                <input
+                  type="checkbox"
+                  checked={autoFullscreen}
+                  onChange={(e) => onAutoFullscreenChange(e.target.checked)}
+                />
+              </label>
+              <p className="settings-hint">
+                On phones, fullscreen hides the toolbar and overlays controls on the stream.
+                Double-tap the game to toggle fullscreen.
+              </p>
+            </section>
+          )}
+
           <section className="settings-section">
             <h3>Video</h3>
             <label className="field">

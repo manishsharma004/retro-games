@@ -26,6 +26,8 @@ function prefersTouch(): boolean {
   return window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0
 }
 
+const REMOTE_AUTO_FS_KEY = 'retro-games-remote-auto-fs'
+
 interface RemotePlayGuestViewProps {
   peer: UsePeerSessionResult
   remoteGuest: UseRemoteGuestResult
@@ -48,10 +50,16 @@ export function RemotePlayGuestView({
   const [layoutEditorOpen, setLayoutEditorOpen] = useState(false)
   const [gameSystem, setGameSystem] = useState<SystemId>('nes')
   const [touchDevice] = useState(() => prefersTouch())
+  const [autoFullscreen, setAutoFullscreen] = useState(
+    () => sessionStorage.getItem(REMOTE_AUTO_FS_KEY) === '1',
+  )
+  const [fsPromptOpen, setFsPromptOpen] = useState(false)
+  const lastTapAtRef = useRef(0)
   const playerRef = useRef<HTMLDivElement>(null)
   const {
     isFullscreen,
     cssFallback,
+    enter: enterFullscreen,
     toggle: toggleFullscreen,
     exit: exitFullscreen,
   } = useFullscreen(playerRef)
@@ -61,7 +69,7 @@ export function RemotePlayGuestView({
   const peerPlaying = peer.phase === 'playing'
   const peerActive = peer.role !== null && peer.phase !== 'idle' && peer.phase !== 'error'
   const localSeat = peer.seat === 1 || peer.seat === 2 ? peer.seat : null
-  const showSeatPicker = peer.connectionState === 'connected' && !peerPlaying
+  const showSeatPicker = peer.connectionState === 'connected' && !peerPlaying && !isFullscreen
 
   const showVirtual = useMemo(() => {
     if (settings.showVirtualController === 'auto') return touchDevice
@@ -108,7 +116,7 @@ export function RemotePlayGuestView({
     onRelease: onPadRelease,
   })
 
-  usePreventGameTouchGestures(playerRef, peerPlaying)
+  usePreventGameTouchGestures(playerRef, peerPlaying || isFullscreen)
 
   useEffect(() => {
     saveSettings(settings)
@@ -118,31 +126,76 @@ export function RemotePlayGuestView({
     saveControllerBindings(controllerBindings)
   }, [controllerBindings])
 
+  useEffect(() => {
+    sessionStorage.setItem(REMOTE_AUTO_FS_KEY, autoFullscreen ? '1' : '0')
+  }, [autoFullscreen])
+
+  useEffect(() => {
+    if (!peerPlaying || !remoteGuest.hasVideo || isFullscreen) return
+    if (autoFullscreen && touchDevice) {
+      void enterFullscreen()
+      return
+    }
+    if (touchDevice) setFsPromptOpen(true)
+  }, [peerPlaying, remoteGuest.hasVideo, isFullscreen, autoFullscreen, touchDevice, enterFullscreen])
+
+  const onStagePointerUp = useCallback(() => {
+    if (!touchDevice) return
+    const now = Date.now()
+    if (now - lastTapAtRef.current < 320) {
+      void toggleFullscreen()
+      setFsPromptOpen(false)
+    }
+    lastTapAtRef.current = now
+  }, [touchDevice, toggleFullscreen])
+
   const streamDetail =
     peer.latencyProfile.streamFps < 60 ? `${peer.latencyProfile.streamFps} FPS stream` : null
 
   return (
-    <div className="app app--playing">
+    <div
+      ref={playerRef}
+      className={[
+        'app',
+        'app--playing',
+        'player',
+        isFullscreen && 'player--fullscreen',
+        cssFallback && 'player--fullscreen-faux',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
       <div className="atmosphere" aria-hidden="true" />
 
-      <div
-        ref={playerRef}
-        className={[
-          'player',
-          isFullscreen && 'player--fullscreen',
-          cssFallback && 'player--fullscreen-faux',
-        ]
-          .filter(Boolean)
-          .join(' ')}
-      >
-        {minimalFs ? (
-          <>
-            <PlayHud
-              className="play-hud--corner"
-              fps={null}
-              latencyProfile={peer.latencyProfile}
-              peerConnected={peer.connectionState === 'connected'}
-            />
+      {minimalFs ? (
+        <>
+          <PlayHud
+            className="play-hud--corner"
+            fps={null}
+            latencyProfile={peer.latencyProfile}
+            peerConnected={peer.connectionState === 'connected'}
+          />
+          <div className="fs-corner-actions">
+            <button
+              type="button"
+              className="fs-corner-btn"
+              onClick={() => setSettingsOpen(true)}
+              aria-label="Settings"
+              title="Settings"
+            >
+              ⚙
+            </button>
+            {showVirtual && (
+              <button
+                type="button"
+                className="fs-corner-btn"
+                onClick={() => setLayoutEditorOpen(true)}
+                aria-label="Pad layout"
+                title="Pad layout"
+              >
+                ⊞
+              </button>
+            )}
             <button
               type="button"
               className="fs-exit-btn"
@@ -152,68 +205,69 @@ export function RemotePlayGuestView({
             >
               ✕
             </button>
-          </>
-        ) : (
-          <div className="toolbar">
-            <div className="toolbar__left">
-              <span className="toolbar__brand">Retro Games</span>
-              <span className="toolbar__rom" title={`Room ${roomCode}`}>
-                Remote · room {roomCode}
-              </span>
-              {peer.role && (
-                <>
-                  <span className="toolbar__peer" title="Remote play session">
-                    remote · P{peer.seat ?? '—'} · {peer.phase}
-                  </span>
-                  <LatencyBadge
-                    profile={peer.latencyProfile}
-                    connected={peer.connectionState === 'connected'}
-                    detail={streamDetail}
-                  />
-                </>
-              )}
-            </div>
-            <div className="toolbar__actions">
-              <button
-                type="button"
-                className="btn btn--ghost"
-                onClick={() => setGameSystem((s) => (s === 'nes' ? 'snes' : 'nes'))}
-                title="Switch on-screen pad layout (NES / SNES)"
-              >
-                {gameSystem.toUpperCase()}
-              </button>
-              <button type="button" className="btn btn--ghost" onClick={() => void toggleFullscreen()}>
-                {isFullscreen ? 'Exit FS' : 'Fullscreen'}
-              </button>
-              <button type="button" className="btn btn--ghost" onClick={() => setSettingsOpen(true)}>
-                Settings
-              </button>
-              {showVirtual && (
-                <button
-                  type="button"
-                  className="btn btn--ghost"
-                  onClick={() => setLayoutEditorOpen(true)}
-                >
-                  Pad layout
-                </button>
-              )}
-              <button
-                type="button"
-                className="btn btn--ghost"
-                onClick={() => {
-                  peer.disconnect()
-                  exitFullscreen()
-                  onLeave()
-                }}
-              >
-                Leave
-              </button>
-            </div>
-            <GamepadStatus pads={pads} onOpen={() => setControllersOpen(true)} />
           </div>
-        )}
+        </>
+      ) : (
+        <div className="toolbar">
+          <div className="toolbar__left">
+            <span className="toolbar__brand">Retro Games</span>
+            <span className="toolbar__rom" title={`Room ${roomCode}`}>
+              Remote · room {roomCode}
+            </span>
+            {peer.role && (
+              <>
+                <span className="toolbar__peer" title="Remote play session">
+                  remote · P{peer.seat ?? '—'} · {peer.phase}
+                </span>
+                <LatencyBadge
+                  profile={peer.latencyProfile}
+                  connected={peer.connectionState === 'connected'}
+                  detail={streamDetail}
+                />
+              </>
+            )}
+          </div>
+          <div className="toolbar__actions">
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={() => setGameSystem((s) => (s === 'nes' ? 'snes' : 'nes'))}
+              title="Switch on-screen pad layout (NES / SNES)"
+            >
+              {gameSystem.toUpperCase()}
+            </button>
+            <button type="button" className="btn btn--ghost" onClick={() => void toggleFullscreen()}>
+              Fullscreen
+            </button>
+            <button type="button" className="btn btn--ghost" onClick={() => setSettingsOpen(true)}>
+              Settings
+            </button>
+            {showVirtual && (
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => setLayoutEditorOpen(true)}
+              >
+                Pad layout
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={() => {
+                peer.disconnect()
+                exitFullscreen()
+                onLeave()
+              }}
+            >
+              Leave
+            </button>
+          </div>
+          <GamepadStatus pads={pads} onOpen={() => setControllersOpen(true)} />
+        </div>
+      )}
 
-        {showSeatPicker && (
+      {showSeatPicker && (
           <div className="join-page__seats remote-guest__seats" role="radiogroup" aria-label="Player slot">
             <p className="join-page__label">Your controller</p>
             {([1, 2] as const).map((player) => {
@@ -248,6 +302,7 @@ export function RemotePlayGuestView({
           <div
             className={`play-stage${effectivePadOverlay ? ' play-stage--pad-overlay' : ''}`}
             style={effectivePadOverlay ? undefined : { aspectRatio: '4 / 3' }}
+            onPointerUp={onStagePointerUp}
           >
             <video
               ref={remoteGuest.videoRef}
@@ -256,6 +311,53 @@ export function RemotePlayGuestView({
               playsInline
               muted
             />
+            {!isFullscreen && remoteGuest.hasVideo && (
+              <button
+                type="button"
+                className="fs-enter-btn"
+                onClick={() => {
+                  setFsPromptOpen(false)
+                  void enterFullscreen()
+                }}
+                aria-label="Enter fullscreen"
+                title="Enter fullscreen"
+              >
+                ⛶
+              </button>
+            )}
+            {fsPromptOpen && !isFullscreen && remoteGuest.hasVideo && (
+              <div className="play-overlay play-overlay--dim remote-guest__fs-prompt">
+                <p className="play-overlay__title">Fullscreen available</p>
+                <p>Double-tap the game or use the corner button for fullscreen.</p>
+                <div className="remote-guest__fs-prompt-actions">
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    onClick={() => {
+                      setFsPromptOpen(false)
+                      void enterFullscreen()
+                    }}
+                  >
+                    Enter fullscreen
+                  </button>
+                  <label className="remote-guest__auto-fs">
+                    <input
+                      type="checkbox"
+                      checked={autoFullscreen}
+                      onChange={(e) => setAutoFullscreen(e.target.checked)}
+                    />
+                    Always start fullscreen
+                  </label>
+                  <button
+                    type="button"
+                    className="btn btn--ghost"
+                    onClick={() => setFsPromptOpen(false)}
+                  >
+                    Not now
+                  </button>
+                </div>
+              </div>
+            )}
             {!remoteGuest.hasVideo && peer.connectionState === 'connected' && (
               <div className="play-overlay">
                 <p>Waiting for host video stream…</p>
@@ -300,7 +402,6 @@ export function RemotePlayGuestView({
         </div>
 
         {peer.error && <p className="player__error">{peer.error}</p>}
-      </div>
 
       <AdvancedSettings
         open={settingsOpen}
@@ -312,6 +413,9 @@ export function RemotePlayGuestView({
         onApplyRelaunch={() => setSettingsOpen(false)}
         gameName="Remote stream"
         gamepadCount={pads.length}
+        remoteGuest
+        autoFullscreen={autoFullscreen}
+        onAutoFullscreenChange={setAutoFullscreen}
         onOpenControllers={() => {
           setSettingsOpen(false)
           setControllersOpen(true)

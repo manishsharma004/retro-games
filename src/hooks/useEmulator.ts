@@ -63,6 +63,8 @@ export interface UseEmulatorResult {
   exportStateBlob: (options?: { keepPaused?: boolean }) => Promise<Blob | null>
   importStateBlob: (state: Blob, options?: { keepPaused?: boolean }) => Promise<void>
   getRomBytes: () => Promise<Uint8Array | null>
+  /** Resume after a state load; re-issues resume if the core stays paused. */
+  resumeAfterStateLoad: () => void
   pressDown: (button: string, player?: number) => void
   pressUp: (button: string, player?: number) => void
   remotePressDown: (button: string, player: number) => void
@@ -378,6 +380,22 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     setStatus('running')
   }, [releaseAllInputs])
 
+  const resumeAfterStateLoad = useCallback(() => {
+    releaseAllInputs()
+    const emu = nostalgistRef.current
+    if (!emu) return
+    emu.resume()
+    setStatus('running')
+    requestAnimationFrame(() => {
+      const active = nostalgistRef.current
+      if (!active) return
+      if (active.getStatus() !== 'running') {
+        active.resume()
+        setStatus('running')
+      }
+    })
+  }, [releaseAllInputs])
+
   const restart = useCallback(() => {
     nostalgistRef.current?.restart()
     setStatus('running')
@@ -443,7 +461,15 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
 
   const importStateBlob = useCallback(async (state: Blob, options?: { keepPaused?: boolean }) => {
     const emu = nostalgistRef.current
-    if (!emu || stateIoBusyRef.current) return
+    if (!emu) return
+
+    for (let i = 0; i < 60 && stateIoBusyRef.current; i++) {
+      await new Promise<void>((r) => window.setTimeout(r, 50))
+    }
+    if (stateIoBusyRef.current) {
+      throw new Error('Emulator busy during state import')
+    }
+
     stateIoBusyRef.current = true
     const wasRunning = statusRef.current === 'running'
     try {
@@ -590,6 +616,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     exportStateBlob,
     importStateBlob,
     getRomBytes,
+    resumeAfterStateLoad,
     pressDown,
     pressUp,
     remotePressDown,

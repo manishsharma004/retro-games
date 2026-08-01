@@ -15,6 +15,10 @@ export interface LatencyProfile {
   advice: string | null
   /** Co-op: suggest manual state sync after this many ms of play without sync. */
   coopSyncIntervalMs: number | null
+  /** Co-op: automatic background state sync interval. */
+  coopAutoSyncIntervalMs: number | null
+  /** Co-op: delay before applying remote inputs (ms). */
+  coopInputDelayMs: number
   /** Show input-delay warning in the lobby/toolbar. */
   warnInputDelay: boolean
 }
@@ -39,6 +43,11 @@ export function formatLatency(ms: number | null): string {
   return `${ms} ms`
 }
 
+export function getCoopInputDelayMs(latencyMs: number | null): number {
+  const base = latencyMs ?? 80
+  return Math.min(180, Math.max(60, Math.round(base * 0.75)))
+}
+
 export function getLatencyProfile(
   ms: number | null,
   mode: SessionMode,
@@ -53,6 +62,8 @@ export function getLatencyProfile(
     label: tier === 'unknown' ? 'Measuring…' : formatLatency(ms),
     advice: null,
     coopSyncIntervalMs: null,
+    coopAutoSyncIntervalMs: mode === 'coop' ? 90_000 : null,
+    coopInputDelayMs: getCoopInputDelayMs(ms),
     warnInputDelay: false,
   }
 
@@ -72,6 +83,8 @@ export function getLatencyProfile(
               ? 'Fair latency — stream quality reduced slightly.'
               : 'Fair latency — controller input may feel slightly delayed.',
         coopSyncIntervalMs: 120_000,
+        coopAutoSyncIntervalMs: 60_000,
+        coopInputDelayMs: getCoopInputDelayMs(ms),
         warnInputDelay: mode !== 'remote',
       }
     case 'poor':
@@ -86,6 +99,8 @@ export function getLatencyProfile(
               ? 'High latency — stream capped at 30 FPS.'
               : 'High latency — inputs will feel delayed on the host.',
         coopSyncIntervalMs: 60_000,
+        coopAutoSyncIntervalMs: 45_000,
+        coopInputDelayMs: getCoopInputDelayMs(ms),
         warnInputDelay: true,
       }
     case 'bad':
@@ -100,6 +115,8 @@ export function getLatencyProfile(
               ? 'Very high latency — sync often; inputs are noticeably delayed.'
               : 'Very high latency — expect noticeable input and video delay.',
         coopSyncIntervalMs: 30_000,
+        coopAutoSyncIntervalMs: 30_000,
+        coopInputDelayMs: getCoopInputDelayMs(ms),
         warnInputDelay: true,
       }
     default:
@@ -107,6 +124,7 @@ export function getLatencyProfile(
         ...base,
         pingIntervalMs: 2500,
         label: 'Measuring…',
+        coopInputDelayMs: getCoopInputDelayMs(ms),
       }
   }
 }

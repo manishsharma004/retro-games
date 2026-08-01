@@ -9,6 +9,7 @@ export type SessionMode = 'local' | 'remote' | 'coop'
 
 /** Wall-clock lead time so both peers schedule resume at the same instant. */
 export const COOP_GO_DELAY_MS = 400
+export const COOP_RESYNC_RESUME_DELAY_MS = 400
 
 export interface PeerSyncSettings {
   swapAB: boolean
@@ -56,7 +57,7 @@ export type ControlMessage =
   | { type: 'rumble'; seat: PeerSeat; pattern: number[] }
   | { type: 'resync-request' }
   | { type: 'resync-start' }
-  | { type: 'resync-done' }
+  | { type: 'resync-done'; at: number }
   | { type: 'ping'; t: number }
   | { type: 'pong'; t: number }
   | { type: 'ice-reoffer'; sdp: string; tier?: 'local' | 'relay' }

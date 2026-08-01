@@ -2436,6 +2436,10 @@ body.rg-faux-fullscreen {
   font-size: 0.9rem;
 }
 
+.peer-lobby__hint--warn {
+  color: var(--warn);
+}
+
 .peer-lobby__note {
   margin: 0.35rem 0 0.75rem;
   color: var(--warn);

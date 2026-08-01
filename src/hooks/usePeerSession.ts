@@ -107,6 +107,8 @@ export interface UsePeerSessionResult {
   attachMediaStream: (stream: MediaStream) => Promise<void>
   getConnection: () => PeerConnection | null
   disconnect: () => void
+  /** Current seat from ref (always in sync with sendInput). */
+  getSeat: () => PeerSeat | null
 }
 
 export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionResult {
@@ -673,6 +675,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
 
   const getConnection = useCallback(() => connRef.current, [])
 
+  const getSeat = useCallback(() => seatRef.current, [])
+
   const disconnect = useCallback(() => {
     hostGenerationRef.current += 1
     hostOfferInFlightRef.current = false
@@ -739,5 +743,6 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     attachMediaStream,
     getConnection,
     disconnect,
+    getSeat,
   }
 }

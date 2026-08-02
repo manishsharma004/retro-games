@@ -195,7 +195,9 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       optionsRef.current.onRemoteInput?.(seat, button, down, executeAt),
     onGuestConnected: () => {
       optionsRef.current.onGuestHello?.()
-      if (modeRef.current === 'remote') refreshMediaStreamRef.current()
+      if (modeRef.current === 'remote' && !multiGuestRef.current) {
+        refreshMediaStreamRef.current()
+      }
     },
     onError: (message) => optionsRef.current.onPeerError?.(message),
   })
@@ -644,8 +646,10 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
             optionsRef.current.onLinked?.()
           }, 0)
         } else if (state === 'disconnected') {
+          setRemoteStream(null)
           markConnectionLost('Connection lost — tap Reconnect to resume')
         } else if (state === 'failed') {
+          setRemoteStream(null)
           updatePhase('error')
           markConnectionLost('Peer connection failed')
         } else if (state === 'awaiting-answer') {
@@ -1177,7 +1181,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   const syncHostGameToGuests = useCallback(
     (game: HostGameInfo) => {
       sendGameUpdate(game)
-      if (modeRef.current === 'remote' || multiGuestRef.current) {
+      if (modeRef.current === 'remote' && !multiGuestRef.current) {
         refreshMediaStreamRef.current()
       }
     },

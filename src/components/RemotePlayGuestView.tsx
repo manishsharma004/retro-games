@@ -72,9 +72,12 @@ export function RemotePlayGuestView({
   const localSeat = peer.seat
   const isSpectator = peer.seat === null
   const joining =
-    peer.phase === 'connecting' ||
-    peer.phase === 'guest-answer' ||
-    peer.connectionState === 'connecting'
+    (peer.phase === 'connecting' ||
+      peer.phase === 'guest-answer' ||
+      peer.connectionState === 'connecting') &&
+    !peer.connectionLost &&
+    peer.connectionState !== 'disconnected' &&
+    peer.connectionState !== 'failed'
   const showRolePicker =
     peer.role === 'guest' && peer.phase !== 'idle' && peer.phase !== 'error' && !isFullscreen
   const rolePickerInOverlay = showRolePicker && joining

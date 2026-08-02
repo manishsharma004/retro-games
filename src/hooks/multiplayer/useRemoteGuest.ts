@@ -43,6 +43,18 @@ export function useRemoteGuest({ enabled, peer }: UseRemoteGuestOptions): UseRem
       return
     }
 
+    const disconnected =
+      peer.connectionLost ||
+      peer.connectionState === 'disconnected' ||
+      peer.connectionState === 'failed' ||
+      peer.connectionState === 'closed'
+    if (disconnected) {
+      setHasVideo(false)
+      const video = videoRef.current
+      if (video) video.srcObject = null
+      return
+    }
+
     const stream = peer.remoteStream
     const video = videoRef.current
     if (!stream || !video) return
@@ -91,7 +103,7 @@ export function useRemoteGuest({ enabled, peer }: UseRemoteGuestOptions): UseRem
       video.removeEventListener('loadedmetadata', relayout)
       video.removeEventListener('resize', relayout)
     }
-  }, [enabled, peer.remoteStream, peer.hostGame, peer.streamGeneration])
+  }, [enabled, peer.remoteStream, peer.hostGame, peer.streamGeneration, peer.connectionState, peer.connectionLost])
 
   const unmute = useCallback(() => {
     const video = videoRef.current

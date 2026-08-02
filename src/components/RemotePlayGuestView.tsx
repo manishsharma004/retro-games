@@ -16,7 +16,7 @@ import { useLandscape } from '../hooks/useLandscape'
 import { usePreventGameTouchGestures } from '../hooks/usePreventGameTouchGestures'
 import type { UsePeerSessionResult } from '../hooks/usePeerSession'
 import type { SystemId } from '../lib/cores'
-import { playerSeats } from '../lib/peer/roster'
+import { GuestRolePicker } from './GuestRolePicker'
 import {
   loadControllerBindings,
   saveControllerBindings,
@@ -69,10 +69,15 @@ export function RemotePlayGuestView({
 
   const peerPlaying = peer.phase === 'playing'
   const peerActive = peer.role !== null && peer.phase !== 'idle' && peer.phase !== 'error'
-  const seatPickerSeats = playerSeats(peer.multiGuest ? peer.maxPlayers : 2)
   const localSeat = peer.seat
   const isSpectator = peer.seat === null
-  const showRolePicker = peer.connectionState === 'connected' && !isFullscreen
+  const joining =
+    peer.phase === 'connecting' ||
+    peer.phase === 'guest-answer' ||
+    peer.connectionState === 'connecting'
+  const showRolePicker =
+    peer.role === 'guest' && peer.phase !== 'idle' && peer.phase !== 'error' && !isFullscreen
+  const rolePickerInOverlay = showRolePicker && joining
 
   const showVirtual = useMemo(() => {
     if (settings.showVirtualController === 'auto') return touchDevice
@@ -281,46 +286,9 @@ export function RemotePlayGuestView({
         </div>
       )}
 
-      {showRolePicker && (
-          <div className="join-page__seats remote-guest__seats" role="radiogroup" aria-label="Your role">
-            <p className="join-page__label">Your role</p>
-            {seatPickerSeats.map((player) => {
-              const taken = !peer.isSeatAvailable(player)
-              const checked = peer.seat === player
-              return (
-                <label key={player} className="join-page__seat">
-                  <input
-                    type="radio"
-                    name="remote-player-slot"
-                    checked={checked}
-                    disabled={taken && !checked}
-                    onChange={() => peer.pickRole(player)}
-                  />
-                  <span>
-                    Player {player}
-                    {checked ? ' (you)' : ''}
-                    {taken && !checked ? ' (taken)' : ''}
-                  </span>
-                </label>
-              )
-            })}
-            <label className="join-page__seat">
-              <input
-                type="radio"
-                name="remote-player-slot"
-                checked={peer.seat === null}
-                onChange={() => peer.pickRole(null)}
-              />
-              <span>Spectator{peer.seat === null ? ' (you)' : ''}</span>
-            </label>
-            {!peer.multiGuest && peer.remoteSeat && peer.seat && peer.remoteSeat !== peer.seat && (
-              <p className="join-page__hint">Host is Player {peer.remoteSeat}.</p>
-            )}
-            {!peer.multiGuest && peer.remoteSpectator && peer.seat !== null && (
-              <p className="join-page__hint">Host is spectating.</p>
-            )}
-          </div>
-        )}
+      {showRolePicker && !rolePickerInOverlay && (
+        <GuestRolePicker peer={peer} name="remote-player-slot" className="remote-guest__seats" />
+      )}
 
         <div
           className={`play-shell ${effectivePadOverlay ? 'play-shell--pad-overlay' : 'play-shell--docked'}`}
@@ -351,7 +319,16 @@ export function RemotePlayGuestView({
                 exitFullscreen()
                 onLeave()
               }}
-            />
+            >
+              {rolePickerInOverlay && (
+                <GuestRolePicker
+                  peer={peer}
+                  name="remote-player-slot-overlay"
+                  className="remote-guest__seats remote-guest__seats--overlay"
+                  compact
+                />
+              )}
+            </PeerConnectionStatus>
             {!isFullscreen && remoteGuest.hasVideo && (
               <button
                 type="button"

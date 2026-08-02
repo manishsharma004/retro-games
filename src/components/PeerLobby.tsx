@@ -168,7 +168,10 @@ export function PeerLobby({
   const seatPickerSeats = playerSeats(multiGuest ? maxPlayers : 2)
   const showRolePicker =
     Boolean(pickRoleFn && isSeatAvailable) &&
-    (connectionState === 'connected' || (multiGuest && role === 'host' && phase !== 'idle'))
+    (connectionState === 'connected' ||
+      (role === 'guest' &&
+        (phase === 'connecting' || phase === 'guest-answer' || connectionState === 'connecting')) ||
+      (multiGuest && role === 'host' && phase !== 'idle'))
   const showManualExchange =
     manualOpen ||
     useManualSignaling ||

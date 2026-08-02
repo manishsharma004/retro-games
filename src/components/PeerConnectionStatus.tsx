@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { PeerConnectionState, SessionMode } from '../lib/peer'
 import type { PeerPhase } from '../hooks/usePeerSession'
 
@@ -15,6 +16,7 @@ interface PeerConnectionStatusProps {
   variant?: 'overlay' | 'inline'
   onReconnect?: () => void | Promise<void>
   onLeave?: () => void
+  children?: ReactNode
 }
 
 export function PeerConnectionStatus({
@@ -30,6 +32,7 @@ export function PeerConnectionStatus({
   variant = 'overlay',
   onReconnect,
   onLeave,
+  children,
 }: PeerConnectionStatusProps) {
   const connecting =
     phase === 'connecting' || phase === 'guest-answer' || connectionState === 'connecting'
@@ -95,6 +98,7 @@ export function PeerConnectionStatus({
     >
       <p className="peer-connection-status__title">{title}</p>
       {detail && <p className="peer-connection-status__detail">{detail}</p>}
+      {children}
       <div className="peer-connection-status__actions">
         {(connectionLost || phase === 'error' || (error && onReconnect)) && onReconnect && (
           <button type="button" className="btn btn--primary" onClick={() => void onReconnect()}>

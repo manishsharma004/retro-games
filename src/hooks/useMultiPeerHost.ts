@@ -47,12 +47,12 @@ export function useMultiPeerHost({ hostPeerId, onRemoteInput, onGuestConnected, 
       chain: SignalingAdapterChain,
       roomCode: string,
       maxPlayers: MaxPlayers,
-      opts?: { declareSendonlyMedia?: boolean },
+      opts?: { remotePlay?: boolean },
     ) => {
       const manager = managerRef.current
       if (!manager) return
       manager.setMaxPlayers(maxPlayers)
-      manager.setDeclareSendonlyMedia(opts?.declareSendonlyMedia ?? false)
+      manager.setRemotePlay(opts?.remotePlay ?? false)
       manager.start(chain, roomCode)
     setRoster(manager.getRoster())
     setGuests(manager.getGuests())

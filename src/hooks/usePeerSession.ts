@@ -180,11 +180,16 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   const multiGuestRef = useRef(false)
   const maxPlayersRef = useRef<MaxPlayers>(2)
 
+  const refreshMediaStreamRef = useRef<() => void>(() => {})
+
   const multiHost = useMultiPeerHost({
     hostPeerId: peerIdRef.current,
     onRemoteInput: (seat, button, down, executeAt) =>
       optionsRef.current.onRemoteInput?.(seat, button, down, executeAt),
-    onGuestConnected: () => optionsRef.current.onGuestHello?.(),
+    onGuestConnected: () => {
+      optionsRef.current.onGuestHello?.()
+      if (modeRef.current === 'remote') refreshMediaStreamRef.current()
+    },
     onError: (message) => optionsRef.current.onPeerError?.(message),
   })
 
@@ -447,6 +452,23 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         type === 'ice-reoffer'
           ? { type, sdp, tier: tier ?? 'relay' }
           : { type, sdp }
+      const guestId = signalingGuestIdRef.current
+      if (
+        guestId &&
+        chain &&
+        (type === 'media-reanswer' || type === 'ice-reanswer')
+      ) {
+        void chain.sendGuestSessionMessage(guestId, payload).catch(() => {
+          if (conn?.connected) {
+            try {
+              conn.sendControl(payload)
+            } catch {
+              // ignore
+            }
+          }
+        })
+        return
+      }
       if (conn?.connected) {
         try {
           conn.sendControl(payload)
@@ -455,7 +477,6 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           // fall through to signaling channel
         }
       }
-      const guestId = signalingGuestIdRef.current
       if (guestId) {
         void chain?.sendGuestSessionMessage(guestId, payload)
       } else {
@@ -844,7 +865,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           setJoinUrl(room.joinUrl)
           setSignalingPath(chain.lastAdapter)
           multiHost.start(chain, room.code, playerCap, {
-            declareSendonlyMedia: mode === 'remote',
+            remotePlay: mode === 'remote',
           })
           setRoster(multiHost.roster)
           setConnectionState('connected')
@@ -1093,6 +1114,10 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     setStreamGeneration((n) => n + 1)
   }, [])
 
+  useEffect(() => {
+    refreshMediaStreamRef.current = refreshMediaStream
+  }, [refreshMediaStream])
+
   const sendBootstrap = useCallback(
     async (payload: {
       name: string
@@ -1287,7 +1312,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         if (multiGuestRef.current) {
           multiHost.stop()
           multiHost.start(chain, code, maxPlayersRef.current, {
-            declareSendonlyMedia: modeRef.current === 'remote',
+            remotePlay: modeRef.current === 'remote',
           })
           setConnectionLost(false)
           setConnectionState('connected')

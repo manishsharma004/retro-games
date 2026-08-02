@@ -21,9 +21,17 @@ import {
 import {
   SignalingAdapterChain,
   formatSignalingPath,
+  getSignalingRoomMeta,
   type SignalingAdapterName,
 } from '../lib/peer/signaling'
 import { normalizeRoomCode } from '../lib/peer/joinUrl'
+import { getPeerId } from '../lib/peer/peerId'
+import {
+  clampMaxPlayers,
+  type MaxPlayers,
+  type RosterEntry,
+} from '../lib/peer/roster'
+import { useMultiPeerHost } from './useMultiPeerHost'
 import type { SystemId } from '../lib/cores'
 import type { EmulatorSettings } from '../lib/settings'
 
@@ -57,6 +65,7 @@ export interface PeerBootstrapPayload {
 interface UsePeerSessionOptions {
   settings: EmulatorSettings
   sessionMode?: SessionMode
+  system?: 'nes' | 'snes' | null
   onRemoteInput?: (seat: PeerSeat, button: string, down: boolean, executeAt?: number) => void
   onBootstrap?: (payload: PeerBootstrapPayload) => void | Promise<void>
   onGo?: (resumeAt?: number) => void
@@ -103,10 +112,18 @@ export interface UsePeerSessionResult {
   remoteSpectator: boolean
   connectionLost: boolean
   isSpectator: boolean
-  pickRole: (seat: 1 | 2 | null) => boolean
-  pickSeat: (seat: 1 | 2) => boolean
-  isSeatAvailable: (seat: 1 | 2) => boolean
-  createHostOffer: (mode?: SessionMode) => Promise<void>
+  multiGuest: boolean
+  maxPlayers: MaxPlayers
+  roster: RosterEntry[]
+  peerId: string
+  connectedGuestCount: number
+  pickRole: (seat: PeerSeat | null) => boolean
+  pickSeat: (seat: PeerSeat) => boolean
+  isSeatAvailable: (seat: PeerSeat) => boolean
+  createHostOffer: (
+    mode?: SessionMode,
+    opts?: { maxPlayers?: MaxPlayers; system?: 'nes' | 'snes' },
+  ) => Promise<void>
   acceptGuestAnswer: (answer: string) => Promise<void>
   joinWithOffer: (offer: string, mode?: SessionMode, opts?: { asSpectator?: boolean }) => Promise<void>
   joinWithRoomCode: (
@@ -142,6 +159,17 @@ export interface UsePeerSessionResult {
 export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionResult {
   const optionsRef = useRef(options)
   optionsRef.current = options
+
+  const peerIdRef = useRef(getPeerId())
+  const multiGuestRef = useRef(false)
+  const maxPlayersRef = useRef<MaxPlayers>(2)
+
+  const multiHost = useMultiPeerHost({
+    hostPeerId: peerIdRef.current,
+    onRemoteInput: (seat, button, down, executeAt) =>
+      optionsRef.current.onRemoteInput?.(seat, button, down, executeAt),
+    onError: (message) => optionsRef.current.onPeerError?.(message),
+  })
 
   const connRef = useRef<PeerConnection | null>(null)
   const signalingRef = useRef<SignalingAdapterChain | null>(null)
@@ -196,6 +224,9 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   const [remoteSeat, setRemoteSeat] = useState<PeerSeat | null>(null)
   const [remoteSpectator, setRemoteSpectator] = useState(false)
   const [connectionLost, setConnectionLost] = useState(false)
+  const [multiGuest, setMultiGuest] = useState(false)
+  const [maxPlayers, setMaxPlayers] = useState<MaxPlayers>(2)
+  const [roster, setRoster] = useState<RosterEntry[]>([])
 
   useEffect(() => {
     onRoleChangeRef.current = options.onRoleChange
@@ -226,14 +257,41 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         seat: s,
         mode: m,
         joinRole: s === null ? 'spectator' : 'player',
+        peerId: peerIdRef.current,
       })
     } catch {
       // ignore
     }
   }, [])
 
+  const applyRosterUpdate = useCallback(
+    (peers: Array<{ peerId: string; role: 'host' | 'guest'; seat: PeerSeat | null; name?: string }>, nextMax?: number) => {
+      const entries: RosterEntry[] = peers.map((p) => ({
+        peerId: p.peerId,
+        role: p.role,
+        seat: p.seat,
+        name: p.name,
+      }))
+      setRoster(entries)
+      if (nextMax) {
+        maxPlayersRef.current = clampMaxPlayers(nextMax)
+        setMaxPlayers(maxPlayersRef.current)
+      }
+      if (roleRef.current === 'guest') {
+        const me = entries.find((e) => e.peerId === peerIdRef.current)
+        if (me) {
+          seatRef.current = me.seat
+          setSeat(me.seat)
+          onRoleChangeRef.current?.(me.seat)
+        }
+      }
+    },
+    [],
+  )
+
   const applyRemoteSeat = useCallback(
     (seat: PeerSeat | null, conn: PeerConnection) => {
+      if (multiGuestRef.current) return
       if (seat !== null && seat === seatRef.current) {
         const other = (seat === 1 ? 2 : 1) as PeerSeat
         seatRef.current = other
@@ -253,12 +311,53 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     [sendHello],
   )
 
-  const isSeatAvailable = useCallback((seat: 1 | 2) => {
-    return remoteSeatRef.current !== seat
-  }, [])
+  const isSeatAvailable = useCallback(
+    (seat: PeerSeat) => {
+      if (multiGuestRef.current) {
+        if (roleRef.current === 'host') {
+          return multiHost.isSeatAvailable(seat, peerIdRef.current)
+        }
+        return !roster.some((e) => e.seat === seat && e.peerId !== peerIdRef.current)
+      }
+      return remoteSeatRef.current !== seat
+    },
+    [multiHost, roster],
+  )
 
   const pickRole = useCallback(
-    (nextSeat: 1 | 2 | null) => {
+    (nextSeat: PeerSeat | null) => {
+      if (multiGuestRef.current) {
+        if (nextSeat !== null && !isSeatAvailable(nextSeat)) {
+          setError(`Player ${nextSeat} is taken`)
+          return false
+        }
+        setError(null)
+        const prev = seatRef.current
+        seatRef.current = nextSeat
+        setSeat(nextSeat)
+        if (prev !== nextSeat) onRoleChangeRef.current?.(nextSeat)
+
+        if (roleRef.current === 'host') {
+          multiHost.setHostSeat(nextSeat)
+        } else {
+          const conn = connRef.current
+          if (conn?.connected) {
+            try {
+              conn.sendControl({
+                type: 'seat-claim',
+                peerId: peerIdRef.current,
+                seat: nextSeat,
+              })
+              sendHello(conn)
+            } catch {
+              // ignore
+            }
+          }
+        }
+        return true
+      }
+
+      if (nextSeat !== null && nextSeat > 2) return false
       if (nextSeat !== null && remoteSeatRef.current === nextSeat) {
         setError(`Player ${nextSeat} is taken by the other device`)
         return false
@@ -281,11 +380,11 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       }
       return true
     },
-    [sendHello],
+    [isSeatAvailable, multiHost, sendHello],
   )
 
   const pickSeat = useCallback(
-    (seat: 1 | 2) => pickRole(seat),
+    (seat: PeerSeat) => pickRole(seat),
     [pickRole],
   )
 
@@ -472,6 +571,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           optionsRef.current.onHello?.(msg.mode, msg.seat)
         } else if (msg.type === 'seat-pick') {
           applyRemoteSeat(msg.seat, conn)
+        } else if (msg.type === 'roster-update') {
+          applyRosterUpdate(msg.peers, msg.maxPlayers)
         } else if (msg.type === 'bootstrap') {
           setError(null)
           bootstrapDoneRef.current = false
@@ -581,6 +682,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     return conn
   }, [
     applyRemoteSeat,
+    applyRosterUpdate,
     handleRenegotiationAnswer,
     handleRenegotiationOffer,
     handleMediaRenegotiationAnswer,
@@ -607,11 +709,24 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     }
   }, [options.sessionMode])
 
+  useEffect(() => {
+    if (multiGuest && role === 'host') {
+      setRoster(multiHost.roster)
+    }
+  }, [multiGuest, role, multiHost.roster])
+
   const createHostOffer = useCallback(
-    async (mode: SessionMode = modeRef.current) => {
+    async (
+      mode: SessionMode = modeRef.current,
+      opts?: { maxPlayers?: MaxPlayers; system?: 'nes' | 'snes' },
+    ) => {
       if (hostOfferInFlightRef.current) return
       hostOfferInFlightRef.current = true
       const generation = ++hostGenerationRef.current
+
+      const system = opts?.system ?? optionsRef.current.system ?? null
+      const playerCap = clampMaxPlayers(opts?.maxPlayers ?? 2)
+      const useMultiGuest = mode === 'local' && system === 'snes' && playerCap > 2
 
       setError(null)
       setConnectionLost(false)
@@ -623,18 +738,43 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       seatRef.current = 1
       setRole('host')
       setSeat(1)
+      multiGuestRef.current = useMultiGuest
+      setMultiGuest(useMultiGuest)
+      maxPlayersRef.current = playerCap
+      setMaxPlayers(playerCap)
 
       try {
-        const conn = createConnection()
-        const offer = await conn.createOffer()
-        setLocalSignal(offer)
-
         signalingRef.current?.close()
         const chain = new SignalingAdapterChain()
         signalingRef.current = chain
         wireSignalingSession(chain)
 
-        const room = await chain.hostRoom(offer, { mode })
+        if (useMultiGuest) {
+          connRef.current?.close()
+          connRef.current = null
+          const room = await chain.hostRoom('multi-guest', {
+            mode,
+            maxPlayers: playerCap,
+            multiGuest: true,
+          })
+          if (generation !== hostGenerationRef.current) return
+
+          setRoomCode(room.code)
+          setJoinUrl(room.joinUrl)
+          setSignalingPath(chain.lastAdapter)
+          multiHost.start(chain, room.code, playerCap)
+          setRoster(multiHost.roster)
+          updatePhase('linked')
+          optionsRef.current.onLinked?.()
+          optionsRef.current.onGo?.()
+          return
+        }
+
+        const conn = createConnection()
+        const offer = await conn.createOffer()
+        setLocalSignal(offer)
+
+        const room = await chain.hostRoom(offer, { mode, maxPlayers: 2, multiGuest: false })
         if (generation !== hostGenerationRef.current) return
 
         setRoomCode(room.code)
@@ -665,7 +805,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         hostOfferInFlightRef.current = false
       }
     },
-    [createConnection, updatePhase, wireSignalingSession],
+    [createConnection, multiHost, updatePhase, wireSignalingSession],
   )
 
   const acceptGuestAnswer = useCallback(
@@ -713,7 +853,17 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       modeRef.current = mode
       setSessionMode(mode)
       roleRef.current = 'guest'
-      const guestSeat = opts?.asSpectator ? null : 2
+
+      const roomMeta = getSignalingRoomMeta(normalized)
+      const useMulti = mode === 'local' && Boolean(roomMeta?.multiGuest)
+      multiGuestRef.current = useMulti
+      setMultiGuest(useMulti)
+      if (roomMeta?.maxPlayers) {
+        maxPlayersRef.current = clampMaxPlayers(roomMeta.maxPlayers)
+        setMaxPlayers(maxPlayersRef.current)
+      }
+
+      const guestSeat = opts?.asSpectator ? null : useMulti ? null : 2
       seatRef.current = guestSeat
       setRole('guest')
       setSeat(guestSeat)
@@ -729,12 +879,18 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         const chain = signalingRef.current
 
         try {
-          const offer = await chain.guestFetchOffer(normalized)
+          const offer = useMulti
+            ? await chain.joinRoomAsGuest(normalized, peerIdRef.current)
+            : await chain.guestFetchOffer(normalized)
           setSignalingPath(chain.lastAdapter)
           const conn = createConnection({ preserveSession: reconnectInFlightRef.current })
           const answer = await conn.createAnswerFromOffer(offer)
           setLocalSignal(answer)
-          await chain.guestPublishAnswer(normalized, answer)
+          if (useMulti) {
+            await chain.guestPublishAnswer(normalized, answer, peerIdRef.current)
+          } else {
+            await chain.guestPublishAnswer(normalized, answer)
+          }
           updatePhase('guest-answer')
           return
         } catch (err) {
@@ -936,6 +1092,14 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         const chain = signalingRef.current
         if (!chain) throw new Error('Signaling unavailable — disconnect and host again')
 
+        if (multiGuestRef.current) {
+          multiHost.stop()
+          multiHost.start(chain, code, maxPlayersRef.current)
+          setConnectionLost(false)
+          updatePhase('linked')
+          return
+        }
+
         existingConn?.softClose()
         const conn = createConnection({ preserveSession: true })
         const offer = await conn.createOffer()
@@ -964,6 +1128,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     createConnection,
     joinWithRoomCode,
     markConnectionLost,
+    multiHost,
     publishRenegotiation,
     updatePhase,
   ])
@@ -975,17 +1140,23 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     signalingSessionUnsubRef.current = null
     signalingRef.current?.close({ rejectPending: true })
     signalingRef.current = null
+    multiHost.stop()
     connRef.current?.close()
     connRef.current = null
     roleRef.current = null
     seatRef.current = null
     remoteSeatRef.current = null
     remoteSpectatorRef.current = false
+    multiGuestRef.current = false
+    maxPlayersRef.current = 2
     bootstrapDoneRef.current = false
     setRole(null)
     setSeat(null)
     setRemoteSeat(null)
     setRemoteSpectator(false)
+    setMultiGuest(false)
+    setMaxPlayers(2)
+    setRoster([])
     setConnectionLost(false)
     setLocalSignal('')
     setRoomCode(null)
@@ -1001,7 +1172,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     setRemoteReady(false)
     lastPongAtRef.current = null
     setLatencyMs(null)
-  }, [updatePhase])
+  }, [multiHost, updatePhase])
 
   return {
     phase,
@@ -1028,6 +1199,11 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     remoteSpectator,
     connectionLost,
     isSpectator,
+    multiGuest,
+    maxPlayers,
+    roster,
+    peerId: peerIdRef.current,
+    connectedGuestCount: multiHost.connectedGuestCount,
     pickRole,
     pickSeat,
     isSeatAvailable,

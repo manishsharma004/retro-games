@@ -30,6 +30,7 @@ import {
 } from './lib/gamepad'
 import { fetchLibrary, type LibraryRom } from './lib/library'
 import { coopTimingSettings, loadSettings, saveSettings, type EmulatorSettings } from './lib/settings'
+import type { MaxPlayers } from './lib/peer/roster'
 import './styles/app.css'
 
 function prefersTouch(): boolean {
@@ -51,6 +52,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   const [layoutEditorOpen, setLayoutEditorOpen] = useState(false)
   const [sessionMode, setSessionMode] = useState<SessionMode>(initialCoopJoin ? 'coop' : 'local')
   const [hostOnScreenP2, setHostOnScreenP2] = useState(false)
+  const [hostMaxPlayers, setHostMaxPlayers] = useState<MaxPlayers>(2)
   const [touchDevice] = useState(() => prefersTouch())
   const [library, setLibrary] = useState<LibraryRom[]>([])
   const autoLoadedRef = useRef(false)
@@ -134,6 +136,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   const peer = usePeerSession({
     settings,
     sessionMode,
+    system: emu.game?.system ?? null,
     onRemoteInput: (seat, button, down, executeAt) => {
       if (sessionMode === 'coop') {
         const local = peerRef.current.getSeat()
@@ -330,10 +333,14 @@ export default function App({ initialCoopJoin = null }: AppProps) {
     onRelease: onLocalRelease,
   })
 
+  const maxLocalSeats =
+    emu.game?.system === 'snes' ? settings.snesPlayerCount : 2
+
   useGamepadControls({
     enabled: inputEnabled,
     bindings: controllerBindings,
-    peerSeat: peerActive && (localSeat === 1 || localSeat === 2) ? localSeat : null,
+    peerSeat: peerActive && localSeat !== null ? localSeat : null,
+    maxLocalSeats,
     onPress: onPadPress,
     onRelease: onPadRelease,
   })
@@ -723,7 +730,10 @@ export default function App({ initialCoopJoin = null }: AppProps) {
         pads={pads}
         bindings={controllerBindings}
         onChange={setControllerBindings}
-        peerSeat={peerActive && (localSeat === 1 || localSeat === 2) ? localSeat : null}
+        peerSeat={peerActive && localSeat !== null ? localSeat : null}
+        maxLocalSeats={maxLocalSeats}
+        multiGuest={peer.multiGuest}
+        maxPlayers={peer.maxPlayers}
         remoteSeat={
           (sessionMode === 'coop' || sessionMode === 'local') && peerActive
             ? peer.remoteSeat
@@ -744,7 +754,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
         onClose={() => setPeerOpen(false)}
         phase={peer.phase}
         role={peer.role}
-        seat={peer.seat && peer.seat <= 2 ? (peer.seat as 1 | 2) : peer.seat}
+        seat={peer.seat}
         sessionMode={sessionMode}
         onSessionModeChange={setSessionMode}
         connectionState={peer.connectionState}
@@ -761,7 +771,12 @@ export default function App({ initialCoopJoin = null }: AppProps) {
         emuReady={emuReadyForPeer}
         hostOnScreenP2={hostOnScreenP2}
         onHostOnScreenP2Change={setHostOnScreenP2}
-        onCreateHost={() => peer.createHostOffer(sessionMode)}
+        onCreateHost={() =>
+          peer.createHostOffer(sessionMode, {
+            maxPlayers: hostMaxPlayers,
+            system: emu.game?.system === 'snes' ? 'snes' : emu.game?.system === 'nes' ? 'nes' : undefined,
+          })
+        }
         onAcceptAnswer={(answer) => peer.acceptGuestAnswer(answer)}
         onJoinOffer={(offer) => peer.joinWithOffer(offer, sessionMode)}
         onJoinRoomCode={(code, opts) => peer.joinWithRoomCode(code, sessionMode, opts)}
@@ -788,6 +803,12 @@ export default function App({ initialCoopJoin = null }: AppProps) {
           setPeerOpen(false)
           setControllersOpen(true)
         }}
+        gameSystem={emu.game?.system ?? null}
+        multiGuest={peer.multiGuest}
+        maxPlayers={peer.multiGuest ? peer.maxPlayers : hostMaxPlayers}
+        onMaxPlayersChange={setHostMaxPlayers}
+        roster={peer.roster}
+        connectedGuestCount={peer.connectedGuestCount}
       />
 
       {showLanding && (

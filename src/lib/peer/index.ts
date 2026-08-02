@@ -17,6 +17,7 @@ export type { JoinRole } from './joinUrl'
 export {
   SignalingAdapterChain,
   formatSignalingPath,
+  getSignalingRoomMeta,
   DEFAULT_PEERJS_CONFIG,
   type SignalingAdapter,
   type SignalingAdapterName,
@@ -31,7 +32,16 @@ export {
   type PeerSeat,
   type PeerSyncSettings,
   type SessionMode,
+  type RosterPeer,
 } from './protocol'
+export { getPeerId } from './peerId'
+export {
+  clampMaxPlayers,
+  MAX_SNES_PLAYERS,
+  playerSeats,
+  type MaxPlayers,
+  type RosterEntry,
+} from './roster'
 export { copySignalString, shareSignalString } from './share'
 export {
   classifyLatency,

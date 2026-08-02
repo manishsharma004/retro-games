@@ -2,17 +2,22 @@ import { useEffect, useRef } from 'react'
 import {
   STANDARD_BUTTON_MAP,
   STICK_DEADZONE,
+  activePlayerSeats,
+  padSlotForSeat,
   resolvePadIndex,
   type ControllerBindings,
   type PadSlot,
+  type PlayerSeat,
 } from '../lib/gamepad'
 import type { RetroPadButton } from '../lib/keyboard'
 
 interface UseGamepadControlsOptions {
   enabled: boolean
   bindings: ControllerBindings
-  /** When set (peer mode), only this seat is driven from pad1 binding. */
-  peerSeat?: 1 | 2 | null
+  /** When set (peer mode), only this seat is driven from its pad binding. */
+  peerSeat?: PlayerSeat | null
+  /** Local couch seats to poll when not in single-seat peer mode. */
+  maxLocalSeats?: number
   onPress: (button: string, player: number) => void
   onRelease: (button: string, player: number) => void
 }
@@ -46,6 +51,7 @@ export function useGamepadControls({
   enabled,
   bindings,
   peerSeat = null,
+  maxLocalSeats = 2,
   onPress,
   onRelease,
 }: UseGamepadControlsOptions): void {
@@ -53,17 +59,19 @@ export function useGamepadControls({
   const onReleaseRef = useRef(onRelease)
   const bindingsRef = useRef(bindings)
   const peerSeatRef = useRef(peerSeat)
+  const maxLocalSeatsRef = useRef(maxLocalSeats)
   onPressRef.current = onPress
   onReleaseRef.current = onRelease
   bindingsRef.current = bindings
   peerSeatRef.current = peerSeat
+  maxLocalSeatsRef.current = maxLocalSeats
 
   useEffect(() => {
     if (!enabled) return
 
     const heldByPlayer = new Map<number, Set<RetroPadButton>>()
 
-    const applySeat = (player: 1 | 2, next: Set<RetroPadButton>) => {
+    const applySeat = (player: PlayerSeat, next: Set<RetroPadButton>) => {
       const prev = heldByPlayer.get(player) ?? new Set<RetroPadButton>()
       for (const button of next) {
         if (!prev.has(button)) onPressRef.current(button, player)
@@ -86,7 +94,7 @@ export function useGamepadControls({
       for (const player of [...heldByPlayer.keys()]) clearSeat(player)
     }
 
-    const pollSeat = (player: 1 | 2, slot: PadSlot, pads: (Gamepad | null)[]) => {
+    const pollSeat = (player: PlayerSeat, slot: PadSlot, pads: (Gamepad | null)[]) => {
       const indices = pads.filter((p): p is Gamepad => Boolean(p)).map((p) => p.index)
       const index = resolvePadIndex(slot, player, indices)
       if (index === null) {
@@ -105,14 +113,17 @@ export function useGamepadControls({
     const tick = () => {
       const pads = (navigator.getGamepads?.() ?? []) as (Gamepad | null)[]
       const seat = peerSeatRef.current
-      const { pad1, pad2 } = bindingsRef.current
+      const localSeats = activePlayerSeats(maxLocalSeatsRef.current)
 
-      if (seat === 1 || seat === 2) {
-        pollSeat(seat, pad1, pads)
-        clearSeat(seat === 1 ? 2 : 1)
+      if (seat !== null && seat >= 1 && seat <= 5) {
+        pollSeat(seat, padSlotForSeat(bindingsRef.current, seat), pads)
+        for (const other of localSeats) {
+          if (other !== seat) clearSeat(other)
+        }
       } else {
-        pollSeat(1, pad1, pads)
-        pollSeat(2, pad2, pads)
+        for (const player of localSeats) {
+          pollSeat(player, padSlotForSeat(bindingsRef.current, player), pads)
+        }
       }
 
       raf = requestAnimationFrame(tick)

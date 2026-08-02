@@ -368,6 +368,27 @@ export function AdvancedSettings({
                   <option value="pal">PAL</option>
                 </select>
               </label>
+              {system === 'snes' && (
+                <label className="field">
+                  <span>Player count (multitap)</span>
+                  <select
+                    value={settings.snesPlayerCount}
+                    onChange={(e) =>
+                      patch('snesPlayerCount', Number(e.target.value) as EmulatorSettings['snesPlayerCount'])
+                    }
+                  >
+                    <option value={2}>2</option>
+                    <option value={3}>3</option>
+                    <option value={4}>4</option>
+                    <option value={5}>5</option>
+                  </select>
+                </label>
+              )}
+              {system === 'snes' && settings.snesPlayerCount > 2 && (
+                <p className="settings-hint">
+                  Enables SNES multitap for up to 5 local players. Apply &amp; relaunch after changing.
+                </p>
+              )}
             </section>
           )}
 

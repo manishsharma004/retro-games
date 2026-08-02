@@ -1,7 +1,7 @@
 import type { SystemId } from '../cores'
 import { coopTimingSettings, type EmulatorSettings } from '../settings'
 
-export type PeerSeat = 1 | 2 | 3 | 4
+export type PeerSeat = 1 | 2 | 3 | 4 | 5
 
 export type PeerRole = 'host' | 'guest'
 
@@ -39,6 +39,13 @@ export function pickSyncSettings(settings: EmulatorSettings): PeerSyncSettings {
 /** Active player seat, or null when watching as spectator. */
 export type PeerParticipationSeat = PeerSeat | null
 
+export interface RosterPeer {
+  peerId: string
+  role: PeerRole
+  seat: PeerParticipationSeat
+  name?: string
+}
+
 export type ControlMessage =
   | {
       type: 'hello'
@@ -47,8 +54,12 @@ export type ControlMessage =
       mode: SessionMode
       name?: string
       joinRole?: 'player' | 'spectator'
+      peerId?: string
     }
   | { type: 'seat-pick'; seat: PeerParticipationSeat }
+  | { type: 'roster-update'; peers: RosterPeer[]; maxPlayers?: number }
+  | { type: 'seat-claim'; peerId: string; seat: PeerParticipationSeat }
+  | { type: 'seat-release'; peerId: string }
   | { type: 'ready' }
   | { type: 'go'; at: number }
   | { type: 'host-exit' }

@@ -181,7 +181,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
           },
           shader: current.shader || undefined,
           cache: { core: true, shader: true },
-          retroarchConfig: buildRetroarchConfig(current, { coop }),
+          retroarchConfig: buildRetroarchConfig(current, { coop, system: pending.game.system }),
           retroarchCoreConfig: buildCoreConfig(pending.game.system, current, { coop }),
         })
 

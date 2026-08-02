@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { getIceConfig, readNetworkQuality, supportsCanvasCapture } from '../../lib/peer/connectivity'
+import { buildRemoteCaptureStream } from '../../lib/remoteStreamCapture'
 import type { UsePeerSessionResult } from '../usePeerSession'
 import type { UseEmulatorResult } from '../useEmulator'
 import type { ModeHookBase } from './types'
@@ -8,6 +9,7 @@ export interface UseRemoteHostOptions extends ModeHookBase {
   peer: UsePeerSessionResult
   emu: UseEmulatorResult
   isHost: boolean
+  shareAudio?: boolean
   onVideoOnly?: () => void
 }
 
@@ -17,11 +19,14 @@ export function useRemoteHost({
   peer,
   emu,
   isHost,
+  shareAudio = true,
   onVideoOnly,
   streamGeneration = 0,
 }: UseRemoteHostOptions & { streamGeneration?: number }) {
   const streamRef = useRef<MediaStream | null>(null)
+  const disconnectAudioRef = useRef<(() => void) | null>(null)
   const [videoOnly, setVideoOnly] = useState(false)
+  const [audioShared, setAudioShared] = useState(false)
   const captureFps = peer.latencyProfile.streamFps
 
   useEffect(() => {
@@ -34,8 +39,15 @@ export function useRemoteHost({
     const target = nostalgist?.getCanvas?.() ?? canvas
     if (!target) return
 
-    const stream = target.captureStream(captureFps)
+    const { stream, audioIncluded, disconnectAudio } = buildRemoteCaptureStream(
+      target,
+      nostalgist ?? null,
+      captureFps,
+      shareAudio,
+    )
     streamRef.current = stream
+    disconnectAudioRef.current = disconnectAudio ?? null
+    setAudioShared(audioIncluded)
 
     void peer.attachMediaStream(stream).catch(() => {
       setVideoOnly(true)
@@ -43,13 +55,29 @@ export function useRemoteHost({
     })
 
     return () => {
+      disconnectAudioRef.current?.()
+      disconnectAudioRef.current = null
       stream.getTracks().forEach((t) => t.stop())
       streamRef.current = null
+      setAudioShared(false)
     }
-  }, [enabled, isHost, peer.phase, peer.attachMediaStream, emu, emu.game, emu.status, onVideoOnly, captureFps, streamGeneration])
+  }, [
+    enabled,
+    isHost,
+    shareAudio,
+    peer.phase,
+    peer.attachMediaStream,
+    emu,
+    emu.game,
+    emu.status,
+    onVideoOnly,
+    captureFps,
+    streamGeneration,
+  ])
 
   return {
     videoOnly,
+    audioShared,
     captureFps,
     canCapture: supportsCanvasCapture(),
     network: readNetworkQuality(),

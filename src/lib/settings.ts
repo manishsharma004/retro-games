@@ -24,6 +24,8 @@ export interface EmulatorSettings {
   snesRegion: 'auto' | 'ntsc' | 'pal'
   /** SNES multitap player count (2–5). Requires relaunch. */
   snesPlayerCount: 2 | 3 | 4 | 5
+  /** Remote stream host: include game audio in the WebRTC stream. */
+  remoteShareAudio: boolean
 }
 
 export const DEFAULT_SETTINGS: EmulatorSettings = {
@@ -47,6 +49,7 @@ export const DEFAULT_SETTINGS: EmulatorSettings = {
   nesTurbo: 'None',
   snesRegion: 'auto',
   snesPlayerCount: 2,
+  remoteShareAudio: true,
 }
 
 const STORAGE_KEY = 'retro-games-settings-v1'

@@ -17,6 +17,8 @@ interface AdvancedSettingsProps {
   onOpenLayoutEditor?: () => void
   /** Remote play guest: show stream-specific options. */
   remoteGuest?: boolean
+  /** Remote play host: show stream sharing options. */
+  remoteHost?: boolean
   autoFullscreen?: boolean
   onAutoFullscreenChange?: (value: boolean) => void
 }
@@ -35,6 +37,7 @@ export function AdvancedSettings({
   onOpenControllers,
   onOpenLayoutEditor,
   remoteGuest = false,
+  remoteHost = false,
   autoFullscreen = false,
   onAutoFullscreenChange,
 }: AdvancedSettingsProps) {
@@ -60,6 +63,24 @@ export function AdvancedSettings({
         </header>
 
         <div className="settings-panel__body">
+          {remoteHost && (
+            <section className="settings-section">
+              <h3>Remote stream</h3>
+              <label className="field field--row">
+                <span>Share game audio</span>
+                <input
+                  type="checkbox"
+                  checked={settings.remoteShareAudio}
+                  onChange={(e) => patch('remoteShareAudio', e.target.checked)}
+                />
+              </label>
+              <p className="settings-hint">
+                Sends emulator audio to connected viewers. Takes effect immediately — guests may
+                need to tap the video to unmute. Disable to save bandwidth on slow connections.
+              </p>
+            </section>
+          )}
+
           {remoteGuest && onAutoFullscreenChange && (
             <section className="settings-section">
               <h3>Remote play</h3>

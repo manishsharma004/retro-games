@@ -2599,6 +2599,16 @@ body.rg-faux-fullscreen {
   cursor: pointer;
 }
 
+.peer-lobby__mode--row {
+  align-items: center;
+  justify-content: space-between;
+  cursor: default;
+}
+
+.peer-lobby__mode--row select {
+  min-width: 4.5rem;
+}
+
 .peer-lobby__advanced {
   margin: 0.5rem 0 1rem;
 }

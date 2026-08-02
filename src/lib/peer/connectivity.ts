@@ -9,6 +9,7 @@ export interface IceConfig {
   iceServers: RTCIceServer[]
   tier: IceTier
   connectivityTier: ConnectivityTier
+  iceTransportPolicy?: RTCIceTransportPolicy
 }
 
 /** Free public STUN servers — always included. */
@@ -80,13 +81,14 @@ function allTurnServers(): RTCIceServer[] {
  * Local tier: STUN + TURN gathered up front — ICE still prefers LAN/direct when available.
  * Relay tier: same servers; triggers ICE restart with relay preference on fallback.
  */
-export function getIceConfig(tier: IceTier = 'local'): IceConfig {
+export function getIceConfig(tier: IceTier = 'local', forceRelay = false): IceConfig {
   const turn = allTurnServers()
   const iceServers = dedupeIceServers([...STUN_SERVERS, ...turn])
   return {
     iceServers,
     tier,
     connectivityTier: turn.length > 0 ? 'turn' : 'stun',
+    iceTransportPolicy: forceRelay ? 'relay' : 'all',
   }
 }
 

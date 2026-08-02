@@ -11,6 +11,8 @@ import { VirtualController } from './components/VirtualController'
 import { VirtualLayoutEditor } from './components/VirtualLayoutEditor'
 import { useCoopInputDelay } from './hooks/useCoopInputDelay'
 import { useCoopSession } from './hooks/multiplayer/useCoopSession'
+import { useCoopAutoStart } from './hooks/multiplayer/useCoopAutoStart'
+import { useHostGameSync } from './hooks/multiplayer/useHostGameSync'
 import { useLocalHost } from './hooks/multiplayer/useLocalHost'
 import { useRemoteHost } from './hooks/multiplayer/useRemoteHost'
 import { useEmulator } from './hooks/useEmulator'
@@ -149,14 +151,23 @@ export default function App({ initialCoopJoin = null }: AppProps) {
     },
     onBootstrap: handleBootstrap,
     onGo: handleGo,
-    onLinked: () => {
-      if (sessionMode !== 'coop') return
-      window.setTimeout(() => {
-        if (peerRef.current.role !== 'host') return
-        if (peerRef.current.phase !== 'linked') return
+    onGuestHello: () => {
+      const game = emu.game
+      if (!game || emu.status === 'idle' || emu.status === 'loading') return
+      if (sessionMode === 'coop') {
         void coopRef.current?.shareGame().catch(() => {})
-      }, 50)
+        return
+      }
+      if (sessionMode === 'local' || sessionMode === 'remote') {
+        peerRef.current.sendGameUpdate({
+          name: game.name,
+          system: game.system,
+          core: game.core,
+          libraryFile: game.libraryFile,
+        })
+      }
     },
+    onLinked: () => {},
     onRumble: (seat, pattern) => {
       if (seat === peerRef.current.seat) {
         try {
@@ -215,6 +226,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
     emu,
     isHost,
     onVideoOnly: () => {},
+    streamGeneration: peer.streamGeneration,
   })
 
   useEffect(() => {
@@ -240,6 +252,22 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   const localSeat = resolveLocalSeat()
   const peerPlaying = peer.phase === 'playing'
   const peerActive = peer.role !== null && peer.phase !== 'idle' && peer.phase !== 'error'
+
+  useHostGameSync({
+    enabled: peerActive && isHost,
+    peer,
+    emu,
+    coop,
+    isHost,
+    sessionMode,
+  })
+
+  useCoopAutoStart({
+    enabled: sessionMode === 'coop' && peerActive,
+    peer,
+    emu,
+    isHost,
+  })
 
   const handleExitGame = useCallback(() => {
     if (
@@ -530,7 +558,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
             <div className="toolbar__actions">
               <RomLoader
                 compact
-                disabled={emu.status === 'loading' || peerPlaying}
+                disabled={emu.status === 'loading'}
                 onFile={emu.launchFile}
                 onDemo={emu.launchDemo}
               />

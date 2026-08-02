@@ -8,6 +8,7 @@ interface PeerConnectionStatusProps {
   connectionLost?: boolean
   error?: string | null
   hasVideo?: boolean
+  hostGameName?: string | null
   /** When false, hide after WebRTC connects (local controller guests). */
   requireVideo?: boolean
   variant?: 'overlay' | 'inline'
@@ -22,6 +23,7 @@ export function PeerConnectionStatus({
   connectionLost = false,
   error = null,
   hasVideo = false,
+  hostGameName = null,
   requireVideo = true,
   variant = 'overlay',
   onReconnect,
@@ -68,7 +70,9 @@ export function PeerConnectionStatus({
       : 'Connecting to the host…'
   } else if (waitingForStream) {
     title = 'Connected'
-    detail = 'Waiting for the host video stream. Ask the host to start remote play and load a game.'
+    detail = hostGameName
+      ? `Loading ${hostGameName} from host…`
+      : 'Waiting for the host video stream. Ask the host to start remote play and load a game.'
   }
 
   return (

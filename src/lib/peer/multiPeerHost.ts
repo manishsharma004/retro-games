@@ -15,6 +15,7 @@ export interface MultiPeerHostHandlers {
   onRemoteInput: (seat: PeerSeat, button: string, down: boolean, executeAt?: number) => void
   onRosterChange: (roster: RosterEntry[], guests: GuestLink[]) => void
   onGuestConnected?: (peerId: string) => void
+  onGuestControl?: (peerId: string, msg: ControlMessage) => void
   onGuestDisconnected?: (peerId: string) => void
   onError?: (message: string) => void
 }
@@ -143,6 +144,7 @@ export class MultiPeerHostManager {
   }
 
   private handleControl(guestId: string, msg: ControlMessage) {
+    this.handlers.onGuestControl?.(guestId, msg)
     if (msg.type === 'hello') {
       const seat = msg.seat
       this.claimSeat(guestId, seat)
@@ -220,6 +222,17 @@ export class MultiPeerHostManager {
       })
     } catch {
       // ignore
+    }
+  }
+
+  broadcastControl(msg: ControlMessage) {
+    for (const g of this.guests.values()) {
+      if (!g.connection.connected) continue
+      try {
+        g.connection.sendControl(msg)
+      } catch {
+        // ignore
+      }
     }
   }
 }

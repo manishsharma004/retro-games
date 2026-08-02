@@ -60,6 +60,7 @@ export type ControlMessage =
   | { type: 'roster-update'; peers: RosterPeer[]; maxPlayers?: number }
   | { type: 'seat-claim'; peerId: string; seat: PeerParticipationSeat }
   | { type: 'seat-release'; peerId: string }
+  | { type: 'game-update'; name: string; system: SystemId; core: string; libraryFile?: string }
   | { type: 'ready' }
   | { type: 'go'; at: number }
   | { type: 'host-exit' }

@@ -12,7 +12,14 @@ export interface UseRemoteHostOptions extends ModeHookBase {
 }
 
 /** Host remote mode: capture canvas stream and attach to WebRTC. */
-export function useRemoteHost({ enabled, peer, emu, isHost, onVideoOnly }: UseRemoteHostOptions) {
+export function useRemoteHost({
+  enabled,
+  peer,
+  emu,
+  isHost,
+  onVideoOnly,
+  streamGeneration = 0,
+}: UseRemoteHostOptions & { streamGeneration?: number }) {
   const streamRef = useRef<MediaStream | null>(null)
   const [videoOnly, setVideoOnly] = useState(false)
   const captureFps = peer.latencyProfile.streamFps
@@ -39,7 +46,7 @@ export function useRemoteHost({ enabled, peer, emu, isHost, onVideoOnly }: UseRe
       stream.getTracks().forEach((t) => t.stop())
       streamRef.current = null
     }
-  }, [enabled, isHost, peer.phase, peer.attachMediaStream, emu, onVideoOnly, captureFps])
+  }, [enabled, isHost, peer.phase, peer.attachMediaStream, emu, emu.game, emu.status, onVideoOnly, captureFps, streamGeneration])
 
   return {
     videoOnly,

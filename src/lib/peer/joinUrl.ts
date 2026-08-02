@@ -21,7 +21,12 @@ export type JoinRole = 'player' | 'spectator'
 export function buildJoinUrl(
   code: string,
   mode: SessionMode,
-  opts?: { spectator?: boolean; multiGuest?: boolean; maxPlayers?: 2 | 3 | 4 | 5 },
+  opts?: {
+    spectator?: boolean
+    multiGuest?: boolean
+    maxPlayers?: 2 | 3 | 4 | 5
+    peerJsBrokerIndex?: number
+  },
 ): string {
   const normalized = normalizeRoomCode(code)
   const base = import.meta.env.BASE_URL.replace(/\/$/, '') || '/'
@@ -30,6 +35,9 @@ export function buildJoinUrl(
   if (opts?.spectator) params.set('role', 'spectator')
   if (opts?.multiGuest) params.set('mg', '1')
   if (opts?.maxPlayers && opts.maxPlayers > 2) params.set('mp', String(opts.maxPlayers))
+  if (opts?.peerJsBrokerIndex !== undefined && opts.peerJsBrokerIndex > 0) {
+    params.set('pb', String(opts.peerJsBrokerIndex))
+  }
   return `${origin}${base}?${params.toString()}`
 }
 
@@ -39,12 +47,20 @@ function parseMaxPlayersParam(raw: string | null): 2 | 3 | 4 | 5 | undefined {
   return undefined
 }
 
+function parseBrokerIndexParam(raw: string | null): number | undefined {
+  if (raw === null || raw === '') return undefined
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n < 0) return undefined
+  return n
+}
+
 export function parseJoinLocation(search: string, hash: string): {
   room: string | null
   mode: SessionMode | null
   role: JoinRole
   multiGuest: boolean
   maxPlayers?: 2 | 3 | 4 | 5
+  peerJsBrokerIndex?: number
 } {
   const fromSearch = new URLSearchParams(search)
   let room = fromSearch.get('room')
@@ -52,6 +68,7 @@ export function parseJoinLocation(search: string, hash: string): {
   const roleParam = fromSearch.get('role')
   let multiGuest = fromSearch.get('mg') === '1'
   let maxPlayers = parseMaxPlayersParam(fromSearch.get('mp'))
+  const peerJsBrokerIndex = parseBrokerIndexParam(fromSearch.get('pb'))
 
   if (!room && hash.startsWith('#join/')) {
     const parts = hash.slice(6).split('/')
@@ -67,5 +84,5 @@ export function parseJoinLocation(search: string, hash: string): {
 
   const role: JoinRole = roleParam === 'spectator' ? 'spectator' : 'player'
 
-  return { room, mode, role, multiGuest, maxPlayers }
+  return { room, mode, role, multiGuest, maxPlayers, peerJsBrokerIndex }
 }

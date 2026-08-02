@@ -1,5 +1,10 @@
 import type { SessionMode } from './protocol'
 import { buildJoinUrl, generateRoomCode, parseJoinLocation } from './joinUrl'
+import {
+  buildPeerJsClientOptions,
+  listPeerJsBrokers,
+  resolvePeerJsBrokerIndex,
+} from './peerJsBrokers'
 
 export type SignalingAdapterName = 'peerjs' | 'firebase' | 'broadcast' | 'manual'
 
@@ -8,6 +13,10 @@ export interface SignalingRoomMeta {
   hostName?: string
   maxPlayers?: 2 | 3 | 4 | 5
   multiGuest?: boolean
+  /** PeerJS broker index — host and guest must match for cross-device join. */
+  peerJsBrokerIndex?: number
+  /** Same-browser only — broadcast/localStorage signaling, not cross-device. */
+  localOnly?: boolean
 }
 
 export interface SignalingAdapter {
@@ -148,9 +157,12 @@ export function resolveJoinRoomMeta(
   const local = getSignalingRoomMeta(code)
   if (local) return local
 
-  const { multiGuest, maxPlayers } = parseJoinLocation(search, '')
+  const { multiGuest, maxPlayers, peerJsBrokerIndex } = parseJoinLocation(search, '')
   if (multiGuest && mode === 'local') {
-    return { mode, multiGuest: true, maxPlayers: maxPlayers ?? 5 }
+    return { mode, multiGuest: true, maxPlayers: maxPlayers ?? 5, peerJsBrokerIndex }
+  }
+  if (peerJsBrokerIndex !== undefined) {
+    return { mode, peerJsBrokerIndex }
   }
   return null
 }
@@ -159,6 +171,7 @@ function joinUrlFromMeta(code: string, meta: SignalingRoomMeta) {
   return buildJoinUrl(code, meta.mode, {
     multiGuest: meta.multiGuest,
     maxPlayers: meta.maxPlayers,
+    peerJsBrokerIndex: meta.peerJsBrokerIndex,
   })
 }
 
@@ -211,12 +224,8 @@ function waitForRoomField(
   })
 }
 
-function readPeerJsConfig() {
-  const host = (import.meta.env.VITE_PEERJS_HOST as string | undefined) ?? DEFAULT_PEERJS_CONFIG.host
-  const port = Number(import.meta.env.VITE_PEERJS_PORT ?? DEFAULT_PEERJS_CONFIG.port)
-  const path = (import.meta.env.VITE_PEERJS_PATH as string | undefined) ?? DEFAULT_PEERJS_CONFIG.path
-  const secure = import.meta.env.VITE_PEERJS_SECURE !== 'false'
-  return { host, port, path, secure }
+function readPeerJsConfig(brokerIndex = 0) {
+  return buildPeerJsClientOptions(brokerIndex)
 }
 
 type PeerJsModule = typeof import('peerjs').default
@@ -300,6 +309,12 @@ export class BroadcastSignalingAdapter implements SignalingAdapter {
     this.codes.push(code)
     writeRoom(code, { offer, meta, answer: undefined, guests: {} })
     return { code, joinUrl: joinUrlFromMeta(code, meta) }
+  }
+
+  /** Mirror an online-hosted room for same-browser guests (localStorage backup). */
+  syncRoom(code: string, offer: string, meta: SignalingRoomMeta) {
+    if (!this.codes.includes(code)) this.codes.push(code)
+    writeRoom(code, { offer, meta, answer: undefined, guests: {} })
   }
 
   async guestPublishAnswer(code: string, answer: string, guestId?: string) {
@@ -486,6 +501,7 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
   private pendingAnswer: string | null = null
   private answerTimer: number | null = null
   private hostCode: string | null = null
+  private brokerIndex = 0
   private disconnecting = false
   private sessionHandlers = new Set<(data: unknown) => void>()
   private latestOffer: string | null = null
@@ -494,6 +510,30 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
   private guestJoinHandlers = new Set<(guestId: string) => void>()
   private guestAnswerWaits = new Map<string, { resolve: (a: string) => void; reject: (e: Error) => void }>()
   private pendingGuestJoins = new Set<string>()
+
+  get activeBrokerIndex(): number {
+    return this.brokerIndex
+  }
+
+  private brokerIndicesToTry(hint?: number): number[] {
+    const brokers = listPeerJsBrokers()
+    if (hint !== undefined && hint >= 0 && hint < brokers.length) {
+      const rest = brokers.map((_, i) => i).filter((i) => i !== hint)
+      return [hint, ...rest]
+    }
+    return brokers.map((_, i) => i)
+  }
+
+  private async openPeer(id: string | undefined, brokerIndex: number): Promise<PeerInstance> {
+    const Peer = await this.loadPeer()
+    const cfg = readPeerJsConfig(brokerIndex)
+    this.brokerIndex = brokerIndex
+    const peer = id ? new Peer(id, cfg) : new Peer(cfg)
+    this.peer = peer
+    this.attachPeerLifecycle(peer)
+    await waitPeerOpen(peer, 15_000)
+    return peer
+  }
 
   private notifyGuestJoin(guestId: string) {
     if (this.guestJoinHandlers.size === 0) {
@@ -576,13 +616,13 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     if (conn?.open) conn.send({ type: 'webrtc-offer', guestId, offer })
   }
 
-  async joinRoomAsGuest(code: string, guestId: string, timeoutMs = 45_000) {
-    const normalized = code.trim().toUpperCase()
-    const Peer = await this.loadPeer()
-    const cfg = readPeerJsConfig()
-    const peer = new Peer(cfg)
-    this.peer = peer
-    await waitPeerOpen(peer, 12_000)
+  private async joinRoomAsGuestOnBroker(
+    normalized: string,
+    guestId: string,
+    timeoutMs: number,
+    brokerIndex: number,
+  ): Promise<string> {
+    const peer = await this.openPeer(undefined, brokerIndex)
     const conn = peer.connect(`rg-${normalized}`, { reliable: true })
     this.conn = conn
     this.conns.set(guestId, conn)
@@ -612,6 +652,28 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
           reject(new Error('PeerJS guest connection failed'))
         })
     })
+  }
+
+  async joinRoomAsGuest(code: string, guestId: string, timeoutMs = 45_000) {
+    const normalized = code.trim().toUpperCase()
+    const localMeta = readRoom(normalized)?.meta
+    const urlParams =
+      typeof window !== 'undefined' ? parseJoinLocation(window.location.search, '') : null
+    const hint = resolvePeerJsBrokerIndex(
+      localMeta?.peerJsBrokerIndex,
+      urlParams?.peerJsBrokerIndex ?? null,
+    )
+
+    let lastErr: Error | null = null
+    for (const brokerIndex of this.brokerIndicesToTry(hint)) {
+      try {
+        return await this.joinRoomAsGuestOnBroker(normalized, guestId, timeoutMs, brokerIndex)
+      } catch (err) {
+        lastErr = err instanceof Error ? err : new Error('PeerJS guest connection failed')
+        this.close({ rejectPending: true })
+      }
+    }
+    throw lastErr ?? new Error('PeerJS guest join timeout')
   }
 
   private deliverAnswer(answer: string) {
@@ -661,19 +723,15 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
   }
 
   async hostRoom(offer: string, meta: SignalingRoomMeta) {
-    const Peer = await this.loadPeer()
+    const brokerIndex = meta.peerJsBrokerIndex ?? 0
     const code = generateRoomCode(4)
-    const cfg = readPeerJsConfig()
-    const peer = new Peer(`rg-${code}`, cfg)
-    this.peer = peer
+    const roomMeta: SignalingRoomMeta = { ...meta, peerJsBrokerIndex: brokerIndex }
+    const peer = await this.openPeer(`rg-${code}`, brokerIndex)
     this.hostCode = code
     this.latestOffer = offer
-    this.latestMeta = meta
+    this.latestMeta = roomMeta
 
-    // Same-browser / offline fallback while PeerJS broker is flaky.
-    writeRoom(code, { offer, meta, answer: undefined, guests: {} })
-
-    this.attachPeerLifecycle(peer)
+    writeRoom(code, { offer, meta: roomMeta, answer: undefined, guests: {} })
 
     peer.on('connection', (conn) => {
       this.conn = conn
@@ -717,9 +775,78 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
       })
     })
 
-    await waitPeerOpen(peer, 12_000)
+    return { code, joinUrl: joinUrlFromMeta(code, roomMeta) }
+  }
 
-    return { code, joinUrl: joinUrlFromMeta(code, meta) }
+  private async guestFetchOfferOnBroker(
+    normalized: string,
+    timeoutMs: number,
+    guestId: string | undefined,
+    brokerIndex: number,
+  ): Promise<string> {
+    const peer = await this.openPeer(undefined, brokerIndex)
+    const conn = peer.connect(`rg-${normalized}`, { reliable: true })
+    this.conn = conn
+
+    return new Promise<string>((resolve, reject) => {
+      const timer = window.setTimeout(() => reject(new Error('PeerJS offer timeout')), timeoutMs)
+      conn.on('data', (data: unknown) => {
+        const msg = data as {
+          type?: string
+          offer?: string
+          sdp?: string
+          guestId?: string
+          meta?: SignalingRoomMeta
+        }
+        if (msg.type === 'offer' && msg.offer) {
+          window.clearTimeout(timer)
+          resolve(msg.offer)
+          return
+        }
+        if (msg.type === 'webrtc-offer' && msg.offer) {
+          window.clearTimeout(timer)
+          resolve(msg.offer)
+          return
+        }
+        if (msg.type === 'room-meta' && msg.meta) {
+          writeRoom(normalized, { meta: msg.meta })
+        }
+        this.handleConnData(data, normalized)
+      })
+      void waitConnOpen(conn, 10_000)
+        .then(() =>
+          conn.send(guestId ? { type: 'guest-ready', guestId } : { type: 'guest-ready' }),
+        )
+        .catch(() => {
+          window.clearTimeout(timer)
+          reject(new Error('PeerJS guest connection failed — host may be offline'))
+        })
+    })
+  }
+
+  async guestFetchOffer(code: string, timeoutMs = 20_000, guestId?: string) {
+    const normalized = code.trim().toUpperCase()
+    const localMeta = readRoom(normalized)?.meta
+    const urlParams =
+      typeof window !== 'undefined' ? parseJoinLocation(window.location.search, '') : null
+    const hint = resolvePeerJsBrokerIndex(
+      localMeta?.peerJsBrokerIndex,
+      urlParams?.peerJsBrokerIndex ?? null,
+    )
+
+    const localOffer = readRoom(normalized)?.offer
+    if (localMeta?.localOnly && localOffer) return localOffer
+
+    let lastErr: Error | null = null
+    for (const brokerIndex of this.brokerIndicesToTry(hint)) {
+      try {
+        return await this.guestFetchOfferOnBroker(normalized, timeoutMs, guestId, brokerIndex)
+      } catch (err) {
+        lastErr = err instanceof Error ? err : new Error('PeerJS guest connection failed')
+        this.close({ rejectPending: true })
+      }
+    }
+    throw lastErr ?? new Error('PeerJS offer timeout')
   }
 
   async guestPublishAnswer(code: string, answer: string, guestId?: string) {
@@ -790,52 +917,6 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     this.clearAnswerWait()
   }
 
-  async guestFetchOffer(code: string, timeoutMs = 20_000, guestId?: string) {
-    const normalized = code.trim().toUpperCase()
-    const Peer = await this.loadPeer()
-    const cfg = readPeerJsConfig()
-    const peer = new Peer(cfg)
-    this.peer = peer
-    await waitPeerOpen(peer, 10_000)
-    const conn = peer.connect(`rg-${normalized}`, { reliable: true })
-    this.conn = conn
-
-    return new Promise<string>((resolve, reject) => {
-      const timer = window.setTimeout(() => reject(new Error('PeerJS offer timeout')), timeoutMs)
-      conn.on('data', (data: unknown) => {
-        const msg = data as {
-          type?: string
-          offer?: string
-          sdp?: string
-          guestId?: string
-          meta?: SignalingRoomMeta
-        }
-        if (msg.type === 'offer' && msg.offer) {
-          window.clearTimeout(timer)
-          resolve(msg.offer)
-          return
-        }
-        if (msg.type === 'webrtc-offer' && msg.offer) {
-          window.clearTimeout(timer)
-          resolve(msg.offer)
-          return
-        }
-        if (msg.type === 'room-meta' && msg.meta) {
-          writeRoom(normalized, { meta: msg.meta })
-        }
-        this.handleConnData(data, normalized)
-      })
-      void waitConnOpen(conn, 8_000)
-        .then(() =>
-          conn.send(guestId ? { type: 'guest-ready', guestId } : { type: 'guest-ready' }),
-        )
-        .catch(() => {
-          window.clearTimeout(timer)
-          reject(new Error('PeerJS guest connection failed — host may be offline'))
-        })
-    })
-  }
-
   close(opts?: { rejectPending?: boolean }) {
     this.disconnecting = true
     if (opts?.rejectPending) {
@@ -868,18 +949,21 @@ const ADAPTER_TIMEOUT_MS: Record<SignalingAdapterName, number> = {
 export class SignalingAdapterChain {
   private adapters: SignalingAdapter[] = []
   private active: SignalingAdapter | null = null
+  private peerAdapter: PeerJSSignalingAdapter
   private broadcastAdapter: BroadcastSignalingAdapter
+  private firebaseAdapter: FirebaseSignalingAdapter | null = null
   lastAdapter: SignalingAdapterName = 'peerjs'
   lastError: string | null = null
 
   constructor() {
-    // Free public servers first — no API keys required.
-    this.adapters.push(new PeerJSSignalingAdapter())
+    this.peerAdapter = new PeerJSSignalingAdapter()
     this.broadcastAdapter = new BroadcastSignalingAdapter()
+    this.adapters.push(this.peerAdapter)
     this.adapters.push(this.broadcastAdapter)
 
     const firebase = new FirebaseSignalingAdapter()
     if (import.meta.env.VITE_FIREBASE_DATABASE_URL && import.meta.env.VITE_FIREBASE_API_KEY) {
+      this.firebaseAdapter = firebase
       this.adapters.push(firebase)
     }
   }
@@ -906,40 +990,112 @@ export class SignalingAdapterChain {
   }
 
   async hostRoom(offer: string, meta: SignalingRoomMeta) {
-    for (const adapter of this.adapters) {
-      const timeoutMs = ADAPTER_TIMEOUT_MS[adapter.name]
+    const brokers = listPeerJsBrokers()
+    let lastErr: string | null = null
+
+    for (let brokerIndex = 0; brokerIndex < brokers.length; brokerIndex++) {
       try {
-        const result = await this.raceAdapter(adapter, () => adapter.hostRoom(offer, meta), timeoutMs)
-        this.active = adapter
-        this.lastAdapter = adapter.name
+        const roomMeta: SignalingRoomMeta = { ...meta, peerJsBrokerIndex: brokerIndex }
+        const result = await this.raceAdapter(
+          this.peerAdapter,
+          () => this.peerAdapter.hostRoom(offer, roomMeta),
+          ADAPTER_TIMEOUT_MS.peerjs,
+        )
+        this.active = this.peerAdapter
+        this.lastAdapter = 'peerjs'
         this.lastError = null
+        this.broadcastAdapter.syncRoom(result.code, offer, roomMeta)
         return result
       } catch (err) {
-        this.lastError = err instanceof Error ? err.message : 'signaling failed'
-        adapter.close()
+        lastErr = err instanceof Error ? err.message : 'PeerJS signaling failed'
+        this.peerAdapter.close()
       }
     }
+
+    if (this.firebaseAdapter) {
+      try {
+        const result = await this.raceAdapter(
+          this.firebaseAdapter,
+          () => this.firebaseAdapter!.hostRoom(offer, meta),
+          ADAPTER_TIMEOUT_MS.firebase,
+        )
+        this.active = this.firebaseAdapter
+        this.lastAdapter = 'firebase'
+        this.lastError = null
+        this.broadcastAdapter.syncRoom(result.code, offer, meta)
+        return result
+      } catch (err) {
+        lastErr = err instanceof Error ? err.message : 'Firebase signaling failed'
+        this.firebaseAdapter.close()
+      }
+    }
+
+    try {
+      const localMeta: SignalingRoomMeta = { ...meta, localOnly: true }
+      const result = await this.raceAdapter(
+        this.broadcastAdapter,
+        () => this.broadcastAdapter.hostRoom(offer, localMeta),
+        ADAPTER_TIMEOUT_MS.broadcast,
+      )
+      this.active = this.broadcastAdapter
+      this.lastAdapter = 'broadcast'
+      this.lastError =
+        'Online signaling unavailable — room code works in this browser only (open a second tab to test)'
+      return result
+    } catch (err) {
+      lastErr = err instanceof Error ? err.message : 'signaling failed'
+      this.broadcastAdapter.close()
+    }
+
     this.lastAdapter = 'manual'
+    this.lastError = lastErr
     throw new Error('All signaling adapters failed — use manual SDP paste')
   }
 
   async guestFetchOffer(code: string, timeoutMs?: number, guestId?: string) {
-    // Guest always tries PeerJS first (cross-device default).
-    const order = [
-      this.adapters.find((a) => a.name === 'peerjs'),
-      ...this.adapters.filter((a) => a.name !== 'peerjs'),
-    ].filter(Boolean) as SignalingAdapter[]
+    const normalized = code.trim().toUpperCase()
+    const localMeta = readRoom(normalized)?.meta
 
-    for (const adapter of order) {
+    if (localMeta?.localOnly) {
       try {
-        this.active = adapter
-        const offer = await adapter.guestFetchOffer(code, timeoutMs, guestId)
-        this.lastAdapter = adapter.name
+        const offer = await this.broadcastAdapter.guestFetchOffer(code, timeoutMs, guestId)
+        this.active = this.broadcastAdapter
+        this.lastAdapter = 'broadcast'
         return offer
       } catch {
-        adapter.close()
+        this.broadcastAdapter.close()
       }
     }
+
+    try {
+      const offer = await this.peerAdapter.guestFetchOffer(code, timeoutMs, guestId)
+      this.active = this.peerAdapter
+      this.lastAdapter = 'peerjs'
+      return offer
+    } catch {
+      this.peerAdapter.close()
+    }
+
+    if (this.firebaseAdapter) {
+      try {
+        const offer = await this.firebaseAdapter.guestFetchOffer(code, timeoutMs, guestId)
+        this.active = this.firebaseAdapter
+        this.lastAdapter = 'firebase'
+        return offer
+      } catch {
+        this.firebaseAdapter.close()
+      }
+    }
+
+    try {
+      const offer = await this.broadcastAdapter.guestFetchOffer(code, timeoutMs, guestId)
+      this.active = this.broadcastAdapter
+      this.lastAdapter = 'broadcast'
+      return offer
+    } catch {
+      this.broadcastAdapter.close()
+    }
+
     this.lastAdapter = 'manual'
     throw new Error('Could not fetch offer — try manual SDP paste')
   }
@@ -961,23 +1117,38 @@ export class SignalingAdapterChain {
   }
 
   async joinRoomAsGuest(code: string, guestId: string) {
-    const order = [
-      this.adapters.find((a) => a.name === 'peerjs'),
-      this.broadcastAdapter,
-      ...this.adapters.filter((a) => a.name !== 'peerjs' && a.name !== 'broadcast'),
-    ].filter(Boolean) as SignalingAdapter[]
+    const normalized = code.trim().toUpperCase()
+    const localMeta = readRoom(normalized)?.meta
 
-    for (const adapter of order) {
-      if (!adapter.joinRoomAsGuest) continue
+    if (localMeta?.localOnly) {
       try {
-        this.active = adapter
-        const offer = await adapter.joinRoomAsGuest(code, guestId)
-        this.lastAdapter = adapter.name
+        const offer = await this.broadcastAdapter.joinRoomAsGuest!(code, guestId)
+        this.active = this.broadcastAdapter
+        this.lastAdapter = 'broadcast'
         return offer
       } catch {
-        adapter.close()
+        this.broadcastAdapter.close()
       }
     }
+
+    try {
+      const offer = await this.peerAdapter.joinRoomAsGuest!(code, guestId)
+      this.active = this.peerAdapter
+      this.lastAdapter = 'peerjs'
+      return offer
+    } catch {
+      this.peerAdapter.close()
+    }
+
+    try {
+      const offer = await this.broadcastAdapter.joinRoomAsGuest!(code, guestId)
+      this.active = this.broadcastAdapter
+      this.lastAdapter = 'broadcast'
+      return offer
+    } catch {
+      this.broadcastAdapter.close()
+    }
+
     throw new Error('Could not join room as guest')
   }
 
@@ -1070,7 +1241,7 @@ export function formatSignalingPath(name: SignalingAdapterName): string {
     case 'firebase':
       return 'Room code (Firebase)'
     case 'broadcast':
-      return 'Room code (same browser)'
+      return 'Room code (same browser only)'
     case 'manual':
       return 'Manual SDP paste'
   }

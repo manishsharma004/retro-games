@@ -15,13 +15,22 @@ export interface IceConfig {
 const STUN_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun.cloudflare.com:3478' },
   { urls: 'stun:stun.stunprotocol.org:3478' },
   { urls: 'stun:stun.mozilla.org:3478' },
 ]
 
+/** PeerJS cloud TURN — used by PeerJS DataConnections by default. */
+const PEERJS_TURN_SERVERS: RTCIceServer[] = [
+  {
+    urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'],
+    username: 'peerjs',
+    credential: 'peerjsp',
+  },
+]
+
 /**
- * Free public TURN relay (Open Relay Project / Metered) — used only after local
- * Wi‑Fi / STUN path fails so same-LAN peers connect directly when possible.
+ * Free public TURN relay (Open Relay Project / Metered).
  * @see https://www.metered.ca/tools/openrelay/
  */
 const FREE_TURN_SERVERS: RTCIceServer[] = [
@@ -50,21 +59,34 @@ function readCustomTurnServers(): RTCIceServer[] {
   return [{ urls: url, username, credential }]
 }
 
-function turnServers(): RTCIceServer[] {
-  return [...FREE_TURN_SERVERS, ...readCustomTurnServers()]
+function dedupeIceServers(servers: RTCIceServer[]): RTCIceServer[] {
+  const seen = new Set<string>()
+  const out: RTCIceServer[] = []
+  for (const server of servers) {
+    const urls = Array.isArray(server.urls) ? server.urls.join('|') : server.urls
+    const key = `${urls}:${server.username ?? ''}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(server)
+  }
+  return out
+}
+
+function allTurnServers(): RTCIceServer[] {
+  return [...PEERJS_TURN_SERVERS, ...FREE_TURN_SERVERS, ...readCustomTurnServers()]
 }
 
 /**
- * Local tier: STUN only — tries LAN host candidates and direct internet (STUN/srflx).
- * Relay tier: STUN + TURN — fallback when peers are on different networks / strict NAT.
+ * Local tier: STUN + TURN gathered up front — ICE still prefers LAN/direct when available.
+ * Relay tier: same servers; triggers ICE restart with relay preference on fallback.
  */
 export function getIceConfig(tier: IceTier = 'local'): IceConfig {
-  const relay = turnServers()
-  const iceServers = tier === 'local' ? [...STUN_SERVERS] : [...STUN_SERVERS, ...relay]
+  const turn = allTurnServers()
+  const iceServers = dedupeIceServers([...STUN_SERVERS, ...turn])
   return {
     iceServers,
     tier,
-    connectivityTier: tier === 'relay' && relay.length > 0 ? 'turn' : 'stun',
+    connectivityTier: turn.length > 0 ? 'turn' : 'stun',
   }
 }
 
@@ -107,5 +129,5 @@ export function suggestedCaptureFps(): number {
   return readNetworkQuality() === 'cellular' ? 30 : 60
 }
 
-export const ICE_CONNECT_TIMEOUT_MS = 20_000
-export const ICE_LOCAL_RETRY_MS = 12_000
+export const ICE_CONNECT_TIMEOUT_MS = 25_000
+export const ICE_LOCAL_RETRY_MS = 8_000

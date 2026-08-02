@@ -5,6 +5,7 @@ import {
   listPeerJsBrokers,
   resolvePeerJsBrokerIndex,
 } from './peerJsBrokers'
+import { offerFingerprint } from './sdpUtils'
 
 export type SignalingAdapterName = 'peerjs' | 'firebase' | 'broadcast' | 'manual'
 
@@ -22,8 +23,8 @@ export interface SignalingRoomMeta {
 export interface SignalingAdapter {
   readonly name: SignalingAdapterName
   hostRoom(offer: string, meta: SignalingRoomMeta): Promise<{ code: string; joinUrl: string }>
-  guestPublishAnswer(code: string, answer: string, guestId?: string): Promise<void>
-  waitForAnswer(code: string, timeoutMs?: number, guestId?: string): Promise<string>
+  guestPublishAnswer(code: string, answer: string, guestId?: string, offerFp?: string): Promise<void>
+  waitForAnswer(code: string, timeoutMs?: number, guestId?: string, offerFp?: string): Promise<string>
   guestFetchOffer(code: string, timeoutMs?: number, guestId?: string): Promise<string>
   joinRoomAsGuest?(code: string, guestId: string, timeoutMs?: number, stablePeerId?: string): Promise<string>
   publishGuestOffer?(code: string, guestId: string, offer: string): Promise<void>
@@ -47,7 +48,9 @@ const BC_CHANNEL = 'retro-games-lobby'
 
 type RoomRecord = {
   offer?: string
+  offerFp?: string
   answer?: string
+  answerFp?: string
   meta?: SignalingRoomMeta
   guests?: Record<string, { offer?: string; answer?: string; joinedAt: number }>
   updatedAt: number
@@ -182,10 +185,18 @@ function joinUrlFromMeta(code: string, meta: SignalingRoomMeta) {
   })
 }
 
+function readPairedAnswer(code: string, offerFp?: string): string | null {
+  const rec = readRoom(code)
+  if (!rec?.answer) return null
+  if (offerFp && rec.answerFp && rec.answerFp !== offerFp) return null
+  return rec.answer
+}
+
 function waitForRoomField(
   code: string,
   field: 'offer' | 'answer',
   timeoutMs: number,
+  offerFp?: string,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const started = Date.now()
@@ -193,11 +204,20 @@ function waitForRoomField(
 
     const check = () => {
       const rec = readRoom(code)
-      const value = rec?.[field]
-      if (value) {
-        cleanup()
-        resolve(value)
-        return
+      if (field === 'answer') {
+        const paired = readPairedAnswer(code, offerFp)
+        if (paired) {
+          cleanup()
+          resolve(paired)
+          return
+        }
+      } else {
+        const value = rec?.[field]
+        if (value) {
+          cleanup()
+          resolve(value)
+          return
+        }
       }
       if (Date.now() - started > timeoutMs) {
         cleanup()
@@ -314,27 +334,31 @@ export class BroadcastSignalingAdapter implements SignalingAdapter {
   async hostRoom(offer: string, meta: SignalingRoomMeta) {
     const code = generateRoomCode(4)
     this.codes.push(code)
-    writeRoom(code, { offer, meta, answer: undefined, guests: {} })
+    const offerFp = offerFingerprint(offer)
+    writeRoom(code, { offer, offerFp, meta, answer: undefined, answerFp: undefined, guests: {} })
     return { code, joinUrl: joinUrlFromMeta(code, meta) }
   }
 
   /** Mirror an online-hosted room for same-browser guests (localStorage backup). */
   syncRoom(code: string, offer: string, meta: SignalingRoomMeta) {
     if (!this.codes.includes(code)) this.codes.push(code)
-    writeRoom(code, { offer, meta, answer: undefined, guests: {} })
+    const offerFp = offerFingerprint(offer)
+    writeRoom(code, { offer, offerFp, meta, answer: undefined, answerFp: undefined, guests: {} })
   }
 
-  async guestPublishAnswer(code: string, answer: string, guestId?: string) {
+  async guestPublishAnswer(code: string, answer: string, guestId?: string, offerFp?: string) {
     if (guestId) {
       writeGuestSlot(code, guestId, { answer })
       return
     }
-    writeRoom(code, { answer })
+    writeRoom(code, { answer, answerFp: offerFp })
   }
 
-  async waitForAnswer(code: string, timeoutMs = 120_000, guestId?: string) {
+  async waitForAnswer(code: string, timeoutMs = 120_000, guestId?: string, offerFp?: string) {
     if (guestId) return waitForGuestField(code, guestId, 'answer', timeoutMs)
-    return waitForRoomField(code, 'answer', timeoutMs)
+    const existing = readPairedAnswer(code, offerFp)
+    if (existing) return existing
+    return waitForRoomField(code, 'answer', timeoutMs, offerFp)
   }
 
   async guestFetchOffer(code: string, timeoutMs = 30_000, guestId?: string) {
@@ -359,7 +383,8 @@ export class BroadcastSignalingAdapter implements SignalingAdapter {
   }
 
   async republishOffer(code: string, offer: string) {
-    writeRoom(code, { offer, answer: undefined })
+    const offerFp = offerFingerprint(offer)
+    writeRoom(code, { offer, offerFp, answer: undefined, answerFp: undefined })
   }
 
   clearAnswer(code: string, guestId?: string) {
@@ -367,7 +392,7 @@ export class BroadcastSignalingAdapter implements SignalingAdapter {
       writeGuestSlot(code, guestId, { answer: undefined })
       return
     }
-    writeRoom(code, { answer: undefined })
+    writeRoom(code, { answer: undefined, answerFp: undefined })
   }
 
   clearGuestSlot(code: string, guestId: string) {
@@ -516,6 +541,7 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
   private disconnecting = false
   private sessionHandlers = new Set<(data: unknown) => void>()
   private latestOffer: string | null = null
+  private latestOfferFp: string | null = null
   private latestMeta: SignalingRoomMeta | null = null
   private conns = new Map<string, DataConn>()
   private guestJoinHandlers = new Set<(signalingId: string, stablePeerId?: string) => void>()
@@ -578,8 +604,10 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     }
 
     if (msg.type === 'answer' && msg.answer) {
-      writeRoom(code, { answer: msg.answer })
-      this.deliverAnswer(msg.answer)
+      const offerFp = (msg as { offerFp?: string }).offerFp
+      if (offerFp && this.latestOfferFp && offerFp !== this.latestOfferFp) return
+      writeRoom(code, { answer: msg.answer, answerFp: offerFp })
+      this.deliverAnswer(msg.answer, offerFp)
       return
     }
     if (msg.type === 'ice-reoffer' && msg.sdp) {
@@ -702,7 +730,8 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     throw lastErr ?? new Error('PeerJS guest join timeout')
   }
 
-  private deliverAnswer(answer: string) {
+  private deliverAnswer(answer: string, offerFp?: string) {
+    if (offerFp && this.latestOfferFp && offerFp !== this.latestOfferFp) return
     if (this.answerResolve) {
       const resolve = this.answerResolve
       this.clearAnswerWait()
@@ -755,9 +784,17 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     const peer = await this.openPeer(`rg-${code}`, brokerIndex)
     this.hostCode = code
     this.latestOffer = offer
+    this.latestOfferFp = offerFingerprint(offer)
     this.latestMeta = roomMeta
 
-    writeRoom(code, { offer, meta: roomMeta, answer: undefined, guests: {} })
+    writeRoom(code, {
+      offer,
+      offerFp: this.latestOfferFp,
+      meta: roomMeta,
+      answer: undefined,
+      answerFp: undefined,
+      guests: {},
+    })
 
     peer.on('connection', (conn) => {
       const multi = Boolean(meta.multiGuest)
@@ -882,19 +919,19 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     throw lastErr ?? new Error('PeerJS offer timeout')
   }
 
-  async guestPublishAnswer(code: string, answer: string, guestId?: string) {
+  async guestPublishAnswer(code: string, answer: string, guestId?: string, offerFp?: string) {
     if (guestId) {
       writeGuestSlot(code, guestId, { answer })
       const conn = this.conns.get(guestId) ?? this.conn
-      if (conn?.open) conn.send({ type: 'webrtc-answer', guestId, answer })
+      if (conn?.open) conn.send({ type: 'webrtc-answer', guestId, answer, offerFp })
       return
     }
-    writeRoom(code, { answer })
+    writeRoom(code, { answer, answerFp: offerFp })
     if (!this.conn?.open) throw new Error('PeerJS guest connection not open')
-    this.conn.send({ type: 'answer', answer })
+    this.conn.send({ type: 'answer', answer, offerFp })
   }
 
-  async waitForAnswer(code: string, timeoutMs = 120_000, guestId?: string) {
+  async waitForAnswer(code: string, timeoutMs = 120_000, guestId?: string, offerFp?: string) {
     if (guestId) {
       const existing = readRoom(code)?.guests?.[guestId]?.answer
       if (existing) return existing
@@ -910,7 +947,7 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     }
     this.clearAnswerWait()
 
-    const existing = readRoom(code)?.answer
+    const existing = readPairedAnswer(code, offerFp ?? this.latestOfferFp ?? undefined)
     if (existing) return existing
 
     if (this.pendingAnswer) {
@@ -918,11 +955,16 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
       this.pendingAnswer = null
       return answer
     }
+    const expectedFp = offerFp ?? this.latestOfferFp ?? undefined
     return new Promise<string>((resolve, reject) => {
-      this.answerResolve = resolve
+      this.answerResolve = (answer) => {
+        const paired = readPairedAnswer(code, expectedFp)
+        if (paired) resolve(paired)
+        else resolve(answer)
+      }
       this.answerReject = reject
       this.answerTimer = window.setTimeout(() => {
-        if (this.answerResolve === resolve) {
+        if (this.answerReject === reject) {
           this.clearAnswerWait()
           reject(new Error('PeerJS answer timeout'))
         }
@@ -932,11 +974,17 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
 
   async republishOffer(code: string, offer: string) {
     this.latestOffer = offer
-    writeRoom(code, { offer, answer: undefined })
+    this.latestOfferFp = offerFingerprint(offer)
+    writeRoom(code, {
+      offer,
+      offerFp: this.latestOfferFp,
+      answer: undefined,
+      answerFp: undefined,
+    })
     this.pendingAnswer = null
     this.clearAnswerWait()
     if (this.conn?.open) {
-      this.conn.send({ type: 'offer', offer, meta: this.latestMeta })
+      this.conn.send({ type: 'offer', offer, meta: this.latestMeta, offerFp: this.latestOfferFp })
     }
   }
 
@@ -945,7 +993,7 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
       writeGuestSlot(code, guestId, { answer: undefined })
       return
     }
-    writeRoom(code, { answer: undefined })
+    writeRoom(code, { answer: undefined, answerFp: undefined })
     this.pendingAnswer = null
     this.clearAnswerWait()
   }
@@ -1140,14 +1188,14 @@ export class SignalingAdapterChain {
     throw new Error('Could not fetch offer — try manual SDP paste')
   }
 
-  async guestPublishAnswer(code: string, answer: string, guestId?: string) {
+  async guestPublishAnswer(code: string, answer: string, guestId?: string, offerFp?: string) {
     if (this.active) {
-      await this.active.guestPublishAnswer(code, answer, guestId)
+      await this.active.guestPublishAnswer(code, answer, guestId, offerFp)
       return
     }
     for (const adapter of this.adapters) {
       try {
-        await adapter.guestPublishAnswer(code, answer, guestId)
+        await adapter.guestPublishAnswer(code, answer, guestId, offerFp)
         this.active = adapter
         return
       } catch {
@@ -1226,33 +1274,19 @@ export class SignalingAdapterChain {
     }
   }
 
-  async waitForAnswer(code: string, guestId?: string) {
-    const waits: Promise<string>[] = []
-
+  async waitForAnswer(code: string, guestId?: string, offerFp?: string) {
     if (this.active) {
-      waits.push(this.active.waitForAnswer(code, 120_000, guestId))
+      return this.active.waitForAnswer(code, 120_000, guestId, offerFp)
     }
 
-    if (this.active?.name === 'peerjs' && !guestId) {
-      waits.push(this.broadcastAdapter.waitForAnswer(code))
-    }
-
-    if (guestId && this.broadcastAdapter) {
-      waits.push(this.broadcastAdapter.waitForAnswer(code, 120_000, guestId))
-    }
-
-    if (waits.length === 0) {
-      for (const adapter of this.adapters) {
-        try {
-          return await adapter.waitForAnswer(code, 120_000, guestId)
-        } catch {
-          adapter.close()
-        }
+    for (const adapter of this.adapters) {
+      try {
+        return await adapter.waitForAnswer(code, 120_000, guestId, offerFp)
+      } catch {
+        adapter.close()
       }
-      throw new Error('Answer timeout')
     }
-
-    return Promise.race(waits)
+    throw new Error('Answer timeout')
   }
 
   async republishOffer(code: string, offer: string) {

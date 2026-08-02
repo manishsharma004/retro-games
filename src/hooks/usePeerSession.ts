@@ -456,7 +456,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       }
       const guestId = signalingGuestIdRef.current
       if (guestId) {
-        chain?.sendGuestSessionMessage(guestId, payload)
+        void chain?.sendGuestSessionMessage(guestId, payload)
       } else {
         chain?.sendSessionMessage(payload)
       }
@@ -545,7 +545,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     }
     setRemoteStream(null)
     setConnectionPath('unknown')
-    setIceTier('local')
+    setIceTier(modeRef.current === 'remote' ? 'relay' : 'local')
 
     const conn = new PeerConnection({
       onState: (state) => {
@@ -754,7 +754,9 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         }
       },
     }, {
-      declareSendonlyMedia: modeRef.current === 'remote',
+      declareSendonlyMedia: roleRef.current === 'host' && modeRef.current === 'remote',
+      forceRelay: modeRef.current === 'remote',
+      iceTier: modeRef.current === 'remote' ? 'relay' : 'local',
     })
     connRef.current = conn
     return conn

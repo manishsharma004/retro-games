@@ -193,7 +193,18 @@ export class MultiPeerHostManager {
     if (status === 'connected') entry.signalingId = undefined
   }
 
+  private guestFailTimers = new Map<string, number>()
+
+  private clearGuestFailTimer(signalingId: string) {
+    const t = this.guestFailTimers.get(signalingId)
+    if (t !== undefined) {
+      window.clearTimeout(t)
+      this.guestFailTimers.delete(signalingId)
+    }
+  }
+
   private cancelGuestAttempt(signalingId: string) {
+    this.clearGuestFailTimer(signalingId)
     const g = this.guests.get(signalingId)
     if (g) {
       g.connection.close()
@@ -255,6 +266,8 @@ export class MultiPeerHostManager {
 
     const conn = new PeerConnection(this.buildConnHandlers(signalingId, peerId), {
       declareSendonlyMedia: this.declareSendonlyMedia,
+      forceRelay: this.declareSendonlyMedia,
+      iceTier: this.declareSendonlyMedia ? 'relay' : 'local',
     })
     try {
       const offer = await conn.createOffer()
@@ -315,6 +328,7 @@ export class MultiPeerHostManager {
         if (g) {
           g.connectionState = state
           if (state === 'connected') {
+            this.clearGuestFailTimer(signalingId)
             this.setRosterStatus(g.peerId, 'connected')
             this.sendRosterTo(signalingId)
             if (this.activeStream) {
@@ -323,16 +337,34 @@ export class MultiPeerHostManager {
           }
           this.emitRosterChange()
         }
-        if (state === 'disconnected' || state === 'closed' || state === 'failed') {
+        if (state === 'failed') {
+          this.clearGuestFailTimer(signalingId)
+          const timer = window.setTimeout(() => {
+            this.guestFailTimers.delete(signalingId)
+            const link = this.guests.get(signalingId)
+            if (link && (link.connectionState === 'failed' || link.connectionState === 'closed')) {
+              this.removeGuest(signalingId)
+            }
+          }, 5000)
+          this.guestFailTimers.set(signalingId, timer)
+          return
+        }
+        if (state === 'disconnected' || state === 'closed') {
           this.removeGuest(signalingId)
         }
       },
       onRenegotiationOffer: (signal, tier) => {
-        this.chain?.sendGuestSessionMessage(signalingId, {
-          type: 'ice-reoffer',
-          sdp: signal,
-          tier,
-        })
+        void this.chain
+          ?.sendGuestSessionMessage(signalingId, {
+            type: 'ice-reoffer',
+            sdp: signal,
+            tier,
+          })
+          .catch((err) => {
+            this.handlers.onError?.(
+              err instanceof Error ? err.message : 'ICE renegotiation signaling failed',
+            )
+          })
       },
       onControl: (msg) => this.handleControl(signalingId, peerId, msg),
       onError: (err) => this.handlers.onError?.(err.message),
@@ -379,6 +411,7 @@ export class MultiPeerHostManager {
   }
 
   private removeGuest(signalingId: string) {
+    this.clearGuestFailTimer(signalingId)
     const g = this.guests.get(signalingId)
     const peerId = g?.peerId ?? signalingId
     const code = this.roomCode

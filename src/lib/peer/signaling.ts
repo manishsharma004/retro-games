@@ -51,7 +51,7 @@ export interface SignalingAdapter {
   clearGuestStorage?(code: string, guestId: string): void
   clearGuestSlot?(code: string, guestId: string): void
   sendSessionMessage?(data: unknown): void
-  sendGuestSessionMessage?(guestId: string, data: unknown): void
+  sendGuestSessionMessage?(guestId: string, data: unknown): void | Promise<void>
   onSessionMessage?(handler: (data: unknown) => void): () => void
   onGuestSessionMessage?(handler: (guestId: string | undefined, data: unknown) => void): () => void
   close(opts?: { rejectPending?: boolean }): void
@@ -674,10 +674,28 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     this.conn.send(data)
   }
 
-  sendGuestSessionMessage(guestId: string, data: unknown) {
-    const conn = this.conns.get(guestId)
-    if (!conn?.open) return
-    conn.send({ ...(data as object), guestId })
+  sendGuestSessionMessage(guestId: string, data: unknown): Promise<void> {
+    const deadline = Date.now() + 8_000
+    const trySend = (): DataConn | undefined => {
+      const conn = this.conns.get(guestId)
+      return conn?.open ? conn : undefined
+    }
+    return new Promise<void>((resolve, reject) => {
+      const attempt = () => {
+        const conn = trySend()
+        if (conn) {
+          conn.send({ ...(data as object), guestId })
+          resolve()
+          return
+        }
+        if (Date.now() >= deadline) {
+          reject(new Error('Guest signaling channel not open'))
+          return
+        }
+        window.setTimeout(attempt, 50)
+      }
+      attempt()
+    })
   }
 
   onSessionMessage(handler: (data: unknown) => void) {
@@ -1384,8 +1402,8 @@ export class SignalingAdapterChain {
     this.active?.sendSessionMessage?.(data)
   }
 
-  sendGuestSessionMessage(guestId: string, data: unknown) {
-    this.peerAdapter.sendGuestSessionMessage(guestId, data)
+  sendGuestSessionMessage(guestId: string, data: unknown): Promise<void> {
+    return this.peerAdapter.sendGuestSessionMessage(guestId, data)
   }
 
   onSessionMessage(handler: (data: unknown) => void) {

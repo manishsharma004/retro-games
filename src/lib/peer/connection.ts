@@ -18,6 +18,8 @@ export interface PeerConnectionOptions {
   /** @deprecated use iceTier — relay tier forces TURN from the start */
   preferTurn?: boolean
   iceTier?: IceTier
+  /** Force TURN relay candidates only (cross-network remote play). */
+  forceRelay?: boolean
   /** Pre-declare sendonly A/V m-lines so cross-browser answers match (remote stream). */
   declareSendonlyMedia?: boolean
 }
@@ -114,10 +116,13 @@ export class PeerConnection {
   private localMigrateTimer: number | null = null
   private connectionPath: ConnectionPath = 'unknown'
   private declareSendonlyMedia: boolean
+  private forceRelay: boolean
 
   constructor(handlers: PeerConnectionHandlers = {}, options: PeerConnectionOptions = {}) {
     this.handlers = handlers
-    this.iceTier = options.iceTier ?? (options.preferTurn ? 'relay' : 'local')
+    this.forceRelay = options.forceRelay ?? false
+    this.iceTier =
+      options.iceTier ?? (options.preferTurn || this.forceRelay ? 'relay' : 'local')
     this.declareSendonlyMedia = options.declareSendonlyMedia ?? false
   }
 
@@ -177,7 +182,7 @@ export class PeerConnection {
     this.connectWatchTimer = window.setTimeout(() => {
       this.connectWatchTimer = null
       if (this.state !== 'connecting' && this.state !== 'awaiting-answer') return
-      if (!this.relayRetryDone && this.iceTier === 'local' && !this.isAnswerer) {
+      if (!this.relayRetryDone && !this.isAnswerer) {
         void this.tryRelayFallback()
         return
       }
@@ -224,10 +229,12 @@ export class PeerConnection {
   }
 
   private async tryRelayFallback(): Promise<void> {
-    if (this.relayRetryDone || this.iceTier === 'relay' || this.isAnswerer) return
+    if (this.relayRetryDone || this.isAnswerer) return
     this.relayRetryDone = true
-    this.iceTier = 'relay'
-    this.handlers.onIceTierChange?.('relay')
+    if (this.iceTier !== 'relay') {
+      this.iceTier = 'relay'
+      this.handlers.onIceTierChange?.('relay')
+    }
     try {
       const offer = await this.renegotiateAsOfferer('relay')
       this.handlers.onRenegotiationOffer?.(offer, 'relay')
@@ -260,7 +267,7 @@ export class PeerConnection {
   private async renegotiateAsOfferer(tier: IceTier): Promise<string> {
     const pc = this.pc
     if (!pc) throw new Error('No peer connection')
-    const { iceServers } = getIceConfig(tier)
+    const { iceServers } = getIceConfig(tier, this.forceRelay)
     pc.setConfiguration({ iceServers, iceCandidatePoolSize: 10 })
     pc.restartIce()
     const offer = await pc.createOffer({ iceRestart: true })
@@ -276,7 +283,7 @@ export class PeerConnection {
     if (!pc) throw new Error('No peer connection')
     this.iceTier = tier
     this.handlers.onIceTierChange?.(tier)
-    const { iceServers } = getIceConfig(tier)
+    const { iceServers } = getIceConfig(tier, this.forceRelay)
     pc.setConfiguration({ iceServers, iceCandidatePoolSize: 10 })
     const sdp = decompressSignal(encoded)
     await pc.setRemoteDescription({ type: 'offer', sdp })
@@ -320,11 +327,12 @@ export class PeerConnection {
 
   private ensurePc(): RTCPeerConnection {
     if (this.pc) return this.pc
-    const { iceServers } = getIceConfig(this.iceTier)
+    const { iceServers, iceTransportPolicy } = getIceConfig(this.iceTier, this.forceRelay)
     const pc = new RTCPeerConnection({
       iceServers,
       iceCandidatePoolSize: 10,
       bundlePolicy: 'max-bundle',
+      ...(iceTransportPolicy ? { iceTransportPolicy } : {}),
     })
     pc.ontrack = (event) => {
       const stream = event.streams[0]
@@ -343,7 +351,7 @@ export class PeerConnection {
       if (SIGNALING_WAIT_STATES.has(this.state)) return
 
       if (s === 'failed') {
-        if (!this.relayRetryDone && this.iceTier === 'local' && !this.isAnswerer) {
+        if (!this.relayRetryDone && !this.isAnswerer) {
           void this.tryRelayFallback()
           return
         }
@@ -386,7 +394,7 @@ export class PeerConnection {
       if (SIGNALING_WAIT_STATES.has(this.state)) return
       if (!this.offererAnswerApplied && this.state !== 'connecting') return
       if (this.state === 'connected') return
-      if (!this.relayRetryDone && this.iceTier === 'local' && !this.isAnswerer) {
+      if (!this.relayRetryDone && !this.isAnswerer) {
         void this.tryRelayFallback()
         return
       }
@@ -563,7 +571,7 @@ export class PeerConnection {
       this.setState('awaiting-answer')
       throw err
     }
-    this.watchForConnect(ICE_LOCAL_RETRY_MS)
+    this.watchForConnect(this.iceTier === 'relay' ? ICE_CONNECT_TIMEOUT_MS : ICE_LOCAL_RETRY_MS)
   }
 
   /** Attach canvas/audio stream for remote mode (host side).

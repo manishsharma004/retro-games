@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AdvancedSettings } from './AdvancedSettings'
+import { PeerConnectionStatus } from './PeerConnectionStatus'
 import { ControllerPanel } from './ControllerPanel'
 import { GamepadStatus } from './GamepadStatus'
 import { LatencyBadge } from './LatencyBadge'
@@ -331,6 +332,20 @@ export function RemotePlayGuestView({
               autoPlay
               playsInline
               muted
+            />
+            <PeerConnectionStatus
+              roomCode={roomCode}
+              phase={peer.phase}
+              connectionState={peer.connectionState}
+              connectionLost={peer.connectionLost}
+              error={peer.error}
+              hasVideo={remoteGuest.hasVideo}
+              onReconnect={() => peer.reconnectSession()}
+              onLeave={() => {
+                peer.disconnect()
+                exitFullscreen()
+                onLeave()
+              }}
             />
             {!isFullscreen && remoteGuest.hasVideo && (
               <button

@@ -16,21 +16,30 @@ export function normalizeRoomCode(code: string): string {
   return code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
 }
 
-export function buildJoinUrl(code: string, mode: SessionMode): string {
+export type JoinRole = 'player' | 'spectator'
+
+export function buildJoinUrl(
+  code: string,
+  mode: SessionMode,
+  opts?: { spectator?: boolean },
+): string {
   const normalized = normalizeRoomCode(code)
   const base = import.meta.env.BASE_URL.replace(/\/$/, '') || '/'
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
   const params = new URLSearchParams({ room: normalized, mode, join: '1' })
+  if (opts?.spectator) params.set('role', 'spectator')
   return `${origin}${base}?${params.toString()}`
 }
 
 export function parseJoinLocation(search: string, hash: string): {
   room: string | null
   mode: SessionMode | null
+  role: JoinRole
 } {
   const fromSearch = new URLSearchParams(search)
   let room = fromSearch.get('room')
   let mode = fromSearch.get('mode') as SessionMode | null
+  const roleParam = fromSearch.get('role')
 
   if (!room && hash.startsWith('#join/')) {
     const parts = hash.slice(6).split('/')
@@ -44,5 +53,7 @@ export function parseJoinLocation(search: string, hash: string): {
     mode = room ? 'local' : null
   }
 
-  return { room, mode }
+  const role: JoinRole = roleParam === 'spectator' ? 'spectator' : 'player'
+
+  return { room, mode, role }
 }

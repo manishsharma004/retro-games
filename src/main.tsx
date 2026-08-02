@@ -8,7 +8,9 @@ const join = resolveJoinRoute()
 const root = createRoot(document.getElementById('root')!)
 
 if (join && join.mode !== 'coop') {
-  root.render(<JoinPage initialRoom={join.room} initialMode={join.mode} />)
+  root.render(
+    <JoinPage initialRoom={join.room} initialMode={join.mode} initialRole={join.role} />,
+  )
 } else {
   root.render(<App initialCoopJoin={join?.mode === 'coop' ? join.room : null} />)
 }

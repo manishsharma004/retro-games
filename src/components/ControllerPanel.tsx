@@ -16,7 +16,9 @@ interface ControllerPanelProps {
   /** Co-op: pick P1/P2 with mutual exclusion across devices. */
   remoteSeat?: PeerSeat | null
   onPickSeat?: (seat: 1 | 2) => void
+  onPickRole?: (seat: 1 | 2 | null) => void
   isSeatAvailable?: (seat: 1 | 2) => boolean
+  remoteSpectator?: boolean
 }
 
 function slotOptions(
@@ -50,9 +52,13 @@ export function ControllerPanel({
   peerSeat,
   remoteSeat = null,
   onPickSeat,
+  onPickRole,
   isSeatAvailable,
+  remoteSpectator = false,
 }: ControllerPanelProps) {
   if (!open) return null
+
+  const pickRoleFn = onPickRole ?? onPickSeat
 
   const pad1Options = slotOptions(pads, true)
   const pad2Options = slotOptions(pads, true)
@@ -91,9 +97,9 @@ export function ControllerPanel({
           </ul>
         )}
 
-        {onPickSeat && isSeatAvailable && (
+        {pickRoleFn && isSeatAvailable && (
           <div className="controller-panel__seats" role="radiogroup" aria-label="Player slot">
-            <p className="peer-lobby__label">Your player slot</p>
+            <p className="peer-lobby__label">Your role</p>
             {([1, 2] as const).map((player) => {
               const taken = !isSeatAvailable(player)
               const checked = peerSeat === player
@@ -105,7 +111,7 @@ export function ControllerPanel({
                       name="controller-player-slot"
                       checked={checked}
                       disabled={taken && !checked}
-                      onChange={() => onPickSeat(player)}
+                      onChange={() => pickRoleFn(player)}
                     />{' '}
                     Player {player}
                     {taken && !checked ? ' (taken)' : ''}
@@ -113,10 +119,26 @@ export function ControllerPanel({
                 </label>
               )
             })}
+            {onPickRole && (
+              <label className="controller-panel__field">
+                <span>
+                  <input
+                    type="radio"
+                    name="controller-player-slot"
+                    checked={peerSeat === null}
+                    onChange={() => onPickRole(null)}
+                  />{' '}
+                  Spectator
+                </span>
+              </label>
+            )}
             {remoteSeat && peerSeat && remoteSeat !== peerSeat && (
               <p className="peer-lobby__hint">
                 Other device is Player {remoteSeat}.
               </p>
+            )}
+            {remoteSpectator && peerSeat !== null && (
+              <p className="peer-lobby__hint">Other device is spectating.</p>
             )}
           </div>
         )}
@@ -155,7 +177,7 @@ export function ControllerPanel({
           </label>
         )}
 
-        {peerSeat && !onPickSeat && (
+        {peerSeat && !pickRoleFn && (
           <p className="peer-lobby__hint">
             In a 2-player link, only your seat (P{peerSeat}) is sent to the peer. The other player
             uses their own device.

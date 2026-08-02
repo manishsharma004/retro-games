@@ -16,6 +16,7 @@ export interface UseRemoteGuestResult {
   latencyProfile: LatencyProfile
   onPress: (button: string) => void
   onRelease: (button: string) => void
+  releaseAll: () => void
 }
 
 /** Guest remote mode: display video stream and send input. */
@@ -23,6 +24,18 @@ export function useRemoteGuest({ enabled, peer }: UseRemoteGuestOptions): UseRem
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [needsTap, setNeedsTap] = useState(false)
   const [hasVideo, setHasVideo] = useState(false)
+  const pressedRef = useRef(new Set<string>())
+
+  const releaseAll = useCallback(() => {
+    for (const button of pressedRef.current) {
+      peer.sendInput(button, false)
+    }
+    pressedRef.current.clear()
+  }, [peer])
+
+  useEffect(() => {
+    if (peer.seat === null) releaseAll()
+  }, [peer.seat, releaseAll])
 
   useEffect(() => {
     if (!enabled) {
@@ -79,7 +92,16 @@ export function useRemoteGuest({ enabled, peer }: UseRemoteGuestOptions): UseRem
     unmute,
     latencyMs: peer.latencyMs,
     latencyProfile: peer.latencyProfile,
-    onPress: (button: string) => peer.sendInput(button, true),
-    onRelease: (button: string) => peer.sendInput(button, false),
+    onPress: (button: string) => {
+      if (peer.seat === null) return
+      pressedRef.current.add(button)
+      peer.sendInput(button, true)
+    },
+    onRelease: (button: string) => {
+      if (peer.seat === null) return
+      pressedRef.current.delete(button)
+      peer.sendInput(button, false)
+    },
+    releaseAll,
   }
 }

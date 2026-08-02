@@ -14,6 +14,8 @@ export interface SignalingAdapter {
   guestPublishAnswer(code: string, answer: string): Promise<void>
   waitForAnswer(code: string, timeoutMs?: number): Promise<string>
   guestFetchOffer(code: string, timeoutMs?: number): Promise<string>
+  republishOffer?(code: string, offer: string): Promise<void>
+  clearAnswer?(code: string): void
   sendSessionMessage?(data: unknown): void
   onSessionMessage?(handler: (data: unknown) => void): () => void
   close(opts?: { rejectPending?: boolean }): void
@@ -192,6 +194,14 @@ export class BroadcastSignalingAdapter implements SignalingAdapter {
     return waitForRoomField(code, 'offer', timeoutMs)
   }
 
+  async republishOffer(code: string, offer: string) {
+    writeRoom(code, { offer, answer: undefined })
+  }
+
+  clearAnswer(code: string) {
+    writeRoom(code, { answer: undefined })
+  }
+
   close(_opts?: { rejectPending?: boolean }) {
     for (const code of this.codes) {
       localStorage.removeItem(roomKey(code))
@@ -266,6 +276,21 @@ export class FirebaseSignalingAdapter implements SignalingAdapter {
     throw new Error('Firebase offer timeout')
   }
 
+  async republishOffer(code: string, offer: string) {
+    if (!this.enabled()) throw new Error('Firebase not configured')
+    await fetch(this.url(`rooms/${code}`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ offer }),
+    })
+    await fetch(this.url(`rooms/${code}/answer`), { method: 'DELETE' })
+  }
+
+  clearAnswer(code: string) {
+    if (!this.enabled()) return
+    void fetch(this.url(`rooms/${code}/answer`), { method: 'DELETE' })
+  }
+
   close(_opts?: { rejectPending?: boolean }) {
     if (this.activeCode && this.enabled()) {
       void fetch(this.url(`rooms/${this.activeCode}`), { method: 'DELETE' })
@@ -289,6 +314,8 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
   private hostCode: string | null = null
   private disconnecting = false
   private sessionHandlers = new Set<(data: unknown) => void>()
+  private latestOffer: string | null = null
+  private latestMeta: SignalingRoomMeta | null = null
 
   private handleConnData(data: unknown, code: string) {
     const msg = data as {
@@ -382,6 +409,8 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     const peer = new Peer(`rg-${code}`, cfg)
     this.peer = peer
     this.hostCode = code
+    this.latestOffer = offer
+    this.latestMeta = meta
 
     // Same-browser / offline fallback while PeerJS broker is flaky.
     writeRoom(code, { offer, meta, answer: undefined })
@@ -391,7 +420,12 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     peer.on('connection', (conn) => {
       this.conn = conn
       void waitConnOpen(conn, 12_000).then(() => {
-        conn.send({ type: 'offer', offer, meta })
+        const payload = {
+          type: 'offer',
+          offer: this.latestOffer ?? offer,
+          meta: this.latestMeta ?? meta,
+        }
+        conn.send(payload)
       })
       conn.on('data', (data: unknown) => {
         this.handleConnData(data, code)
@@ -410,6 +444,8 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
   }
 
   async waitForAnswer(code: string, timeoutMs = 120_000) {
+    this.clearAnswerWait()
+
     const existing = readRoom(code)?.answer
     if (existing) return existing
 
@@ -417,9 +453,6 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
       const answer = this.pendingAnswer
       this.pendingAnswer = null
       return answer
-    }
-    if (this.answerResolve) {
-      throw new Error('Already waiting for answer')
     }
     return new Promise<string>((resolve, reject) => {
       this.answerResolve = resolve
@@ -431,6 +464,22 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
         }
       }, timeoutMs)
     })
+  }
+
+  async republishOffer(code: string, offer: string) {
+    this.latestOffer = offer
+    writeRoom(code, { offer, answer: undefined })
+    this.pendingAnswer = null
+    this.clearAnswerWait()
+    if (this.conn?.open) {
+      this.conn.send({ type: 'offer', offer, meta: this.latestMeta })
+    }
+  }
+
+  clearAnswer(code: string) {
+    writeRoom(code, { answer: undefined })
+    this.pendingAnswer = null
+    this.clearAnswerWait()
   }
 
   async guestFetchOffer(code: string, timeoutMs = 45_000) {
@@ -619,6 +668,19 @@ export class SignalingAdapterChain {
     }
 
     return Promise.race(waits)
+  }
+
+  async republishOffer(code: string, offer: string) {
+    if (this.active?.republishOffer) {
+      await this.active.republishOffer(code, offer)
+      return
+    }
+    await this.broadcastAdapter.republishOffer!(code, offer)
+  }
+
+  clearAnswer(code: string) {
+    this.active?.clearAnswer?.(code)
+    this.broadcastAdapter.clearAnswer?.(code)
   }
 
   close(opts?: { rejectPending?: boolean }) {

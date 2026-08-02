@@ -214,7 +214,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   const signalingSessionUnsubRef = useRef<(() => void) | null>(null)
   const reconnectInFlightRef = useRef(false)
   const signalingGuestIdRef = useRef<string | null>(null)
-  const forceRelayRef = useRef(false)
+  const remotePlayRef = useRef(false)
   const remoteSpectatorRef = useRef(false)
   const joinedAsSpectatorRef = useRef(false)
   const onRoleChangeRef = useRef(options.onRoleChange)
@@ -546,7 +546,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     }
     setRemoteStream(null)
     setConnectionPath('unknown')
-    setIceTier(forceRelayRef.current ? 'relay' : 'local')
+    setIceTier('local')
 
     const conn = new PeerConnection({
       onState: (state) => {
@@ -756,8 +756,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       },
     }, {
       declareSendonlyMedia: roleRef.current === 'host' && modeRef.current === 'remote',
-      forceRelay: forceRelayRef.current,
-      iceTier: forceRelayRef.current ? 'relay' : 'local',
+      remotePlay: remotePlayRef.current,
     })
     connRef.current = conn
     return conn
@@ -823,6 +822,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       setMultiGuest(useMultiGuest)
       maxPlayersRef.current = playerCap
       setMaxPlayers(playerCap)
+      remotePlayRef.current = mode === 'remote'
 
       try {
         signalingRef.current?.close()
@@ -958,7 +958,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       let useMulti =
         (mode === 'local' || mode === 'remote') && Boolean(roomMeta?.multiGuest)
       const sameBrowserAsHost = Boolean(getSignalingRoomMeta(normalized))
-      forceRelayRef.current = mode === 'remote' && !sameBrowserAsHost
+      remotePlayRef.current = mode === 'remote'
       multiGuestRef.current = useMulti
       setMultiGuest(useMulti)
       if (roomMeta?.maxPlayers) {
@@ -1337,7 +1337,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     signalingRef.current?.close({ rejectPending: true })
     signalingRef.current = null
     signalingGuestIdRef.current = null
-    forceRelayRef.current = false
+    remotePlayRef.current = false
     multiHost.stop()
     connRef.current?.close()
     connRef.current = null

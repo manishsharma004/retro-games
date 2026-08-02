@@ -33,8 +33,10 @@ export function buildJoinUrl(
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
   const params = new URLSearchParams({ room: normalized, mode, join: '1' })
   if (opts?.spectator) params.set('role', 'spectator')
-  if (opts?.multiGuest) params.set('mg', '1')
-  if (opts?.maxPlayers && opts.maxPlayers > 2) params.set('mp', String(opts.maxPlayers))
+  if (opts?.multiGuest) {
+    params.set('mg', '1')
+    params.set('mp', String(opts.maxPlayers ?? 2))
+  }
   if (opts?.peerJsBrokerIndex !== undefined) {
     params.set('pb', String(opts.peerJsBrokerIndex))
   }

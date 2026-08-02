@@ -409,11 +409,11 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       }
       setError(null)
       const prev = seatRef.current
+      if (prev === nextSeat) return true
       seatRef.current = nextSeat
       setSeat(nextSeat)
-      if (prev !== nextSeat) {
-        onRoleChangeRef.current?.(nextSeat)
-      }
+      joinedAsSpectatorRef.current = nextSeat === null
+      onRoleChangeRef.current?.(nextSeat)
       const conn = connRef.current
       if (conn?.connected) {
         try {
@@ -613,6 +613,12 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           modeRef.current = msg.mode
           setSessionMode(msg.mode)
           if (roleRef.current === 'host') {
+            if (!multiGuestRef.current) {
+              remoteSpectatorRef.current = msg.seat === null
+              setRemoteSpectator(msg.seat === null)
+              remoteSeatRef.current = msg.seat
+              setRemoteSeat(msg.seat)
+            }
             optionsRef.current.onGuestHello?.()
           } else {
             applyRemoteSeat(msg.seat, conn)
@@ -792,8 +798,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       const generation = ++hostGenerationRef.current
 
       const playerCap = clampMaxPlayers(opts?.maxPlayers ?? 2)
-      const useMultiGuest =
-        (mode === 'local' || mode === 'remote') && playerCap > 2
+      const useMultiGuest = mode === 'local' || mode === 'remote'
 
       setError(null)
       setConnectionLost(false)
@@ -957,10 +962,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           ? opts.initialSeat
           : opts?.asSpectator
             ? null
-            : useMulti
-              ? null
-              : 2
-      joinedAsSpectatorRef.current = opts?.asSpectator === true && guestSeat === null
+            : 2
+      joinedAsSpectatorRef.current = guestSeat === null
       seatRef.current = guestSeat
       setRole('guest')
       setSeat(guestSeat)
@@ -986,25 +989,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           }
 
           try {
-            if (useMulti && urlOnlyMulti) {
-              try {
-                offer = await chain.guestFetchOffer(normalized, 10_000, peerIdRef.current)
-                useMulti = false
-                multiGuestRef.current = false
-                setMultiGuest(false)
-                if (!opts?.asSpectator) {
-                  seatRef.current = 2
-                  setSeat(2)
-                }
-              } catch {
-                const probedMeta = getSignalingRoomMeta(normalized) ?? roomMeta
-                if (probedMeta?.maxPlayers) {
-                  maxPlayersRef.current = clampMaxPlayers(probedMeta.maxPlayers)
-                  setMaxPlayers(maxPlayersRef.current)
-                }
-                offer = await joinAsMultiGuest()
-              }
-            } else if (useMulti) {
+            if (useMulti) {
               offer = await joinAsMultiGuest()
             } else {
               offer = await chain.guestFetchOffer(normalized, offerTimeoutMs, peerIdRef.current)
@@ -1014,7 +999,6 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
               (mode === 'local' || mode === 'remote') &&
               !useMulti &&
               (fetchErr instanceof MultiGuestRoomError ||
-                mode === 'local' ||
                 getSignalingRoomMeta(normalized)?.multiGuest)
             if (tryMultiGuest) {
               useMulti = true

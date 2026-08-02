@@ -631,14 +631,14 @@ export class PeerConnection {
 
   /** Attach canvas/audio stream for remote mode (host side).
    * Returns true when SDP renegotiation is required after attaching tracks. */
-  addMediaStream(stream: MediaStream): boolean {
+  async addMediaStream(stream: MediaStream): Promise<boolean> {
     const pc = this.ensurePc()
     let addedTrack = false
     let attachedToPlaceholder = false
     for (const track of stream.getTracks()) {
       const { sender, wasPlaceholder } = this.findSenderForTrack(pc, track.kind)
       if (sender) {
-        void sender.replaceTrack(track)
+        await sender.replaceTrack(track)
         if (wasPlaceholder) attachedToPlaceholder = true
       } else {
         pc.addTrack(track, stream)
@@ -690,7 +690,7 @@ export class PeerConnection {
   }
 
   async createOfferWithMedia(stream?: MediaStream): Promise<string> {
-    if (stream) this.addMediaStream(stream)
+    if (stream) await this.addMediaStream(stream)
     return this.createOffer()
   }
 

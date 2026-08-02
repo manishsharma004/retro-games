@@ -1216,7 +1216,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       }
       const conn = connRef.current
       if (!conn) throw new Error('No connection')
-      const needsRenegotiation = conn.addMediaStream(stream)
+      const needsRenegotiation = await conn.addMediaStream(stream)
       if (needsRenegotiation && roleRef.current === 'host') {
         const sdp = await conn.createMediaRenegotiationOffer()
         publishRenegotiation('media-reoffer', sdp)

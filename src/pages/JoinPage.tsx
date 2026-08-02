@@ -39,9 +39,8 @@ export function JoinPage({ initialRoom, initialMode, initialRole = 'player' }: J
     typeof window !== 'undefined' ? window.location.search : '',
     '',
   )
-  const lobbyMultiGuest =
-    urlJoin.multiGuest && (initialMode === 'local' || initialMode === 'remote')
-  const lobbyMaxPlayers = urlJoin.maxPlayers ?? (lobbyMultiGuest ? 5 : 2)
+  const lobbyMultiGuest = initialMode === 'local' || initialMode === 'remote'
+  const lobbyMaxPlayers = urlJoin.maxPlayers ?? 5
 
   const [mode] = useState<SessionMode>(initialMode)
   const [roomInput, setRoomInput] = useState(initialRoom)

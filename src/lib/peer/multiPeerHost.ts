@@ -196,7 +196,7 @@ export class MultiPeerHostManager {
     const priorSeat = prior?.seat ?? null
 
     this.connectingGuests.add(signalingId)
-    chain.clearGuestSlot?.(code, signalingId)
+    chain.clearGuestStorage?.(code, signalingId)
     chain.clearAnswer?.(code, signalingId)
 
     const defaultSeat = priorSeat
@@ -224,7 +224,6 @@ export class MultiPeerHostManager {
         connectionState: 'connecting',
       }
       this.guests.set(signalingId, link)
-      this.setRosterStatus(peerId, 'connected')
       this.broadcastRoster()
       this.handlers.onGuestConnected?.(peerId)
       this.emitRosterChange()

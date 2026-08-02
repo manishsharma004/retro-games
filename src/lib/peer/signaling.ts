@@ -39,6 +39,8 @@ export interface SignalingAdapter {
   onGuestJoin?(handler: (signalingId: string, stablePeerId?: string) => void): () => void
   republishOffer?(code: string, offer: string): Promise<void>
   clearAnswer?(code: string, guestId?: string): void
+  /** Clear stale localStorage guest SDP slots without tearing down live PeerJS connections. */
+  clearGuestStorage?(code: string, guestId: string): void
   clearGuestSlot?(code: string, guestId: string): void
   sendSessionMessage?(data: unknown): void
   onSessionMessage?(handler: (data: unknown) => void): () => void
@@ -404,6 +406,10 @@ export class BroadcastSignalingAdapter implements SignalingAdapter {
   }
 
   clearGuestSlot(code: string, guestId: string) {
+    clearGuestSlot(code, guestId)
+  }
+
+  clearGuestStorage(code: string, guestId: string) {
     clearGuestSlot(code, guestId)
   }
 
@@ -952,7 +958,9 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     if (guestId) {
       writeGuestSlot(code, guestId, { answer })
       const conn = this.conns.get(guestId) ?? this.conn
-      if (conn?.open) conn.send({ type: 'webrtc-answer', guestId, answer, offerFp })
+      if (!conn) throw new Error('PeerJS guest connection not open')
+      await waitConnOpen(conn, 12_000)
+      conn.send({ type: 'webrtc-answer', guestId, answer, offerFp })
       return
     }
     writeRoom(code, { answer, answerFp: offerFp })
@@ -1031,6 +1039,11 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     clearGuestSlot(code, guestId)
     this.conns.delete(guestId)
     this.notifiedJoins.delete(guestId)
+    this.guestAnswerWaits.delete(guestId)
+  }
+
+  clearGuestStorage(code: string, guestId: string) {
+    clearGuestSlot(code, guestId)
     this.guestAnswerWaits.delete(guestId)
   }
 
@@ -1283,8 +1296,6 @@ export class SignalingAdapterChain {
       const unsub = adapter.onGuestJoin?.(handler)
       if (unsub) unsubs.push(unsub)
     }
-    const broadcastUnsub = this.broadcastAdapter.onGuestJoin(handler)
-    unsubs.push(broadcastUnsub)
     return () => {
       for (const u of unsubs) u()
     }
@@ -1335,6 +1346,12 @@ export class SignalingAdapterChain {
     this.active?.clearGuestSlot?.(code, guestId)
     this.broadcastAdapter.clearGuestSlot?.(code, guestId)
     this.peerAdapter.clearGuestSlot?.(code, guestId)
+  }
+
+  clearGuestStorage(code: string, guestId: string) {
+    this.active?.clearGuestStorage?.(code, guestId)
+    this.broadcastAdapter.clearGuestStorage?.(code, guestId)
+    this.peerAdapter.clearGuestStorage?.(code, guestId)
   }
 
   close(opts?: { rejectPending?: boolean }) {

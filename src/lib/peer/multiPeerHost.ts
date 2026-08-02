@@ -11,6 +11,8 @@ export interface GuestLink {
   seat: PeerSeat | null
   connection: PeerConnection
   connectionState: PeerConnectionState
+  /** True once the data channel opened — avoids tearing down mid-handshake. */
+  wasConnected: boolean
 }
 
 export interface MultiPeerHostHandlers {
@@ -280,6 +282,7 @@ export class MultiPeerHostManager {
         seat: defaultSeat,
         connection: conn,
         connectionState: conn.connected ? 'connected' : 'connecting',
+        wasConnected: conn.connected,
       }
       this.guests.set(signalingId, link)
 
@@ -328,6 +331,7 @@ export class MultiPeerHostManager {
         if (g) {
           g.connectionState = state
           if (state === 'connected') {
+            g.wasConnected = true
             this.clearGuestFailTimer(signalingId)
             this.setRosterStatus(g.peerId, 'connected')
             this.sendRosterTo(signalingId)
@@ -350,6 +354,8 @@ export class MultiPeerHostManager {
           return
         }
         if (state === 'disconnected' || state === 'closed') {
+          const link = this.guests.get(signalingId)
+          if (!link?.wasConnected) return
           this.removeGuest(signalingId)
         }
       },
@@ -413,14 +419,14 @@ export class MultiPeerHostManager {
   private removeGuest(signalingId: string) {
     this.clearGuestFailTimer(signalingId)
     const g = this.guests.get(signalingId)
-    const peerId = g?.peerId ?? signalingId
+    if (!g) return
+
+    const peerId = g.peerId
     const code = this.roomCode
     const chain = this.chain
 
-    if (g) {
-      g.connection.close()
-      this.guests.delete(signalingId)
-    }
+    g.connection.close()
+    this.guests.delete(signalingId)
 
     this.setRosterStatus(peerId, 'disconnected')
     if (code) {

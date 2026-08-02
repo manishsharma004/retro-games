@@ -570,10 +570,11 @@ export class PeerConnection {
   }
 
   async createOffer(): Promise<string> {
-    this.close()
-    this.offererAnswerApplied = false
+    this.clearLocalMigrateTimer()
+    this.teardownPc(false)
     this.isAnswerer = false
     this.restoreIceSessionDefaults()
+    this.offererAnswerApplied = false
     this.setState('creating-offer')
     const pc = this.ensurePc()
     this.prepareSendonlyMedia(pc)

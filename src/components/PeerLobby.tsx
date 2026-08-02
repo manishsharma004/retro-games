@@ -316,7 +316,7 @@ export function PeerLobby({
               </label>
             </div>
 
-            {sessionMode === 'local' && onMaxPlayersChange && (
+            {(sessionMode === 'local' || sessionMode === 'remote') && onMaxPlayersChange && (
               <div className="peer-lobby__modes">
                 <label className="peer-lobby__mode peer-lobby__mode--row">
                   <span>Max players</span>
@@ -334,9 +334,11 @@ export function PeerLobby({
                 </label>
                 {maxPlayers > 2 && (
                   <p className="peer-lobby__hint">
-                    {gameSystem === 'snes'
-                      ? 'SNES multitap — each guest joins as P2–P5 from their phone.'
-                      : 'Load an SNES ROM for 3–5 player multitap (NES supports 2 players only).'}
+                    {sessionMode === 'remote'
+                      ? 'Up to 5 guests can watch the stream and pick a player slot from their phone.'
+                      : gameSystem === 'snes'
+                        ? 'SNES multitap — each guest joins as P2–P5 from their phone.'
+                        : 'Load an SNES ROM for 3–5 player multitap (NES supports 2 players only).'}
                   </p>
                 )}
               </div>

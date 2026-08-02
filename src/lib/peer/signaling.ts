@@ -168,7 +168,7 @@ export function resolveJoinRoomMeta(
   if (local) return local
 
   const { multiGuest, maxPlayers, peerJsBrokerIndex } = parseJoinLocation(search, '')
-  if (multiGuest && mode === 'local') {
+  if (multiGuest && (mode === 'local' || mode === 'remote')) {
     return { mode, multiGuest: true, maxPlayers: maxPlayers ?? 5, peerJsBrokerIndex }
   }
   if (peerJsBrokerIndex !== undefined) {

@@ -780,7 +780,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       const generation = ++hostGenerationRef.current
 
       const playerCap = clampMaxPlayers(opts?.maxPlayers ?? 2)
-      const useMultiGuest = mode === 'local' && playerCap > 2
+      const useMultiGuest =
+        (mode === 'local' || mode === 'remote') && playerCap > 2
 
       setError(null)
       setConnectionLost(false)
@@ -922,7 +923,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       roleRef.current = 'guest'
 
       const roomMeta = resolveJoinRoomMeta(normalized, mode)
-      let useMulti = mode === 'local' && Boolean(roomMeta?.multiGuest)
+      let useMulti =
+        (mode === 'local' || mode === 'remote') && Boolean(roomMeta?.multiGuest)
       multiGuestRef.current = useMulti
       setMultiGuest(useMulti)
       if (roomMeta?.maxPlayers) {

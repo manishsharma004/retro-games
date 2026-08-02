@@ -668,6 +668,16 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
       this.emitGuestSessionMessage(guestId, msg)
       return
     }
+    if (msg.type === 'media-reoffer' && msg.sdp) {
+      this.emitSessionMessage(msg)
+      this.emitGuestSessionMessage(guestId, msg)
+      return
+    }
+    if (msg.type === 'media-reanswer' && msg.sdp) {
+      this.emitSessionMessage(msg)
+      this.emitGuestSessionMessage(guestId, msg)
+      return
+    }
     if (msg.type === 'offer' && msg.offer) {
       this.emitSessionMessage(msg)
     }

@@ -36,7 +36,7 @@ export class MultiPeerHostManager {
   private unsubGuestSession: (() => void) | null = null
   private connectingGuests = new Set<string>()
   private activeStream: MediaStream | null = null
-  private declareSendonlyMedia = false
+  private remotePlay = false
   private handlers: MultiPeerHostHandlers
 
   constructor(hostPeerId: string, handlers: MultiPeerHostHandlers) {
@@ -49,8 +49,8 @@ export class MultiPeerHostManager {
     this.maxPlayers = n
   }
 
-  setDeclareSendonlyMedia(enabled: boolean) {
-    this.declareSendonlyMedia = enabled
+  setRemotePlay(enabled: boolean) {
+    this.remotePlay = enabled
   }
 
   getRoster(): RosterEntry[] {
@@ -78,14 +78,23 @@ export class MultiPeerHostManager {
     this.unsubGuestSession = chain.onGuestSessionMessage((guestId, data) => {
       if (!guestId) return
       const msg = data as { type?: string; sdp?: string }
-      if (msg.type !== 'ice-reanswer' || !msg.sdp) return
       const g = this.guests.get(guestId)
       if (!g) return
-      void g.connection.acceptRenegotiationAnswer(msg.sdp).catch((err) => {
-        this.handlers.onError?.(
-          err instanceof Error ? err.message : 'ICE renegotiation failed',
-        )
-      })
+      if (msg.type === 'ice-reanswer' && msg.sdp) {
+        void g.connection.acceptRenegotiationAnswer(msg.sdp).catch((err) => {
+          this.handlers.onError?.(
+            err instanceof Error ? err.message : 'ICE renegotiation failed',
+          )
+        })
+        return
+      }
+      if (msg.type === 'media-reanswer' && msg.sdp) {
+        void g.connection.acceptMediaRenegotiationAnswer(msg.sdp).catch((err) => {
+          this.handlers.onError?.(
+            err instanceof Error ? err.message : 'Video stream negotiation failed',
+          )
+        })
+      }
     })
   }
 
@@ -110,19 +119,40 @@ export class MultiPeerHostManager {
     )
   }
 
-  private async attachMediaStreamToGuest(signalingId: string): Promise<void> {
+  private async sendMediaOffer(signalingId: string, sdp: string): Promise<void> {
+    const g = this.guests.get(signalingId)
+    if (!g) return
+    const payload = { type: 'media-reoffer' as const, sdp }
+    try {
+      await this.chain?.sendGuestSessionMessage(signalingId, payload)
+      return
+    } catch {
+      // fall through to data channel
+    }
+    g.connection.sendControl(payload)
+  }
+
+  private async attachMediaStreamToGuest(signalingId: string, attempt = 0): Promise<void> {
     const stream = this.activeStream
     const g = this.guests.get(signalingId)
-    if (!stream || !g?.connection.connected) return
+    if (!stream || !g) return
+    if (!g.connection.connected) {
+      if (attempt < 24) {
+        await new Promise((r) => window.setTimeout(r, 500))
+        return this.attachMediaStreamToGuest(signalingId, attempt + 1)
+      }
+      return
+    }
 
-    const needsRenegotiation = await g.connection.addMediaStream(stream)
-    if (!needsRenegotiation) return
-
-    const sdp = await g.connection.createMediaRenegotiationOffer()
     try {
-      g.connection.sendControl({ type: 'media-reoffer', sdp })
-    } catch {
-      // ignore — guest may reconnect
+      const needsRenegotiation = await g.connection.addMediaStream(stream)
+      if (!needsRenegotiation && !this.remotePlay) return
+      const sdp = await g.connection.createMediaRenegotiationOffer()
+      await this.sendMediaOffer(signalingId, sdp)
+    } catch (err) {
+      this.handlers.onError?.(
+        err instanceof Error ? err.message : 'Video stream negotiation failed',
+      )
     }
   }
 
@@ -268,8 +298,7 @@ export class MultiPeerHostManager {
     this.emitRosterChange()
 
     const conn = new PeerConnection(this.buildConnHandlers(signalingId, peerId), {
-      declareSendonlyMedia: this.declareSendonlyMedia,
-      remotePlay: this.declareSendonlyMedia,
+      remotePlay: this.remotePlay,
     })
     try {
       const offer = await conn.createOffer()

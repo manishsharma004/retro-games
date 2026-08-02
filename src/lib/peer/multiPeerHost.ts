@@ -115,7 +115,7 @@ export class MultiPeerHostManager {
     const g = this.guests.get(signalingId)
     if (!stream || !g?.connection.connected) return
 
-    const needsRenegotiation = g.connection.addMediaStream(stream)
+    const needsRenegotiation = await g.connection.addMediaStream(stream)
     if (!needsRenegotiation) return
 
     const sdp = await g.connection.createMediaRenegotiationOffer()

@@ -606,6 +606,15 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
   }
 
   private async openPeer(id: string | undefined, brokerIndex: number): Promise<PeerInstance> {
+    if (this.peer) {
+      try {
+        this.peer.destroy()
+      } catch {
+        // ignore
+      }
+      this.peer = null
+      this.conn = null
+    }
     const Peer = await this.loadPeer()
     const cfg = readPeerJsConfig(brokerIndex)
     this.brokerIndex = brokerIndex
@@ -1182,6 +1191,7 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     this.conn = null
     this.peer = null
     this.hostCode = null
+    this.notifiedJoins.clear()
     this.disconnecting = false
   }
 }
@@ -1500,7 +1510,9 @@ export class SignalingAdapterChain {
   }
 
   close(opts?: { rejectPending?: boolean }) {
-    this.active?.close(opts)
+    this.peerAdapter.close(opts)
+    this.broadcastAdapter.close(opts)
+    this.firebaseAdapter?.close(opts)
     this.active = null
   }
 }

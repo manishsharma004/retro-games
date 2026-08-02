@@ -238,6 +238,7 @@ export class MultiPeerHostManager {
   private cancelGuestAttempt(signalingId: string) {
     this.clearGuestFailTimer(signalingId)
     const g = this.guests.get(signalingId)
+    const peerId = g?.peerId
     if (g) {
       g.connection.close()
       this.guests.delete(signalingId)
@@ -248,6 +249,7 @@ export class MultiPeerHostManager {
       this.chain?.clearGuestSlot?.(code, signalingId)
       this.chain?.clearAnswer?.(code, signalingId)
     }
+    if (peerId) this.setRosterStatus(peerId, 'disconnected')
   }
 
   private async handleGuestJoin(
@@ -263,6 +265,12 @@ export class MultiPeerHostManager {
     if (!chain || !code) return
 
     const peerId = stablePeerId ?? signalingId
+
+    for (const [sid, g] of this.guests) {
+      if (g.peerId === peerId && sid !== signalingId) {
+        this.cancelGuestAttempt(sid)
+      }
+    }
 
     if (this.activeGuestPeerCount() >= this.maxGuestConnections()) {
       this.handlers.onError?.('Room is full')

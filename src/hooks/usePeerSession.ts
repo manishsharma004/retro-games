@@ -968,6 +968,15 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         return
       }
 
+      // Tear down any prior guest session so rejoin after Leave gets a fresh PeerJS peer.
+      signalingSessionUnsubRef.current?.()
+      signalingSessionUnsubRef.current = null
+      signalingRef.current?.close({ rejectPending: true })
+      signalingRef.current = null
+      signalingGuestIdRef.current = null
+      connRef.current?.close()
+      connRef.current = null
+
       setError(null)
       setConnectionLost(false)
       setRoomCode(normalized)
@@ -1002,12 +1011,9 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       const offerTimeoutMs = mode === 'remote' || mode === 'coop' ? 20_000 : 30_000
       const maxAttempts = 4
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        if (!signalingRef.current) {
-          const chain = new SignalingAdapterChain()
-          signalingRef.current = chain
-          wireSignalingSession(chain)
-        }
-        const chain = signalingRef.current
+        const chain = new SignalingAdapterChain()
+        signalingRef.current = chain
+        wireSignalingSession(chain)
 
         try {
           let offer: string

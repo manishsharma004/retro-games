@@ -249,6 +249,7 @@ export function JoinPage({ initialRoom, initialMode, initialRole = 'player' }: J
           roomCode={roomInput.trim()}
           onLeave={() => {
             joinStartedRef.current = false
+            peer.disconnect()
             setJoined(false)
           }}
         />

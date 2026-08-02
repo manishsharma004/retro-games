@@ -143,7 +143,7 @@ export interface UsePeerSessionResult {
   joinWithRoomCode: (
     code: string,
     mode: SessionMode,
-    opts?: { asSpectator?: boolean },
+    opts?: { asSpectator?: boolean; initialSeat?: PeerSeat | null },
   ) => Promise<void>
   sendBootstrap: (payload: {
     name: string
@@ -353,6 +353,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
 
   const isSeatAvailable = useCallback(
     (seat: PeerSeat) => {
+      if (roleRef.current === 'guest' && seat === 1) return false
       if (multiGuestRef.current) {
         if (roleRef.current === 'host') {
           return multiHost.isSeatAvailable(seat, peerIdRef.current)
@@ -918,7 +919,11 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   )
 
   const joinWithRoomCode = useCallback(
-    async (code: string, mode: SessionMode, opts?: { asSpectator?: boolean }) => {
+    async (
+      code: string,
+      mode: SessionMode,
+      opts?: { asSpectator?: boolean; initialSeat?: PeerSeat | null },
+    ) => {
       const normalized = normalizeRoomCode(code)
       if (!normalized) {
         setError('Enter a valid room code')
@@ -944,7 +949,14 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         setMaxPlayers(maxPlayersRef.current)
       }
 
-      const guestSeat = opts?.asSpectator ? null : useMulti ? null : 2
+      const guestSeat =
+        opts?.initialSeat !== undefined
+          ? opts.initialSeat
+          : opts?.asSpectator
+            ? null
+            : useMulti
+              ? null
+              : 2
       joinedAsSpectatorRef.current = Boolean(opts?.asSpectator)
       seatRef.current = guestSeat
       setRole('guest')

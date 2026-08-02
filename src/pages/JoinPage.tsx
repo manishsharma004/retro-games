@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { LatencyBadge } from '../components/LatencyBadge'
+import { GuestRolePicker } from '../components/GuestRolePicker'
 import { PeerConnectionStatus } from '../components/PeerConnectionStatus'
 import { RemotePlayGuestView } from '../components/RemotePlayGuestView'
 import { VirtualController } from '../components/VirtualController'
@@ -14,7 +15,7 @@ import {
   type SessionMode,
 } from '../lib/peer'
 import { DEFAULT_LAYOUT } from '../lib/virtualLayout'
-import { playerSeats } from '../lib/peer/roster'
+import type { PeerSeat } from '../lib/peer/protocol'
 import { loadSettings } from '../lib/settings'
 import '../styles/app.css'
 
@@ -24,63 +25,30 @@ interface JoinPageProps {
   initialRole?: JoinRole
 }
 
-function RolePicker({
-  peer,
-  name,
-}: {
-  peer: ReturnType<typeof usePeerSession>
-  name: string
-}) {
-  if (peer.connectionState !== 'connected' && !(peer.multiGuest && peer.role === 'guest')) return null
-
-  const seats = playerSeats(peer.multiGuest ? peer.maxPlayers : 2)
-
-  return (
-    <div className="join-page__seats" role="radiogroup" aria-label="Your role">
-      <p className="join-page__label">Your role</p>
-      {seats.map((player) => {
-        const taken = !peer.isSeatAvailable(player)
-        const checked = peer.seat === player
-        return (
-          <label key={player} className="join-page__seat">
-            <input
-              type="radio"
-              name={name}
-              checked={checked}
-              disabled={taken && !checked}
-              onChange={() => peer.pickRole(player)}
-            />
-            <span>
-              Player {player}
-              {checked ? ' (you)' : ''}
-              {taken && !checked ? ' (taken)' : ''}
-            </span>
-          </label>
-        )
-      })}
-      <label className="join-page__seat">
-        <input
-          type="radio"
-          name={name}
-          checked={peer.seat === null}
-          onChange={() => peer.pickRole(null)}
-        />
-        <span>Spectator{peer.seat === null ? ' (you)' : ''}</span>
-      </label>
-      {peer.remoteSeat && peer.seat && !peer.multiGuest && peer.remoteSeat !== peer.seat && (
-        <p className="join-page__hint">Other device is Player {peer.remoteSeat}.</p>
-      )}
-      {!peer.multiGuest && peer.remoteSpectator && peer.seat !== null && (
-        <p className="join-page__hint">Other device is spectating.</p>
-      )}
-    </div>
-  )
+function defaultPreferredSeat(
+  mode: SessionMode,
+  role: JoinRole,
+  multiGuest: boolean,
+): PeerSeat | null {
+  if (role === 'spectator') return null
+  if (multiGuest) return null
+  return mode === 'remote' || mode === 'local' ? 2 : null
 }
 
 export function JoinPage({ initialRoom, initialMode, initialRole = 'player' }: JoinPageProps) {
+  const urlJoin = parseJoinLocation(
+    typeof window !== 'undefined' ? window.location.search : '',
+    '',
+  )
+  const lobbyMultiGuest =
+    urlJoin.multiGuest && (initialMode === 'local' || initialMode === 'remote')
+  const lobbyMaxPlayers = urlJoin.maxPlayers ?? (lobbyMultiGuest ? 5 : 2)
+
   const [mode] = useState<SessionMode>(initialMode)
   const [roomInput, setRoomInput] = useState(initialRoom)
-  const [joinAsSpectator, setJoinAsSpectator] = useState(initialRole === 'spectator')
+  const [preferredSeat, setPreferredSeat] = useState<PeerSeat | null>(() =>
+    defaultPreferredSeat(initialMode, initialRole, lobbyMultiGuest),
+  )
   const [joined, setJoined] = useState(Boolean(initialRoom))
   const joinStartedRef = useRef(false)
 
@@ -109,8 +77,11 @@ export function JoinPage({ initialRoom, initialMode, initialRole = 'player' }: J
   useEffect(() => {
     if (!joined || !roomInput.trim() || joinStartedRef.current) return
     joinStartedRef.current = true
-    void peer.joinWithRoomCode(roomInput.trim(), mode, { asSpectator: joinAsSpectator })
-  }, [joined, roomInput, mode, joinAsSpectator, peer.joinWithRoomCode])
+    void peer.joinWithRoomCode(roomInput.trim(), mode, {
+      asSpectator: preferredSeat === null,
+      initialSeat: preferredSeat,
+    })
+  }, [joined, roomInput, mode, preferredSeat, peer.joinWithRoomCode])
 
   if (mode === 'local') {
     return (
@@ -159,26 +130,20 @@ export function JoinPage({ initialRoom, initialMode, initialRole = 'player' }: J
                 maxLength={6}
               />
             </label>
-            <div className="join-page__seats" role="radiogroup" aria-label="Join role">
-              <label className="join-page__seat">
-                <input
-                  type="radio"
-                  name="local-join-role"
-                  checked={!joinAsSpectator}
-                  onChange={() => setJoinAsSpectator(false)}
-                />
-                <span>Join as controller</span>
-              </label>
-              <label className="join-page__seat">
-                <input
-                  type="radio"
-                  name="local-join-role"
-                  checked={joinAsSpectator}
-                  onChange={() => setJoinAsSpectator(true)}
-                />
-                <span>Join as spectator</span>
-              </label>
-            </div>
+            <GuestRolePicker
+              peer={{
+                multiGuest: lobbyMultiGuest,
+                maxPlayers: lobbyMaxPlayers,
+                seat: preferredSeat,
+                isSeatAvailable: () => true,
+                pickRole: () => true,
+                remoteSeat: null,
+                remoteSpectator: false,
+              }}
+              name="local-join-role"
+              value={preferredSeat}
+              onChange={setPreferredSeat}
+            />
             <button
               type="button"
               className="btn btn--primary"
@@ -206,7 +171,12 @@ export function JoinPage({ initialRoom, initialMode, initialRole = 'player' }: J
                 setJoined(false)
               }}
             />
-            <RolePicker peer={peer} name="join-local-role" />
+            {(peer.connectionState === 'connected' ||
+              peer.phase === 'connecting' ||
+              peer.phase === 'guest-answer' ||
+              (peer.multiGuest && peer.role === 'guest')) && (
+              <GuestRolePicker peer={peer} name="join-local-role" />
+            )}
             {peer.seat === null && (
               <div className="join-page__spectator-video">
                 <video
@@ -297,26 +267,20 @@ export function JoinPage({ initialRoom, initialMode, initialRole = 'player' }: J
                 maxLength={6}
               />
             </label>
-            <div className="join-page__seats" role="radiogroup" aria-label="Join role">
-              <label className="join-page__seat">
-                <input
-                  type="radio"
-                  name="remote-join-role"
-                  checked={!joinAsSpectator}
-                  onChange={() => setJoinAsSpectator(false)}
-                />
-                <span>Watch &amp; play</span>
-              </label>
-              <label className="join-page__seat">
-                <input
-                  type="radio"
-                  name="remote-join-role"
-                  checked={joinAsSpectator}
-                  onChange={() => setJoinAsSpectator(true)}
-                />
-                <span>Watch only (spectator)</span>
-              </label>
-            </div>
+            <GuestRolePicker
+              peer={{
+                multiGuest: lobbyMultiGuest,
+                maxPlayers: lobbyMaxPlayers,
+                seat: preferredSeat,
+                isSeatAvailable: () => true,
+                pickRole: () => true,
+                remoteSeat: null,
+                remoteSpectator: false,
+              }}
+              name="remote-join-role"
+              value={preferredSeat}
+              onChange={setPreferredSeat}
+            />
             <button
               type="button"
               className="btn btn--primary"
@@ -338,7 +302,7 @@ export function JoinPage({ initialRoom, initialMode, initialRole = 'player' }: J
       <a
         className="btn btn--primary"
         href={buildJoinUrl(roomInput || initialRoom, 'coop', {
-          spectator: joinAsSpectator,
+          spectator: preferredSeat === null,
         })}
       >
         Open co-op session

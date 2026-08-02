@@ -2657,6 +2657,23 @@ body.rg-faux-fullscreen {
   flex-shrink: 0;
 }
 
+.remote-guest__seats--overlay {
+  width: min(100%, 20rem);
+  margin-top: 0.25rem;
+  text-align: left;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.join-page__seats--compact {
+  margin-bottom: 0;
+  padding: 0.5rem 0.75rem;
+  gap: 0.35rem;
+}
+
+.join-page__seats--compact .join-page__label {
+  margin-bottom: 0.15rem;
+}
+
 .remote-guest__video {
   background: #000;
 }

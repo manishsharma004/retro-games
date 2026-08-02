@@ -96,6 +96,11 @@ export function JoinPage({ initialRoom, initialMode, initialRole = 'player' }: J
     peer,
   })
 
+  const localSpectator = useRemoteGuest({
+    enabled: mode === 'local' && joined && peer.seat === null,
+    peer,
+  })
+
   const remoteGuest = useRemoteGuest({
     enabled: mode === 'remote' && joined,
     peer,
@@ -202,6 +207,29 @@ export function JoinPage({ initialRoom, initialMode, initialRole = 'player' }: J
               }}
             />
             <RolePicker peer={peer} name="join-local-role" />
+            {peer.seat === null && (
+              <div className="join-page__spectator-video">
+                <video
+                  ref={localSpectator.videoRef}
+                  className="remote-guest__video join-page__video"
+                  autoPlay
+                  playsInline
+                  muted
+                />
+                {!localSpectator.hasVideo && peer.connectionState === 'connected' && (
+                  <p className="join-page__hint">Waiting for host video stream…</p>
+                )}
+                {localSpectator.needsTap && (
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    onClick={localSpectator.unmute}
+                  >
+                    Tap to start video &amp; audio
+                  </button>
+                )}
+              </div>
+            )}
             {(peer.connectionLost || peer.error) && (
               <div className="join-page__row">
                 <button

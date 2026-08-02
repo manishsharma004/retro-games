@@ -2728,6 +2728,21 @@ body.rg-faux-fullscreen {
   color: var(--muted);
 }
 
+.join-page__spectator-video {
+  margin: 0 1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.join-page__video {
+  width: 100%;
+  max-height: min(50vh, 360px);
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  border-radius: var(--radius);
+}
+
 .peer-connection-status {
   position: absolute;
   inset: 0;

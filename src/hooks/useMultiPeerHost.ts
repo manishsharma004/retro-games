@@ -75,6 +75,10 @@ export function useMultiPeerHost({ hostPeerId, onRemoteInput, onGuestConnected, 
     managerRef.current?.broadcastControl(msg)
   }, [])
 
+  const attachMediaStream = useCallback(async (stream: MediaStream) => {
+    await managerRef.current?.attachMediaStream(stream)
+  }, [])
+
   return {
     roster,
     guests,
@@ -85,5 +89,6 @@ export function useMultiPeerHost({ hostPeerId, onRemoteInput, onGuestConnected, 
     claimSeat,
     isSeatAvailable,
     broadcastControl,
+    attachMediaStream,
   }
 }

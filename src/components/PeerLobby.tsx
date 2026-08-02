@@ -484,6 +484,11 @@ export function PeerLobby({
             <button type="button" className="btn btn--ghost" onClick={() => void handleCopyJoinUrl()}>
               Copy join link
             </button>
+            {phase === 'host-offer' && connectionState === 'awaiting-answer' && (
+              <p className="peer-lobby__hint">
+                Waiting for your friend to join with the room code or link above…
+              </p>
+            )}
           </div>
         )}
 
@@ -562,8 +567,27 @@ export function PeerLobby({
                   P{seat}
                 </>
               )}{' '}
-              · {connectionState}
+              ·{' '}
+              {connectionState === 'awaiting-answer' && role === 'host' ? (
+                <strong>waiting for guest</strong>
+              ) : connectionState === 'awaiting-answer' && role === 'guest' ? (
+                <strong>waiting for host</strong>
+              ) : (
+                connectionState
+              )}
             </p>
+            {connectionState === 'awaiting-answer' && role === 'host' && !multiGuest && (
+              <p className="peer-lobby__hint">
+                Share the room code or join link with your friend. If they already joined, try
+                Reconnect or paste their answer below.
+              </p>
+            )}
+            {multiGuest && role === 'host' && phase === 'linked' && (
+              <p className="peer-lobby__hint">
+                Share the join link — guests can connect from other devices. ({connectedGuestCount}{' '}
+                guest{connectedGuestCount === 1 ? '' : 's'} connected)
+              </p>
+            )}
             {showRolePicker && (
               <div className="peer-lobby__modes" role="radiogroup" aria-label="Your role">
                 <p className="peer-lobby__label">Your role</p>

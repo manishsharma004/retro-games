@@ -36,9 +36,19 @@ export function pickSyncSettings(settings: EmulatorSettings): PeerSyncSettings {
   }
 }
 
+/** Active player seat, or null when watching as spectator. */
+export type PeerParticipationSeat = PeerSeat | null
+
 export type ControlMessage =
-  | { type: 'hello'; role: PeerRole; seat: PeerSeat; mode: SessionMode; name?: string }
-  | { type: 'seat-pick'; seat: PeerSeat }
+  | {
+      type: 'hello'
+      role: PeerRole
+      seat: PeerParticipationSeat
+      mode: SessionMode
+      name?: string
+      joinRole?: 'player' | 'spectator'
+    }
+  | { type: 'seat-pick'; seat: PeerParticipationSeat }
   | { type: 'ready' }
   | { type: 'go'; at: number }
   | { type: 'host-exit' }

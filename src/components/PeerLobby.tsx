@@ -36,8 +36,13 @@ interface PeerLobbyProps {
   onGo: () => void
   onDisconnect: () => void
   remoteSeat?: PeerSeat | null
+  remoteSpectator?: boolean
+  onPickRole?: (seat: 1 | 2 | null) => void
   onPickSeat?: (seat: 1 | 2) => void
   isSeatAvailable?: (seat: 1 | 2) => boolean
+  onJoinRoomCode?: (code: string, opts: { asSpectator: boolean }) => void | Promise<void>
+  onReconnect?: () => void | Promise<void>
+  connectionLost?: boolean
   onSyncGameState?: () => void | Promise<void>
   stateSyncBusy?: boolean
   latencyProfile?: LatencyProfile
@@ -75,8 +80,13 @@ export function PeerLobby({
   onGo,
   onDisconnect,
   remoteSeat = null,
+  remoteSpectator = false,
+  onPickRole,
   onPickSeat,
   isSeatAvailable,
+  onJoinRoomCode,
+  onReconnect,
+  connectionLost = false,
   onSyncGameState,
   stateSyncBusy = false,
   latencyProfile,
@@ -91,6 +101,9 @@ export function PeerLobby({
   const [scanning, setScanning] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [manualOpen, setManualOpen] = useState(false)
+  const [joinOpen, setJoinOpen] = useState(false)
+  const [joinRoomInput, setJoinRoomInput] = useState('')
+  const [joinAsSpectator, setJoinAsSpectator] = useState(false)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const scanStreamRef = useRef<MediaStream | null>(null)
 
@@ -136,10 +149,9 @@ export function PeerLobby({
     transfer.total > 0 ? Math.min(100, Math.round((transfer.received / transfer.total) * 100)) : 0
 
   const showCoopFlow = sessionMode === 'coop'
-  const showSeatPicker =
-    (sessionMode === 'coop' || sessionMode === 'local') &&
-    connectionState === 'connected' &&
-    Boolean(onPickSeat && isSeatAvailable)
+  const pickRoleFn = onPickRole ?? onPickSeat
+  const showRolePicker =
+    connectionState === 'connected' && Boolean(pickRoleFn && isSeatAvailable)
   const showManualExchange =
     manualOpen ||
     useManualSignaling ||
@@ -341,13 +353,70 @@ export function PeerLobby({
                 className="btn btn--ghost"
                 disabled={busy}
                 onClick={() => {
-                  setManualOpen(true)
-                  setStatusNote('Paste or scan a host offer below')
+                  setJoinOpen(true)
+                  setManualOpen(false)
+                  setStatusNote(null)
                 }}
               >
                 Join session
               </button>
             </div>
+
+            {joinOpen && onJoinRoomCode && (
+              <div className="peer-lobby__signal-in">
+                <p className="peer-lobby__label">Join with room code</p>
+                <input
+                  className="peer-lobby__input"
+                  value={joinRoomInput}
+                  onChange={(e) => setJoinRoomInput(e.target.value.toUpperCase())}
+                  placeholder="TPS6"
+                  maxLength={6}
+                  autoComplete="off"
+                />
+                <div className="peer-lobby__modes" role="radiogroup" aria-label="Join role">
+                  <label className="peer-lobby__mode">
+                    <input
+                      type="radio"
+                      name="join-role"
+                      checked={!joinAsSpectator}
+                      onChange={() => setJoinAsSpectator(false)}
+                    />
+                    <span>Play (controller)</span>
+                  </label>
+                  <label className="peer-lobby__mode">
+                    <input
+                      type="radio"
+                      name="join-role"
+                      checked={joinAsSpectator}
+                      onChange={() => setJoinAsSpectator(true)}
+                    />
+                    <span>Watch only (spectator)</span>
+                  </label>
+                </div>
+                <div className="peer-lobby__row">
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    disabled={busy || !joinRoomInput.trim()}
+                    onClick={() =>
+                      void withBusy(async () => {
+                        await onJoinRoomCode(joinRoomInput.trim(), { asSpectator: joinAsSpectator })
+                        setJoinOpen(false)
+                      })
+                    }
+                  >
+                    Join room
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--ghost"
+                    onClick={() => setManualOpen(true)}
+                  >
+                    Manual SDP instead
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
 
@@ -452,12 +521,19 @@ export function PeerLobby({
           phase === 'playing') && (
           <div className="peer-lobby__status">
             <p>
-              Mode: <strong>{sessionMode}</strong> · Role: <strong>{role ?? '—'}</strong> · P
-              {seat ?? '—'} · {connectionState}
+              Mode: <strong>{sessionMode}</strong> · Role: <strong>{role ?? '—'}</strong> ·{' '}
+              {seat === null ? (
+                <strong>Spectator</strong>
+              ) : (
+                <>
+                  P{seat}
+                </>
+              )}{' '}
+              · {connectionState}
             </p>
-            {showSeatPicker && (
-              <div className="peer-lobby__modes" role="radiogroup" aria-label="Player slot">
-                <p className="peer-lobby__label">Your controller</p>
+            {showRolePicker && (
+              <div className="peer-lobby__modes" role="radiogroup" aria-label="Your role">
+                <p className="peer-lobby__label">Your role</p>
                 {([1, 2] as const).map((player) => {
                   const taken = !isSeatAvailable!(player)
                   const checked = seat === player
@@ -468,7 +544,7 @@ export function PeerLobby({
                         name="player-slot"
                         checked={checked}
                         disabled={taken && !checked}
-                        onChange={() => onPickSeat!(player)}
+                        onChange={() => pickRoleFn!(player)}
                       />
                       <span>
                         Player {player}
@@ -478,8 +554,22 @@ export function PeerLobby({
                     </label>
                   )
                 })}
+                {onPickRole && (
+                  <label className="peer-lobby__mode">
+                    <input
+                      type="radio"
+                      name="player-slot"
+                      checked={seat === null}
+                      onChange={() => onPickRole(null)}
+                    />
+                    <span>Spectator{seat === null ? ' (you)' : ''}</span>
+                  </label>
+                )}
                 {remoteSeat && seat && remoteSeat !== seat && (
                   <p className="peer-lobby__hint">Other device is Player {remoteSeat}.</p>
+                )}
+                {remoteSpectator && seat !== null && (
+                  <p className="peer-lobby__hint">Other device is spectating.</p>
                 )}
               </div>
             )}
@@ -580,6 +670,16 @@ export function PeerLobby({
 
         {phase !== 'idle' && (
           <div className="peer-lobby__footer">
+            {(connectionLost || (error && roomCode)) && onReconnect && (
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={busy}
+                onClick={() => void withBusy(onReconnect)}
+              >
+                Reconnect
+              </button>
+            )}
             <button
               type="button"
               className="btn btn--ghost"

@@ -68,9 +68,11 @@ interface UsePeerSessionOptions {
   onPeerError?: (message: string) => void
   onLinked?: () => void
   onRemoteStream?: (stream: MediaStream) => void
-  onHello?: (mode: SessionMode, seat: PeerSeat) => void
+  onHello?: (mode: SessionMode, seat: PeerSeat | null) => void
   onRumble?: (seat: PeerSeat, pattern: number[]) => void
   onLatency?: (ms: number) => void
+  /** Fired when local participation seat changes (including spectator). */
+  onRoleChange?: (seat: PeerSeat | null) => void
 }
 
 export interface UsePeerSessionResult {
@@ -96,14 +98,22 @@ export interface UsePeerSessionResult {
   latencyMs: number | null
   /** Tier, advice, and mode-specific thresholds derived from latency. */
   latencyProfile: LatencyProfile
-  /** Seat claimed by the remote peer (for mutual exclusion). */
+  /** Seat claimed by the remote peer; null when remote is spectating or unknown. */
   remoteSeat: PeerSeat | null
+  remoteSpectator: boolean
+  connectionLost: boolean
+  isSpectator: boolean
+  pickRole: (seat: 1 | 2 | null) => boolean
   pickSeat: (seat: 1 | 2) => boolean
   isSeatAvailable: (seat: 1 | 2) => boolean
   createHostOffer: (mode?: SessionMode) => Promise<void>
   acceptGuestAnswer: (answer: string) => Promise<void>
-  joinWithOffer: (offer: string, mode?: SessionMode) => Promise<void>
-  joinWithRoomCode: (code: string, mode: SessionMode) => Promise<void>
+  joinWithOffer: (offer: string, mode?: SessionMode, opts?: { asSpectator?: boolean }) => Promise<void>
+  joinWithRoomCode: (
+    code: string,
+    mode: SessionMode,
+    opts?: { asSpectator?: boolean },
+  ) => Promise<void>
   sendBootstrap: (payload: {
     name: string
     system: SystemId
@@ -122,6 +132,7 @@ export interface UsePeerSessionResult {
   requestResync: () => void
   attachMediaStream: (stream: MediaStream) => Promise<void>
   getConnection: () => PeerConnection | null
+  reconnectSession: () => Promise<void>
   disconnect: () => void
   clearHostNotice: () => void
   /** Current seat from ref (always in sync with sendInput). */
@@ -156,6 +167,9 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   const hostGenerationRef = useRef(0)
   const hostOfferInFlightRef = useRef(false)
   const signalingSessionUnsubRef = useRef<(() => void) | null>(null)
+  const reconnectInFlightRef = useRef(false)
+  const remoteSpectatorRef = useRef(false)
+  const onRoleChangeRef = useRef(options.onRoleChange)
 
   const [phase, setPhase] = useState<PeerPhase>('idle')
   const [role, setRole] = useState<PeerRole | null>(null)
@@ -180,6 +194,15 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   const [latencyMs, setLatencyMs] = useState<number | null>(null)
   const lastPongAtRef = useRef<number | null>(null)
   const [remoteSeat, setRemoteSeat] = useState<PeerSeat | null>(null)
+  const [remoteSpectator, setRemoteSpectator] = useState(false)
+  const [connectionLost, setConnectionLost] = useState(false)
+
+  useEffect(() => {
+    onRoleChangeRef.current = options.onRoleChange
+  }, [options.onRoleChange])
+
+  const isSpectator =
+    role !== null && seat === null && connectionState === 'connected'
 
   const latencyProfile = useMemo(
     () => getLatencyProfile(latencyMs, sessionMode, connectionPath),
@@ -195,47 +218,62 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     const r = roleRef.current
     const s = seatRef.current
     const m = modeRef.current
-    if (!r || !s) return
+    if (!r) return
     try {
-      conn.sendControl({ type: 'hello', role: r, seat: s, mode: m })
+      conn.sendControl({
+        type: 'hello',
+        role: r,
+        seat: s,
+        mode: m,
+        joinRole: s === null ? 'spectator' : 'player',
+      })
     } catch {
       // ignore
     }
   }, [])
 
-  const applyRemoteSeat = useCallback((seat: PeerSeat, conn: PeerConnection) => {
-    if (seat === seatRef.current) {
-      const other = (seat === 1 ? 2 : 1) as PeerSeat
-      seatRef.current = other
-      setSeat(other)
-      try {
-        conn.sendControl({ type: 'seat-pick', seat: other })
-        sendHello(conn)
-      } catch {
-        // ignore
+  const applyRemoteSeat = useCallback(
+    (seat: PeerSeat | null, conn: PeerConnection) => {
+      if (seat !== null && seat === seatRef.current) {
+        const other = (seat === 1 ? 2 : 1) as PeerSeat
+        seatRef.current = other
+        setSeat(other)
+        try {
+          conn.sendControl({ type: 'seat-pick', seat: other })
+          sendHello(conn)
+        } catch {
+          // ignore
+        }
       }
-    }
-    remoteSeatRef.current = seat
-    setRemoteSeat(seat)
-  }, [sendHello])
+      remoteSpectatorRef.current = seat === null
+      setRemoteSpectator(seat === null)
+      remoteSeatRef.current = seat
+      setRemoteSeat(seat)
+    },
+    [sendHello],
+  )
 
   const isSeatAvailable = useCallback((seat: 1 | 2) => {
     return remoteSeatRef.current !== seat
   }, [])
 
-  const pickSeat = useCallback(
-    (seat: 1 | 2) => {
-      if (remoteSeatRef.current === seat) {
-        setError(`Player ${seat} is taken by the other device`)
+  const pickRole = useCallback(
+    (nextSeat: 1 | 2 | null) => {
+      if (nextSeat !== null && remoteSeatRef.current === nextSeat) {
+        setError(`Player ${nextSeat} is taken by the other device`)
         return false
       }
       setError(null)
-      seatRef.current = seat
-      setSeat(seat)
+      const prev = seatRef.current
+      seatRef.current = nextSeat
+      setSeat(nextSeat)
+      if (prev !== nextSeat) {
+        onRoleChangeRef.current?.(nextSeat)
+      }
       const conn = connRef.current
       if (conn?.connected) {
         try {
-          conn.sendControl({ type: 'seat-pick', seat })
+          conn.sendControl({ type: 'seat-pick', seat: nextSeat })
           sendHello(conn)
         } catch {
           // ignore
@@ -244,6 +282,11 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       return true
     },
     [sendHello],
+  )
+
+  const pickSeat = useCallback(
+    (seat: 1 | 2) => pickRole(seat),
+    [pickRole],
   )
 
   const publishRenegotiation = useCallback(
@@ -334,14 +377,22 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     ],
   )
 
-  const createConnection = useCallback(() => {
+  const markConnectionLost = useCallback((message: string) => {
+    setConnectionLost(true)
+    setError(message)
+    optionsRef.current.onPeerError?.(message)
+  }, [])
+
+  const createConnection = useCallback((opts?: { preserveSession?: boolean }) => {
     connRef.current?.close()
-    bootstrapDoneRef.current = false
-    romBufRef.current = null
-    stateBufRef.current = null
-    bootstrapMetaRef.current = null
-    remoteReadyRef.current = false
-    setRemoteReady(false)
+    if (!opts?.preserveSession) {
+      bootstrapDoneRef.current = false
+      romBufRef.current = null
+      stateBufRef.current = null
+      bootstrapMetaRef.current = null
+      remoteReadyRef.current = false
+      setRemoteReady(false)
+    }
     setRemoteStream(null)
     setConnectionPath('unknown')
     setIceTier('local')
@@ -351,6 +402,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         setConnectionState(state)
         if (state === 'connected') {
           setError(null)
+          setConnectionLost(false)
           if (
             phaseRef.current !== 'playing' &&
             phaseRef.current !== 'ready-wait' &&
@@ -368,9 +420,11 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
             }
             optionsRef.current.onLinked?.()
           }, 0)
+        } else if (state === 'disconnected') {
+          markConnectionLost('Connection lost — tap Reconnect to resume')
         } else if (state === 'failed') {
           updatePhase('error')
-          setError((prev) => prev ?? 'Peer connection failed')
+          markConnectionLost('Peer connection failed')
         } else if (state === 'awaiting-answer') {
           if (roleRef.current === 'host' && phaseRef.current === 'connecting') {
             updatePhase('host-offer')
@@ -399,8 +453,12 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         setConnectionPath(path)
       },
       onError: (err) => {
-        setError(err.message)
-        optionsRef.current.onPeerError?.(err.message)
+        if (err.message.includes('DataChannel')) {
+          markConnectionLost(err.message)
+        } else {
+          setError(err.message)
+          optionsRef.current.onPeerError?.(err.message)
+        }
       },
       onRemoteStream: (stream) => {
         setRemoteStream(stream)
@@ -504,6 +562,9 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           bootstrapDoneRef.current = true
           updatePhase('ready-wait')
           setTransfer({ kind: null, received: 0, total: 0 })
+          if (roleRef.current === 'guest' && seatRef.current === null) {
+            return
+          }
           void optionsRef.current.onBootstrap?.({
             name: meta.name,
             system: meta.system,
@@ -527,6 +588,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     publishRenegotiation,
     sendHello,
     updatePhase,
+    markConnectionLost,
   ])
 
   useEffect(() => {
@@ -552,6 +614,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       const generation = ++hostGenerationRef.current
 
       setError(null)
+      setConnectionLost(false)
       setLocalSignal('')
       setUseManualSignaling(false)
       modeRef.current = mode
@@ -617,15 +680,17 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   )
 
   const joinWithOffer = useCallback(
-    async (offer: string, mode: SessionMode = modeRef.current) => {
+    async (offer: string, mode: SessionMode = modeRef.current, opts?: { asSpectator?: boolean }) => {
       setError(null)
+      setConnectionLost(false)
       setLocalSignal('')
       modeRef.current = mode
       setSessionMode(mode)
       roleRef.current = 'guest'
-      seatRef.current = 2
+      const guestSeat = opts?.asSpectator ? null : 2
+      seatRef.current = guestSeat
       setRole('guest')
-      setSeat(2)
+      setSeat(guestSeat)
       const conn = createConnection()
       const answer = await conn.createAnswerFromOffer(offer)
       setLocalSignal(answer)
@@ -635,7 +700,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   )
 
   const joinWithRoomCode = useCallback(
-    async (code: string, mode: SessionMode) => {
+    async (code: string, mode: SessionMode, opts?: { asSpectator?: boolean }) => {
       const normalized = normalizeRoomCode(code)
       if (!normalized) {
         setError('Enter a valid room code')
@@ -643,26 +708,30 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       }
 
       setError(null)
+      setConnectionLost(false)
       setRoomCode(normalized)
       modeRef.current = mode
       setSessionMode(mode)
       roleRef.current = 'guest'
-      seatRef.current = 2
+      const guestSeat = opts?.asSpectator ? null : 2
+      seatRef.current = guestSeat
       setRole('guest')
-      setSeat(2)
+      setSeat(guestSeat)
       updatePhase('connecting')
 
       const maxAttempts = 6
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        signalingRef.current?.close()
-        const chain = new SignalingAdapterChain()
-        signalingRef.current = chain
-        wireSignalingSession(chain)
+        if (!signalingRef.current) {
+          const chain = new SignalingAdapterChain()
+          signalingRef.current = chain
+          wireSignalingSession(chain)
+        }
+        const chain = signalingRef.current
 
         try {
           const offer = await chain.guestFetchOffer(normalized)
           setSignalingPath(chain.lastAdapter)
-          const conn = createConnection()
+          const conn = createConnection({ preserveSession: reconnectInFlightRef.current })
           const answer = await conn.createAnswerFromOffer(offer)
           setLocalSignal(answer)
           await chain.guestPublishAnswer(normalized, answer)
@@ -821,6 +890,84 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     setError((prev) => (prev === 'Host ended the game' ? null : prev))
   }, [])
 
+  const reconnectSession = useCallback(async () => {
+    if (reconnectInFlightRef.current) return
+    const r = roleRef.current
+    const code = roomCode
+    if (!r) {
+      setError('No session to reconnect')
+      return
+    }
+
+    reconnectInFlightRef.current = true
+    setError(null)
+    setConnectionLost(false)
+
+    try {
+      const existingConn = connRef.current
+
+      if (r === 'host' && existingConn && !existingConn.connected) {
+        try {
+          const sdp = await existingConn.createIceRestartOffer()
+          publishRenegotiation('ice-reoffer', sdp, existingConn.activeIceTier)
+          await new Promise<void>((resolve) => {
+            const started = Date.now()
+            const check = () => {
+              if (existingConn.connected) {
+                resolve()
+                return
+              }
+              if (Date.now() - started > 3000) {
+                resolve()
+                return
+              }
+              window.setTimeout(check, 200)
+            }
+            check()
+          })
+          if (existingConn.connected) return
+        } catch {
+          // fall through to full re-handshake
+        }
+      }
+
+      if (r === 'host') {
+        if (!code) throw new Error('No room code — host a new session')
+        const chain = signalingRef.current
+        if (!chain) throw new Error('Signaling unavailable — disconnect and host again')
+
+        existingConn?.softClose()
+        const conn = createConnection({ preserveSession: true })
+        const offer = await conn.createOffer()
+        setLocalSignal(offer)
+        chain.clearAnswer(code)
+        await chain.republishOffer(code, offer)
+        updatePhase('connecting')
+        const answer = await chain.waitForAnswer(code)
+        await conn.acceptAnswer(answer)
+        return
+      }
+
+      if (!code) throw new Error('No room code')
+      existingConn?.softClose()
+      reconnectInFlightRef.current = true
+      await joinWithRoomCode(code, modeRef.current, {
+        asSpectator: seatRef.current === null,
+      })
+    } catch (err) {
+      markConnectionLost(err instanceof Error ? err.message : 'Reconnect failed')
+    } finally {
+      reconnectInFlightRef.current = false
+    }
+  }, [
+    roomCode,
+    createConnection,
+    joinWithRoomCode,
+    markConnectionLost,
+    publishRenegotiation,
+    updatePhase,
+  ])
+
   const disconnect = useCallback(() => {
     hostGenerationRef.current += 1
     hostOfferInFlightRef.current = false
@@ -833,10 +980,13 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     roleRef.current = null
     seatRef.current = null
     remoteSeatRef.current = null
+    remoteSpectatorRef.current = false
     bootstrapDoneRef.current = false
     setRole(null)
     setSeat(null)
     setRemoteSeat(null)
+    setRemoteSpectator(false)
+    setConnectionLost(false)
     setLocalSignal('')
     setRoomCode(null)
     setJoinUrl(null)
@@ -875,6 +1025,10 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     latencyMs,
     latencyProfile,
     remoteSeat,
+    remoteSpectator,
+    connectionLost,
+    isSpectator,
+    pickRole,
     pickSeat,
     isSeatAvailable,
     createHostOffer,
@@ -892,6 +1046,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     requestResync,
     attachMediaStream,
     getConnection,
+    reconnectSession,
     disconnect,
     clearHostNotice,
     getSeat,

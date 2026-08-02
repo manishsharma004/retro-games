@@ -68,7 +68,8 @@ export function RemotePlayGuestView({
   const peerPlaying = peer.phase === 'playing'
   const peerActive = peer.role !== null && peer.phase !== 'idle' && peer.phase !== 'error'
   const localSeat = peer.seat === 1 || peer.seat === 2 ? peer.seat : null
-  const showSeatPicker = peer.connectionState === 'connected' && !peerPlaying && !isFullscreen
+  const isSpectator = peer.seat === null
+  const showRolePicker = peer.connectionState === 'connected' && !isFullscreen
 
   const showVirtual = useMemo(() => {
     if (settings.showVirtualController === 'auto') return touchDevice
@@ -99,7 +100,11 @@ export function RemotePlayGuestView({
   )
 
   const inputEnabled =
-    peerPlaying && !settingsOpen && !controllersOpen && !layoutEditorOpen
+    peerPlaying &&
+    !isSpectator &&
+    !settingsOpen &&
+    !controllersOpen &&
+    !layoutEditorOpen
 
   useKeyboardControls({
     enabled: inputEnabled,
@@ -210,7 +215,7 @@ export function RemotePlayGuestView({
             {peer.role && (
               <>
                 <span className="toolbar__peer" title="Remote play session">
-                  remote · P{peer.seat ?? '—'} · {peer.phase}
+                  remote · {isSpectator ? 'spectator' : `P${peer.seat}`} · {peer.phase}
                 </span>
                 <LatencyBadge
                   profile={peer.latencyProfile}
@@ -221,6 +226,15 @@ export function RemotePlayGuestView({
             )}
           </div>
           <div className="toolbar__actions">
+            {(peer.connectionLost || peer.error) && (
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={() => void peer.reconnectSession()}
+              >
+                Reconnect
+              </button>
+            )}
             <button
               type="button"
               className="btn btn--ghost"
@@ -235,7 +249,7 @@ export function RemotePlayGuestView({
             <button type="button" className="btn btn--ghost" onClick={() => setSettingsOpen(true)}>
               Settings
             </button>
-            {showVirtual && (
+            {showVirtual && !isSpectator && (
               <button
                 type="button"
                 className="btn btn--ghost"
@@ -256,13 +270,16 @@ export function RemotePlayGuestView({
               Leave
             </button>
           </div>
-          <GamepadStatus pads={pads} onOpen={() => setControllersOpen(true)} />
+          <GamepadStatus
+            pads={isSpectator ? [] : pads}
+            onOpen={isSpectator ? undefined : () => setControllersOpen(true)}
+          />
         </div>
       )}
 
-      {showSeatPicker && (
-          <div className="join-page__seats remote-guest__seats" role="radiogroup" aria-label="Player slot">
-            <p className="join-page__label">Your controller</p>
+      {showRolePicker && (
+          <div className="join-page__seats remote-guest__seats" role="radiogroup" aria-label="Your role">
+            <p className="join-page__label">Your role</p>
             {([1, 2] as const).map((player) => {
               const taken = !peer.isSeatAvailable(player)
               const checked = peer.seat === player
@@ -273,7 +290,7 @@ export function RemotePlayGuestView({
                     name="remote-player-slot"
                     checked={checked}
                     disabled={taken && !checked}
-                    onChange={() => peer.pickSeat(player)}
+                    onChange={() => peer.pickRole(player)}
                   />
                   <span>
                     Player {player}
@@ -283,8 +300,20 @@ export function RemotePlayGuestView({
                 </label>
               )
             })}
+            <label className="join-page__seat">
+              <input
+                type="radio"
+                name="remote-player-slot"
+                checked={peer.seat === null}
+                onChange={() => peer.pickRole(null)}
+              />
+              <span>Spectator{peer.seat === null ? ' (you)' : ''}</span>
+            </label>
             {peer.remoteSeat && peer.seat && peer.remoteSeat !== peer.seat && (
               <p className="join-page__hint">Host is Player {peer.remoteSeat}.</p>
+            )}
+            {peer.remoteSpectator && peer.seat !== null && (
+              <p className="join-page__hint">Host is spectating.</p>
             )}
           </div>
         )}
@@ -368,7 +397,7 @@ export function RemotePlayGuestView({
                 </button>
               </div>
             )}
-            {peerPlaying && showVirtual && effectivePadOverlay && !layoutEditorOpen && (
+            {peerPlaying && showVirtual && !isSpectator && effectivePadOverlay && !layoutEditorOpen && (
               <VirtualController
                 system={gameSystem}
                 onPress={onPress}
@@ -383,7 +412,7 @@ export function RemotePlayGuestView({
               />
             )}
           </div>
-          {peerPlaying && showVirtual && !effectivePadOverlay && !layoutEditorOpen && (
+          {peerPlaying && showVirtual && !isSpectator && !effectivePadOverlay && !layoutEditorOpen && (
             <VirtualController
               system={gameSystem}
               onPress={onPress}
@@ -432,7 +461,9 @@ export function RemotePlayGuestView({
         onChange={setControllerBindings}
         peerSeat={peerActive && localSeat ? localSeat : null}
         remoteSeat={peerActive ? peer.remoteSeat : null}
+        onPickRole={peer.connectionState === 'connected' ? peer.pickRole : undefined}
         onPickSeat={peer.connectionState === 'connected' ? peer.pickSeat : undefined}
+        remoteSpectator={peer.remoteSpectator}
         isSeatAvailable={
           peer.connectionState === 'connected' ? peer.isSeatAvailable : undefined
         }

@@ -730,16 +730,12 @@ export default function App({ initialCoopJoin = null }: AppProps) {
             : null
         }
         onPickSeat={
-          (sessionMode === 'coop' || sessionMode === 'local') &&
-          peer.connectionState === 'connected'
-            ? peer.pickSeat
-            : undefined
+          peer.connectionState === 'connected' ? peer.pickSeat : undefined
         }
+        onPickRole={peer.connectionState === 'connected' ? peer.pickRole : undefined}
+        remoteSpectator={peer.remoteSpectator}
         isSeatAvailable={
-          (sessionMode === 'coop' || sessionMode === 'local') &&
-          peer.connectionState === 'connected'
-            ? peer.isSeatAvailable
-            : undefined
+          peer.connectionState === 'connected' ? peer.isSeatAvailable : undefined
         }
       />
 
@@ -768,11 +764,16 @@ export default function App({ initialCoopJoin = null }: AppProps) {
         onCreateHost={() => peer.createHostOffer(sessionMode)}
         onAcceptAnswer={(answer) => peer.acceptGuestAnswer(answer)}
         onJoinOffer={(offer) => peer.joinWithOffer(offer, sessionMode)}
+        onJoinRoomCode={(code, opts) => peer.joinWithRoomCode(code, sessionMode, opts)}
+        onReconnect={() => peer.reconnectSession()}
+        connectionLost={peer.connectionLost}
         onShareGame={() => coop.shareGame()}
         onReady={() => peer.sendReady()}
         onGo={() => peer.sendGo()}
         onDisconnect={() => peer.disconnect()}
         remoteSeat={peer.remoteSeat}
+        remoteSpectator={peer.remoteSpectator}
+        onPickRole={peer.pickRole}
         onPickSeat={peer.pickSeat}
         isSeatAvailable={peer.isSeatAvailable}
         onSyncGameState={

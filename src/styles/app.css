@@ -2502,6 +2502,20 @@ body.rg-faux-fullscreen {
   background: #e8f7ee;
 }
 
+.peer-lobby__input {
+  width: 100%;
+  margin-bottom: 0.55rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--text);
+  font-family: var(--font-pixel, ui-monospace, monospace);
+  font-size: 1.1rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
 .peer-lobby__textarea {
   width: 100%;
   resize: vertical;

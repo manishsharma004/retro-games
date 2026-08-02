@@ -657,6 +657,22 @@ export class PeerConnection {
     return id
   }
 
+  /** Tear down WebRTC only — handlers and signaling stay alive for reconnect. */
+  softClose(): void {
+    this.clearLocalMigrateTimer()
+    this.teardownPc(false)
+    this.isAnswerer = false
+    this.relayRetryDone = false
+    this.localMigrateAttempted = false
+    this.connectionPath = 'unknown'
+    this.setState('idle')
+  }
+
+  /** ICE restart while keeping the same peer connection (host/offerer). */
+  async createIceRestartOffer(): Promise<string> {
+    return this.renegotiateAsOfferer(this.iceTier)
+  }
+
   close(): void {
     this.clearLocalMigrateTimer()
     this.teardownPc(false)

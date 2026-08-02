@@ -13,6 +13,7 @@ export {
   type ConnectionPath,
 } from './connectivity'
 export { buildJoinUrl, generateRoomCode, normalizeRoomCode, parseJoinLocation } from './joinUrl'
+export type { JoinRole } from './joinUrl'
 export {
   SignalingAdapterChain,
   formatSignalingPath,

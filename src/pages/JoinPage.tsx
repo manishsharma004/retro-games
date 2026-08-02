@@ -5,7 +5,13 @@ import { VirtualController } from '../components/VirtualController'
 import { usePeerSession } from '../hooks/usePeerSession'
 import { useLocalGuest } from '../hooks/multiplayer/useLocalGuest'
 import { useRemoteGuest } from '../hooks/multiplayer/useRemoteGuest'
-import { buildJoinUrl, normalizeRoomCode, parseJoinLocation, type SessionMode } from '../lib/peer'
+import {
+  buildJoinUrl,
+  normalizeRoomCode,
+  parseJoinLocation,
+  type JoinRole,
+  type SessionMode,
+} from '../lib/peer'
 import { DEFAULT_LAYOUT } from '../lib/virtualLayout'
 import { loadSettings } from '../lib/settings'
 import '../styles/app.css'
@@ -13,11 +19,64 @@ import '../styles/app.css'
 interface JoinPageProps {
   initialRoom: string
   initialMode: SessionMode
+  initialRole?: JoinRole
 }
 
-export function JoinPage({ initialRoom, initialMode }: JoinPageProps) {
+function RolePicker({
+  peer,
+  name,
+}: {
+  peer: ReturnType<typeof usePeerSession>
+  name: string
+}) {
+  if (peer.connectionState !== 'connected') return null
+
+  return (
+    <div className="join-page__seats" role="radiogroup" aria-label="Your role">
+      <p className="join-page__label">Your role</p>
+      {([1, 2] as const).map((player) => {
+        const taken = !peer.isSeatAvailable(player)
+        const checked = peer.seat === player
+        return (
+          <label key={player} className="join-page__seat">
+            <input
+              type="radio"
+              name={name}
+              checked={checked}
+              disabled={taken && !checked}
+              onChange={() => peer.pickRole(player)}
+            />
+            <span>
+              Player {player}
+              {checked ? ' (you)' : ''}
+              {taken && !checked ? ' (taken)' : ''}
+            </span>
+          </label>
+        )
+      })}
+      <label className="join-page__seat">
+        <input
+          type="radio"
+          name={name}
+          checked={peer.seat === null}
+          onChange={() => peer.pickRole(null)}
+        />
+        <span>Spectator{peer.seat === null ? ' (you)' : ''}</span>
+      </label>
+      {peer.remoteSeat && peer.seat && peer.remoteSeat !== peer.seat && (
+        <p className="join-page__hint">Other device is Player {peer.remoteSeat}.</p>
+      )}
+      {peer.remoteSpectator && peer.seat !== null && (
+        <p className="join-page__hint">Other device is spectating.</p>
+      )}
+    </div>
+  )
+}
+
+export function JoinPage({ initialRoom, initialMode, initialRole = 'player' }: JoinPageProps) {
   const [mode] = useState<SessionMode>(initialMode)
   const [roomInput, setRoomInput] = useState(initialRoom)
+  const [joinAsSpectator, setJoinAsSpectator] = useState(initialRole === 'spectator')
   const [joined, setJoined] = useState(Boolean(initialRoom))
   const joinStartedRef = useRef(false)
 
@@ -33,9 +92,6 @@ export function JoinPage({ initialRoom, initialMode }: JoinPageProps) {
     peer,
   })
 
-  const showSeatPicker =
-    mode === 'local' && peer.connectionState === 'connected'
-
   const remoteGuest = useRemoteGuest({
     enabled: mode === 'remote' && joined,
     peer,
@@ -44,19 +100,23 @@ export function JoinPage({ initialRoom, initialMode }: JoinPageProps) {
   useEffect(() => {
     if (!joined || !roomInput.trim() || joinStartedRef.current) return
     joinStartedRef.current = true
-    void peer.joinWithRoomCode(roomInput.trim(), mode)
-  }, [joined, roomInput, mode, peer.joinWithRoomCode])
+    void peer.joinWithRoomCode(roomInput.trim(), mode, { asSpectator: joinAsSpectator })
+  }, [joined, roomInput, mode, joinAsSpectator, peer.joinWithRoomCode])
 
   if (mode === 'local') {
     return (
       <div className="join-page join-page--controller">
         <header className="join-page__header">
-          <h1>Player {localGuest.seat ?? peer.seat ?? '—'}</h1>
+          <h1>
+            {peer.seat === null ? 'Spectator' : `Player ${localGuest.seat ?? peer.seat ?? '—'}`}
+          </h1>
           <p className="join-page__status">
             {peer.phase === 'connecting' && 'Connecting to room…'}
             {peer.phase === 'guest-answer' && 'Waiting for host to accept…'}
             {peer.connectionState === 'connected' && 'Connected'}
+            {peer.connectionLost && 'Connection lost'}
             {peer.connectionState !== 'connected' &&
+              !peer.connectionLost &&
               peer.phase !== 'connecting' &&
               peer.phase !== 'guest-answer' &&
               'Not connected'}
@@ -81,58 +141,64 @@ export function JoinPage({ initialRoom, initialMode }: JoinPageProps) {
                 maxLength={6}
               />
             </label>
+            <div className="join-page__seats" role="radiogroup" aria-label="Join role">
+              <label className="join-page__seat">
+                <input
+                  type="radio"
+                  name="local-join-role"
+                  checked={!joinAsSpectator}
+                  onChange={() => setJoinAsSpectator(false)}
+                />
+                <span>Join as controller</span>
+              </label>
+              <label className="join-page__seat">
+                <input
+                  type="radio"
+                  name="local-join-role"
+                  checked={joinAsSpectator}
+                  onChange={() => setJoinAsSpectator(true)}
+                />
+                <span>Join as spectator</span>
+              </label>
+            </div>
             <button
               type="button"
               className="btn btn--primary"
               disabled={!roomInput.trim()}
               onClick={() => setJoined(true)}
             >
-              Join as controller
+              Join room
             </button>
             {peer.error && <p className="join-page__error">{peer.error}</p>}
           </div>
         ) : (
           <>
-            {showSeatPicker && (
-              <div className="join-page__seats" role="radiogroup" aria-label="Player slot">
-                <p className="join-page__label">Your controller</p>
-                {([1, 2] as const).map((player) => {
-                  const taken = !peer.isSeatAvailable(player)
-                  const checked = peer.seat === player
-                  return (
-                    <label key={player} className="join-page__seat">
-                      <input
-                        type="radio"
-                        name="join-player-slot"
-                        checked={checked}
-                        disabled={taken && !checked}
-                        onChange={() => peer.pickSeat(player)}
-                      />
-                      <span>
-                        Player {player}
-                        {checked ? ' (you)' : ''}
-                        {taken && !checked ? ' (taken)' : ''}
-                      </span>
-                    </label>
-                  )
-                })}
-                {peer.remoteSeat && peer.seat && peer.remoteSeat !== peer.seat && (
-                  <p className="join-page__hint">Other device is Player {peer.remoteSeat}.</p>
-                )}
+            <RolePicker peer={peer} name="join-local-role" />
+            {(peer.connectionLost || peer.error) && (
+              <div className="join-page__row">
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => void peer.reconnectSession()}
+                >
+                  Reconnect
+                </button>
               </div>
             )}
-            <VirtualController
-              system="nes"
-              onPress={localGuest.onPress}
-              onRelease={localGuest.onRelease}
-              visible
-              dpadMode="dpad"
-              overlay={false}
-              size="large"
-              scaleBoost={1.2}
-              opacity={0.92}
-              layout={DEFAULT_LAYOUT}
-            />
+            {peer.seat !== null && (
+              <VirtualController
+                system="nes"
+                onPress={localGuest.onPress}
+                onRelease={localGuest.onRelease}
+                visible
+                dpadMode="dpad"
+                overlay={false}
+                size="large"
+                scaleBoost={1.2}
+                opacity={0.92}
+                layout={DEFAULT_LAYOUT}
+              />
+            )}
           </>
         )}
         {joined && peer.error && <p className="join-page__error">{peer.error}</p>}
@@ -175,13 +241,33 @@ export function JoinPage({ initialRoom, initialMode }: JoinPageProps) {
                 maxLength={6}
               />
             </label>
+            <div className="join-page__seats" role="radiogroup" aria-label="Join role">
+              <label className="join-page__seat">
+                <input
+                  type="radio"
+                  name="remote-join-role"
+                  checked={!joinAsSpectator}
+                  onChange={() => setJoinAsSpectator(false)}
+                />
+                <span>Watch &amp; play</span>
+              </label>
+              <label className="join-page__seat">
+                <input
+                  type="radio"
+                  name="remote-join-role"
+                  checked={joinAsSpectator}
+                  onChange={() => setJoinAsSpectator(true)}
+                />
+                <span>Watch only (spectator)</span>
+              </label>
+            </div>
             <button
               type="button"
               className="btn btn--primary"
               disabled={!roomInput.trim()}
               onClick={() => setJoined(true)}
             >
-              Watch &amp; play
+              Join room
             </button>
             {peer.error && <p className="join-page__error">{peer.error}</p>}
           </div>
@@ -195,7 +281,9 @@ export function JoinPage({ initialRoom, initialMode }: JoinPageProps) {
       <p>Co-op join opens the full app with dual-emulator sync.</p>
       <a
         className="btn btn--primary"
-        href={buildJoinUrl(roomInput || initialRoom, 'coop')}
+        href={buildJoinUrl(roomInput || initialRoom, 'coop', {
+          spectator: joinAsSpectator,
+        })}
       >
         Open co-op session
       </a>
@@ -203,14 +291,18 @@ export function JoinPage({ initialRoom, initialMode }: JoinPageProps) {
   )
 }
 
-export function resolveJoinRoute(): { room: string; mode: SessionMode } | null {
+export function resolveJoinRoute(): {
+  room: string
+  mode: SessionMode
+  role: JoinRole
+} | null {
   const params = new URLSearchParams(window.location.search)
   const coopLegacy = params.get('coop')
   if (coopLegacy) {
-    return { room: normalizeRoomCode(coopLegacy), mode: 'coop' }
+    return { room: normalizeRoomCode(coopLegacy), mode: 'coop', role: 'player' }
   }
 
-  const { room, mode } = parseJoinLocation(window.location.search, window.location.hash)
+  const { room, mode, role } = parseJoinLocation(window.location.search, window.location.hash)
   if (!room || !mode) return null
 
   const hasJoinFlag =
@@ -219,5 +311,5 @@ export function resolveJoinRoute(): { room: string; mode: SessionMode } | null {
     Boolean(params.get('room') && params.get('mode'))
 
   if (!hasJoinFlag) return null
-  return { room, mode }
+  return { room, mode, role }
 }

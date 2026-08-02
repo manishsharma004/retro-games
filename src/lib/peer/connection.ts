@@ -124,6 +124,9 @@ export class PeerConnection {
   private relayOnlyMode = false
   /** Senders created via prepareSendonlyMedia before tracks exist. */
   private sendonlySenderKinds = new Map<RTCRtpSender, MediaStreamTrack['kind']>()
+  /** Suppress transient disconnected/connecting during SDP media renegotiation. */
+  private mediaRenegotiating = false
+  private mediaRenegotiationTimer: number | null = null
 
   constructor(handlers: PeerConnectionHandlers = {}, options: PeerConnectionOptions = {}) {
     this.handlers = handlers
@@ -169,6 +172,27 @@ export class PeerConnection {
       window.clearTimeout(this.localMigrateTimer)
       this.localMigrateTimer = null
     }
+  }
+
+  private beginMediaRenegotiation() {
+    this.mediaRenegotiating = true
+    if (this.mediaRenegotiationTimer !== null) {
+      window.clearTimeout(this.mediaRenegotiationTimer)
+    }
+    this.mediaRenegotiationTimer = window.setTimeout(() => {
+      this.mediaRenegotiationTimer = null
+      this.mediaRenegotiating = false
+    }, 3000)
+  }
+
+  private endMediaRenegotiationSoon() {
+    if (this.mediaRenegotiationTimer !== null) {
+      window.clearTimeout(this.mediaRenegotiationTimer)
+    }
+    this.mediaRenegotiationTimer = window.setTimeout(() => {
+      this.mediaRenegotiationTimer = null
+      this.mediaRenegotiating = false
+    }, 1500)
   }
 
   private scheduleLocalMigration() {
@@ -388,12 +412,15 @@ export class PeerConnection {
     }
     pc.onconnectionstatechange = () => {
       const s = pc.connectionState
+      if (this.mediaRenegotiating && (s === 'disconnected' || s === 'connecting')) return
       if (s === 'connected') {
         this.clearConnectWatch()
         void this.refreshConnectionPath()
         if (this.iceTier === 'relay') this.scheduleLocalMigration()
         if (this.channel?.readyState === 'open') this.setState('connected')
-        else if (!SIGNALING_WAIT_STATES.has(this.state)) this.setState('connecting')
+        else if (this.state !== 'connected' && !SIGNALING_WAIT_STATES.has(this.state)) {
+          this.setState('connecting')
+        }
         return
       }
       if (SIGNALING_WAIT_STATES.has(this.state)) return
@@ -486,6 +513,7 @@ export class PeerConnection {
       if (this.iceTier === 'relay') this.scheduleLocalMigration()
     }
     channel.onclose = () => {
+      if (this.mediaRenegotiating) return
       if (this.state === 'connected' || this.state === 'connecting') {
         this.setState('disconnected')
       }
@@ -668,11 +696,13 @@ export class PeerConnection {
   async createMediaRenegotiationOffer(): Promise<string> {
     const pc = this.pc
     if (!pc) throw new Error('No peer connection')
+    this.beginMediaRenegotiation()
     const offer = await pc.createOffer()
     await pc.setLocalDescription(offer)
     await waitForIceGathering(pc)
     const local = pc.localDescription
     if (!local?.sdp) throw new Error('Failed to create media renegotiation offer')
+    this.endMediaRenegotiationSoon()
     return compressSignal(local.sdp)
   }
 
@@ -681,12 +711,14 @@ export class PeerConnection {
     const pc = this.pc
     if (!pc) throw new Error('No peer connection')
     const sdp = decompressSignal(encoded)
+    this.beginMediaRenegotiation()
     await pc.setRemoteDescription({ type: 'offer', sdp })
     const answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
     await waitForIceGathering(pc)
     const local = pc.localDescription
     if (!local?.sdp) throw new Error('Failed to create media renegotiation answer')
+    this.endMediaRenegotiationSoon()
     return compressSignal(local.sdp)
   }
 
@@ -694,7 +726,9 @@ export class PeerConnection {
     const pc = this.pc
     if (!pc) throw new Error('No peer connection')
     const sdp = decompressSignal(encoded)
+    this.beginMediaRenegotiation()
     await pc.setRemoteDescription({ type: 'answer', sdp })
+    this.endMediaRenegotiationSoon()
   }
 
   getPeerConnection(): RTCPeerConnection | null {

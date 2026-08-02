@@ -1,7 +1,7 @@
 import { PeerConnection, type PeerConnectionHandlers, type PeerConnectionState } from './connection'
 import type { ControlMessage, PeerSeat, RosterPeer } from './protocol'
 import type { MaxPlayers, RosterConnectionStatus, RosterEntry } from './roster'
-import { isSeatTaken } from './roster'
+import { findFreeSeat, isSeatTaken } from './roster'
 import { isMlineOrderError, offerFingerprint } from './sdpUtils'
 import type { SignalingAdapterChain } from './signaling'
 
@@ -13,6 +13,8 @@ export interface GuestLink {
   connectionState: PeerConnectionState
   /** True once the data channel opened — avoids tearing down mid-handshake. */
   wasConnected: boolean
+  /** True once canvas capture tracks were attached for this guest. */
+  mediaAttached: boolean
 }
 
 export interface MultiPeerHostHandlers {
@@ -36,6 +38,7 @@ export class MultiPeerHostManager {
   private unsubGuestSession: (() => void) | null = null
   private connectingGuests = new Set<string>()
   private activeStream: MediaStream | null = null
+  private attachMediaTimer: number | null = null
   private remotePlay = false
   private handlers: MultiPeerHostHandlers
 
@@ -103,6 +106,12 @@ export class MultiPeerHostManager {
     this.unsubGuestJoin = null
     this.unsubGuestSession?.()
     this.unsubGuestSession = null
+    if (this.attachMediaTimer !== null) {
+      window.clearTimeout(this.attachMediaTimer)
+      this.attachMediaTimer = null
+    }
+    for (const t of this.guestDisconnectTimers.values()) window.clearTimeout(t)
+    this.guestDisconnectTimers.clear()
     for (const g of this.guests.values()) g.connection.close()
     this.guests.clear()
     this.connectingGuests.clear()
@@ -114,6 +123,16 @@ export class MultiPeerHostManager {
   /** Attach canvas capture to every connected guest (spectators and players). */
   async attachMediaStream(stream: MediaStream): Promise<void> {
     this.activeStream = stream
+    if (this.attachMediaTimer !== null) window.clearTimeout(this.attachMediaTimer)
+    this.attachMediaTimer = window.setTimeout(() => {
+      this.attachMediaTimer = null
+      void this.flushAttachMediaStream()
+    }, 150)
+  }
+
+  private async flushAttachMediaStream(): Promise<void> {
+    const stream = this.activeStream
+    if (!stream) return
     await Promise.all(
       [...this.guests.keys()].map((signalingId) => this.attachMediaStreamToGuest(signalingId)),
     )
@@ -146,10 +165,11 @@ export class MultiPeerHostManager {
 
     try {
       const needsRenegotiation = await g.connection.addMediaStream(stream)
-      if (this.remotePlay || needsRenegotiation) {
+      if (needsRenegotiation) {
         const sdp = await g.connection.createMediaRenegotiationOffer()
         await this.sendMediaOffer(signalingId, sdp)
       }
+      g.mediaAttached = true
     } catch (err) {
       this.handlers.onError?.(
         err instanceof Error ? err.message : 'Video stream negotiation failed',
@@ -173,17 +193,36 @@ export class MultiPeerHostManager {
     return true
   }
 
-  private activeGuestPeerCount(): number {
-    const ids = new Set<string>()
+  private activeGuestSessionCount(): number {
+    let count = 0
     for (const g of this.guests.values()) {
-      if (g.connectionState !== 'closed' && g.connectionState !== 'failed') {
-        ids.add(g.peerId)
-      }
+      if (g.connectionState !== 'closed' && g.connectionState !== 'failed') count++
     }
     for (const e of this.roster) {
-      if (e.role === 'guest' && e.status === 'connecting') ids.add(e.peerId)
+      if (
+        e.role === 'guest' &&
+        e.status === 'connecting' &&
+        e.signalingId &&
+        !this.guests.has(e.signalingId)
+      ) {
+        count++
+      }
     }
-    return ids.size
+    return count
+  }
+
+  private hasConnectedSession(peerId: string, exceptSignalingId?: string): boolean {
+    for (const [sid, g] of this.guests) {
+      if (sid === exceptSignalingId) continue
+      if (
+        g.peerId === peerId &&
+        g.wasConnected &&
+        (g.connectionState === 'connected' || g.connectionState === 'connecting')
+      ) {
+        return true
+      }
+    }
+    return false
   }
 
   private maxGuestConnections(): number {
@@ -227,6 +266,7 @@ export class MultiPeerHostManager {
   }
 
   private guestFailTimers = new Map<string, number>()
+  private guestDisconnectTimers = new Map<string, number>()
 
   private clearGuestFailTimer(signalingId: string) {
     const t = this.guestFailTimers.get(signalingId)
@@ -236,8 +276,17 @@ export class MultiPeerHostManager {
     }
   }
 
+  private clearGuestDisconnectTimer(signalingId: string) {
+    const t = this.guestDisconnectTimers.get(signalingId)
+    if (t !== undefined) {
+      window.clearTimeout(t)
+      this.guestDisconnectTimers.delete(signalingId)
+    }
+  }
+
   private cancelGuestAttempt(signalingId: string) {
     this.clearGuestFailTimer(signalingId)
+    this.clearGuestDisconnectTimer(signalingId)
     const g = this.guests.get(signalingId)
     const peerId = g?.peerId
     if (g) {
@@ -267,13 +316,18 @@ export class MultiPeerHostManager {
 
     const peerId = stablePeerId ?? signalingId
 
-    for (const [sid, g] of this.guests) {
-      if (g.peerId === peerId && sid !== signalingId) {
-        this.cancelGuestAttempt(sid)
-      }
+    if (this.hasConnectedSession(peerId, signalingId)) {
+      this.handlers.onError?.('This device is already connected to the room')
+      return
     }
 
-    if (this.activeGuestPeerCount() >= this.maxGuestConnections()) {
+    for (const [sid, g] of this.guests) {
+      if (g.peerId !== peerId || sid === signalingId) continue
+      if (g.wasConnected && g.connectionState === 'connected') continue
+      this.cancelGuestAttempt(sid)
+    }
+
+    if (this.activeGuestSessionCount() >= this.maxGuestConnections()) {
       this.handlers.onError?.('Room is full')
       return
     }
@@ -294,7 +348,9 @@ export class MultiPeerHostManager {
       (e) => e.peerId === peerId && e.role === 'guest' && e.status === 'disconnected',
     )
     const defaultSeat =
-      initialSeat !== undefined ? initialSeat : (prior?.seat ?? null)
+      initialSeat !== undefined
+        ? initialSeat
+        : (prior?.seat ?? findFreeSeat(this.roster, this.maxPlayers))
 
     this.connectingGuests.add(signalingId)
     chain.clearGuestStorage?.(code, signalingId)
@@ -321,6 +377,7 @@ export class MultiPeerHostManager {
         connection: conn,
         connectionState: conn.connected ? 'connected' : 'connecting',
         wasConnected: conn.connected,
+        mediaAttached: false,
       }
       this.guests.set(signalingId, link)
 
@@ -371,15 +428,17 @@ export class MultiPeerHostManager {
           if (state === 'connected') {
             g.wasConnected = true
             this.clearGuestFailTimer(signalingId)
+            this.clearGuestDisconnectTimer(signalingId)
             this.setRosterStatus(g.peerId, 'connected')
             this.sendRosterTo(signalingId)
-            if (this.activeStream) {
+            if (this.activeStream && !g.mediaAttached) {
               void this.attachMediaStreamToGuest(signalingId)
             }
           }
           this.emitRosterChange()
         }
         if (state === 'failed') {
+          this.clearGuestDisconnectTimer(signalingId)
           this.clearGuestFailTimer(signalingId)
           const timer = window.setTimeout(() => {
             this.guestFailTimers.delete(signalingId)
@@ -394,7 +453,24 @@ export class MultiPeerHostManager {
         if (state === 'disconnected' || state === 'closed') {
           const link = this.guests.get(signalingId)
           if (!link?.wasConnected) return
-          this.removeGuest(signalingId)
+          if (state === 'closed') {
+            this.removeGuest(signalingId)
+            return
+          }
+          if (this.guestDisconnectTimers.has(signalingId)) return
+          const timer = window.setTimeout(() => {
+            this.guestDisconnectTimers.delete(signalingId)
+            const current = this.guests.get(signalingId)
+            if (
+              current &&
+              (current.connectionState === 'disconnected' ||
+                current.connectionState === 'closed' ||
+                current.connectionState === 'failed')
+            ) {
+              this.removeGuest(signalingId)
+            }
+          }, 10_000)
+          this.guestDisconnectTimers.set(signalingId, timer)
         }
       },
       onRenegotiationOffer: (signal, tier) => {
@@ -464,6 +540,7 @@ export class MultiPeerHostManager {
 
   private removeGuest(signalingId: string) {
     this.clearGuestFailTimer(signalingId)
+    this.clearGuestDisconnectTimer(signalingId)
     const g = this.guests.get(signalingId)
     if (!g) return
 

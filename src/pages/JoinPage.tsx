@@ -112,8 +112,17 @@ export function JoinPage({ initialRoom, initialMode, initialRole = 'player' }: J
       <div className="join-page join-page--controller">
         <header className="join-page__header">
           <h1>
-            {peer.seat === null ? 'Spectator' : `Player ${localGuest.seat ?? peer.seat ?? '—'}`}
+            {peer.hostGame
+              ? peer.hostGame.name
+              : peer.seat === null
+                ? 'Spectator'
+                : `Player ${localGuest.seat ?? peer.seat ?? '—'}`}
           </h1>
+          {peer.hostGame && (
+            <p className="join-page__hint">
+              Host is playing {peer.hostGame.system.toUpperCase()} · {peer.hostGame.name}
+            </p>
+          )}
           <p className="join-page__status">
             {peer.phase === 'connecting' && 'Connecting to room…'}
             {peer.phase === 'guest-answer' && 'Waiting for host to accept…'}

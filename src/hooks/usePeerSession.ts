@@ -35,6 +35,13 @@ import { useMultiPeerHost } from './useMultiPeerHost'
 import type { SystemId } from '../lib/cores'
 import type { EmulatorSettings } from '../lib/settings'
 
+export interface HostGameInfo {
+  name: string
+  system: SystemId
+  core: string
+  libraryFile?: string
+}
+
 export type PeerPhase =
   | 'idle'
   | 'host-offer'
@@ -78,6 +85,8 @@ interface UsePeerSessionOptions {
   onLinked?: () => void
   onRemoteStream?: (stream: MediaStream) => void
   onHello?: (mode: SessionMode, seat: PeerSeat | null) => void
+  onGuestHello?: () => void
+  onGameUpdate?: (game: HostGameInfo) => void
   onRumble?: (seat: PeerSeat, pattern: number[]) => void
   onLatency?: (ms: number) => void
   /** Fired when local participation seat changes (including spectator). */
@@ -117,6 +126,8 @@ export interface UsePeerSessionResult {
   roster: RosterEntry[]
   peerId: string
   connectedGuestCount: number
+  hostGame: HostGameInfo | null
+  streamGeneration: number
   pickRole: (seat: PeerSeat | null) => boolean
   pickSeat: (seat: PeerSeat) => boolean
   isSeatAvailable: (seat: PeerSeat) => boolean
@@ -139,6 +150,8 @@ export interface UsePeerSessionResult {
     state: Uint8Array
     libraryFile?: string
   }) => Promise<void>
+  sendGameUpdate: (game: HostGameInfo) => void
+  refreshMediaStream: () => void
   sendReady: () => void
   sendGo: () => void
   sendHostExit: () => void
@@ -168,6 +181,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     hostPeerId: peerIdRef.current,
     onRemoteInput: (seat, button, down, executeAt) =>
       optionsRef.current.onRemoteInput?.(seat, button, down, executeAt),
+    onGuestConnected: () => optionsRef.current.onGuestHello?.(),
     onError: (message) => optionsRef.current.onPeerError?.(message),
   })
 
@@ -227,6 +241,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   const [multiGuest, setMultiGuest] = useState(false)
   const [maxPlayers, setMaxPlayers] = useState<MaxPlayers>(2)
   const [roster, setRoster] = useState<RosterEntry[]>([])
+  const [hostGame, setHostGame] = useState<HostGameInfo | null>(null)
+  const [streamGeneration, setStreamGeneration] = useState(0)
 
   useEffect(() => {
     onRoleChangeRef.current = options.onRoleChange
@@ -262,6 +278,12 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     } catch {
       // ignore
     }
+  }, [])
+
+  const applyGameUpdate = useCallback((game: HostGameInfo) => {
+    setHostGame(game)
+    setError((prev) => (prev === 'Host ended the game' ? null : prev))
+    optionsRef.current.onGameUpdate?.(game)
   }, [])
 
   const applyRosterUpdate = useCallback(
@@ -567,14 +589,33 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         if (msg.type === 'hello') {
           modeRef.current = msg.mode
           setSessionMode(msg.mode)
-          applyRemoteSeat(msg.seat, conn)
-          optionsRef.current.onHello?.(msg.mode, msg.seat)
+          if (roleRef.current === 'host') {
+            optionsRef.current.onGuestHello?.()
+          } else {
+            applyRemoteSeat(msg.seat, conn)
+            optionsRef.current.onHello?.(msg.mode, msg.seat)
+          }
         } else if (msg.type === 'seat-pick') {
           applyRemoteSeat(msg.seat, conn)
         } else if (msg.type === 'roster-update') {
           applyRosterUpdate(msg.peers, msg.maxPlayers)
+        } else if (msg.type === 'game-update') {
+          applyGameUpdate({
+            name: msg.name,
+            system: msg.system,
+            core: msg.core,
+            libraryFile: msg.libraryFile,
+          })
         } else if (msg.type === 'bootstrap') {
+          applyGameUpdate({
+            name: msg.name,
+            system: msg.system,
+            core: msg.core,
+            libraryFile: msg.libraryFile,
+          })
           setError(null)
+          remoteReadyRef.current = false
+          setRemoteReady(false)
           bootstrapDoneRef.current = false
           romBufRef.current = null
           stateBufRef.current = null
@@ -683,6 +724,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   }, [
     applyRemoteSeat,
     applyRosterUpdate,
+    applyGameUpdate,
     handleRenegotiationAnswer,
     handleRenegotiationOffer,
     handleMediaRenegotiationAnswer,
@@ -912,6 +954,30 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     [createConnection, updatePhase, wireSignalingSession],
   )
 
+  const sendGameUpdate = useCallback((game: HostGameInfo) => {
+    if (roleRef.current !== 'host') return
+    const payload = {
+      type: 'game-update' as const,
+      name: game.name,
+      system: game.system,
+      core: game.core,
+      libraryFile: game.libraryFile,
+    }
+    if (multiGuestRef.current) {
+      multiHost.broadcastControl(payload)
+      return
+    }
+    try {
+      connRef.current?.sendControl(payload)
+    } catch {
+      // ignore
+    }
+  }, [multiHost])
+
+  const refreshMediaStream = useCallback(() => {
+    setStreamGeneration((n) => n + 1)
+  }, [])
+
   const sendBootstrap = useCallback(
     async (payload: {
       name: string
@@ -923,6 +989,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     }) => {
       const conn = connRef.current
       if (!conn?.connected) throw new Error('Not connected')
+      remoteReadyRef.current = false
+      setRemoteReady(false)
       updatePhase('transferring')
       const settings = pickSyncSettings(optionsRef.current.settings)
       conn.sendControl({
@@ -1157,6 +1225,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     setMultiGuest(false)
     setMaxPlayers(2)
     setRoster([])
+    setHostGame(null)
+    setStreamGeneration(0)
     setConnectionLost(false)
     setLocalSignal('')
     setRoomCode(null)
@@ -1204,6 +1274,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     roster,
     peerId: peerIdRef.current,
     connectedGuestCount: multiHost.connectedGuestCount,
+    hostGame,
+    streamGeneration,
     pickRole,
     pickSeat,
     isSeatAvailable,
@@ -1212,6 +1284,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     joinWithOffer,
     joinWithRoomCode,
     sendBootstrap,
+    sendGameUpdate,
+    refreshMediaStream,
     sendReady,
     sendGo,
     sendHostExit,

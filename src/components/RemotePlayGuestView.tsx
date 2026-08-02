@@ -212,6 +212,7 @@ export function RemotePlayGuestView({
             <span className="toolbar__brand">Retro Games</span>
             <span className="toolbar__rom" title={`Room ${roomCode}`}>
               Remote · room {roomCode}
+              {peer.hostGame ? ` · ${peer.hostGame.name}` : ''}
             </span>
             {peer.role && (
               <>
@@ -340,6 +341,7 @@ export function RemotePlayGuestView({
               connectionLost={peer.connectionLost}
               error={peer.error}
               hasVideo={remoteGuest.hasVideo}
+              hostGameName={peer.hostGame?.name ?? null}
               onReconnect={() => peer.reconnectSession()}
               onLeave={() => {
                 peer.disconnect()
@@ -399,7 +401,7 @@ export function RemotePlayGuestView({
                 <p>Waiting for host video stream…</p>
               </div>
             )}
-            {peer.error === 'Host ended the game' && (
+            {peer.error === 'Host ended the game' && !peer.hostGame && (
               <div className="play-overlay play-overlay--dim">
                 <p className="play-overlay__title">Host ended the game</p>
                 <p>Waiting for the host to load a new ROM…</p>

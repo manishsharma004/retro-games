@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { ControlMessage } from '../lib/peer/protocol'
 import { MultiPeerHostManager, type GuestLink } from '../lib/peer/multiPeerHost'
 import type { PeerSeat } from '../lib/peer/protocol'
 import type { MaxPlayers, RosterEntry } from '../lib/peer/roster'
@@ -7,13 +8,16 @@ import type { SignalingAdapterChain } from '../lib/peer/signaling'
 export interface UseMultiPeerHostOptions {
   hostPeerId: string
   onRemoteInput: (seat: PeerSeat, button: string, down: boolean, executeAt?: number) => void
+  onGuestConnected?: (peerId: string) => void
   onError?: (message: string) => void
 }
 
-export function useMultiPeerHost({ hostPeerId, onRemoteInput, onError }: UseMultiPeerHostOptions) {
+export function useMultiPeerHost({ hostPeerId, onRemoteInput, onGuestConnected, onError }: UseMultiPeerHostOptions) {
   const onRemoteInputRef = useRef(onRemoteInput)
+  const onGuestConnectedRef = useRef(onGuestConnected)
   const onErrorRef = useRef(onError)
   onRemoteInputRef.current = onRemoteInput
+  onGuestConnectedRef.current = onGuestConnected
   onErrorRef.current = onError
 
   const managerRef = useRef<MultiPeerHostManager | null>(null)
@@ -28,6 +32,7 @@ export function useMultiPeerHost({ hostPeerId, onRemoteInput, onError }: UseMult
         setRoster(nextRoster)
         setGuests(nextGuests)
       },
+      onGuestConnected: (peerId) => onGuestConnectedRef.current?.(peerId),
       onError: (message) => onErrorRef.current?.(message),
     })
     managerRef.current = manager
@@ -66,6 +71,10 @@ export function useMultiPeerHost({ hostPeerId, onRemoteInput, onError }: UseMult
     return managerRef.current?.isSeatAvailable(seat, exceptPeerId) ?? true
   }, [])
 
+  const broadcastControl = useCallback((msg: ControlMessage) => {
+    managerRef.current?.broadcastControl(msg)
+  }, [])
+
   return {
     roster,
     guests,
@@ -75,5 +84,6 @@ export function useMultiPeerHost({ hostPeerId, onRemoteInput, onError }: UseMult
     setHostSeat,
     claimSeat,
     isSeatAvailable,
+    broadcastControl,
   }
 }

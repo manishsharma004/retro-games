@@ -2,6 +2,7 @@ import { PeerConnection, type PeerConnectionHandlers, type PeerConnectionState }
 import type { ControlMessage, PeerSeat, RosterPeer } from './protocol'
 import type { MaxPlayers, RosterConnectionStatus, RosterEntry } from './roster'
 import { isSeatTaken } from './roster'
+import { isMlineOrderError, offerFingerprint } from './sdpUtils'
 import type { SignalingAdapterChain } from './signaling'
 
 export interface GuestLink {
@@ -30,6 +31,7 @@ export class MultiPeerHostManager {
   private roomCode: string | null = null
   private chain: SignalingAdapterChain | null = null
   private unsubGuestJoin: (() => void) | null = null
+  private unsubGuestSession: (() => void) | null = null
   private connectingGuests = new Set<string>()
   private activeStream: MediaStream | null = null
   private declareSendonlyMedia = false
@@ -67,14 +69,29 @@ export class MultiPeerHostManager {
     this.chain = chain
     this.roomCode = roomCode
     this.unsubGuestJoin?.()
+    this.unsubGuestSession?.()
     this.unsubGuestJoin = chain.onGuestJoin((signalingId, stablePeerId) => {
       void this.handleGuestJoin(signalingId, stablePeerId)
+    })
+    this.unsubGuestSession = chain.onGuestSessionMessage((guestId, data) => {
+      if (!guestId) return
+      const msg = data as { type?: string; sdp?: string }
+      if (msg.type !== 'ice-reanswer' || !msg.sdp) return
+      const g = this.guests.get(guestId)
+      if (!g) return
+      void g.connection.acceptRenegotiationAnswer(msg.sdp).catch((err) => {
+        this.handlers.onError?.(
+          err instanceof Error ? err.message : 'ICE renegotiation failed',
+        )
+      })
     })
   }
 
   stop() {
     this.unsubGuestJoin?.()
     this.unsubGuestJoin = null
+    this.unsubGuestSession?.()
+    this.unsubGuestSession = null
     for (const g of this.guests.values()) g.connection.close()
     this.guests.clear()
     this.connectingGuests.clear()
@@ -212,18 +229,40 @@ export class MultiPeerHostManager {
     })
     try {
       const offer = await conn.createOffer()
+      const fp = offerFingerprint(offer)
       await chain.publishGuestOffer(code, signalingId, offer)
-      const answer = await chain.waitForAnswer(code, signalingId)
-      await conn.acceptAnswer(answer)
 
       const link: GuestLink = {
         signalingId,
         peerId,
         seat: defaultSeat,
         connection: conn,
-        connectionState: 'connecting',
+        connectionState: conn.connected ? 'connected' : 'connecting',
       }
       this.guests.set(signalingId, link)
+
+      const acceptGuestAnswer = async () => {
+        const answer = await chain.waitForAnswer(code, signalingId, fp)
+        try {
+          await conn.acceptAnswer(answer)
+        } catch (err) {
+          if (isMlineOrderError(err)) {
+            chain.clearAnswer?.(code, signalingId)
+            return acceptGuestAnswer()
+          }
+          throw err
+        }
+      }
+      await acceptGuestAnswer()
+
+      if (conn.connected) {
+        this.setRosterStatus(peerId, 'connected')
+        this.sendRosterTo(signalingId)
+        if (this.activeStream) {
+          void this.attachMediaStreamToGuest(signalingId)
+        }
+      }
+
       this.broadcastRoster()
       this.handlers.onGuestConnected?.(peerId)
       this.emitRosterChange()
@@ -258,6 +297,13 @@ export class MultiPeerHostManager {
         if (state === 'disconnected' || state === 'closed' || state === 'failed') {
           this.removeGuest(signalingId)
         }
+      },
+      onRenegotiationOffer: (signal, tier) => {
+        this.chain?.sendGuestSessionMessage(signalingId, {
+          type: 'ice-reoffer',
+          sdp: signal,
+          tier,
+        })
       },
       onControl: (msg) => this.handleControl(signalingId, peerId, msg),
       onError: (err) => this.handlers.onError?.(err.message),

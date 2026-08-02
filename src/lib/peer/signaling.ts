@@ -43,7 +43,9 @@ export interface SignalingAdapter {
   clearGuestStorage?(code: string, guestId: string): void
   clearGuestSlot?(code: string, guestId: string): void
   sendSessionMessage?(data: unknown): void
+  sendGuestSessionMessage?(guestId: string, data: unknown): void
   onSessionMessage?(handler: (data: unknown) => void): () => void
+  onGuestSessionMessage?(handler: (guestId: string | undefined, data: unknown) => void): () => void
   close(opts?: { rejectPending?: boolean }): void
 }
 export const DEFAULT_PEERJS_CONFIG = {
@@ -554,6 +556,9 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
   private brokerIndex = 0
   private disconnecting = false
   private sessionHandlers = new Set<(data: unknown) => void>()
+  private guestSessionHandlers = new Set<
+    (guestId: string | undefined, data: unknown) => void
+  >()
   private latestOffer: string | null = null
   private latestOfferFp: string | null = null
   private latestMeta: SignalingRoomMeta | null = null
@@ -626,10 +631,12 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     }
     if (msg.type === 'ice-reoffer' && msg.sdp) {
       this.emitSessionMessage(msg)
+      this.emitGuestSessionMessage(guestId, msg)
       return
     }
     if (msg.type === 'ice-reanswer' && msg.sdp) {
       this.emitSessionMessage(msg)
+      this.emitGuestSessionMessage(guestId, msg)
       return
     }
     if (msg.type === 'offer' && msg.offer) {
@@ -641,14 +648,29 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     for (const handler of this.sessionHandlers) handler(data)
   }
 
+  private emitGuestSessionMessage(guestId: string | undefined, data: unknown) {
+    for (const handler of this.guestSessionHandlers) handler(guestId, data)
+  }
+
   sendSessionMessage(data: unknown) {
     if (!this.conn?.open) return
     this.conn.send(data)
   }
 
+  sendGuestSessionMessage(guestId: string, data: unknown) {
+    const conn = this.conns.get(guestId)
+    if (!conn?.open) return
+    conn.send({ ...(data as object), guestId })
+  }
+
   onSessionMessage(handler: (data: unknown) => void) {
     this.sessionHandlers.add(handler)
     return () => this.sessionHandlers.delete(handler)
+  }
+
+  onGuestSessionMessage(handler: (guestId: string | undefined, data: unknown) => void) {
+    this.guestSessionHandlers.add(handler)
+    return () => this.guestSessionHandlers.delete(handler)
   }
 
   onGuestJoin(handler: (signalingId: string, stablePeerId?: string) => void) {
@@ -686,6 +708,7 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     return new Promise<string>((resolve, reject) => {
       const timer = window.setTimeout(() => reject(new Error('PeerJS guest offer timeout')), timeoutMs)
       let roomMultiGuest = false
+      let offerResolved = false
       const onData = (data: unknown) => {
         const msg = data as {
           type?: string
@@ -699,15 +722,20 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
           return
         }
         if (msg.type === 'webrtc-offer' && msg.offer && msg.guestId === guestId) {
-          window.clearTimeout(timer)
-          conn.off('data', onData)
-          resolve(msg.offer)
+          if (!offerResolved) {
+            offerResolved = true
+            window.clearTimeout(timer)
+            resolve(msg.offer)
+          }
           return
         }
         if (msg.type === 'offer' && msg.offer && !roomMultiGuest) {
-          window.clearTimeout(timer)
-          conn.off('data', onData)
-          resolve(msg.offer)
+          if (!offerResolved) {
+            offerResolved = true
+            window.clearTimeout(timer)
+            resolve(msg.offer)
+          }
+          return
         }
         this.handleConnData(data, normalized, guestId)
       }
@@ -1055,6 +1083,7 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     this.clearAnswerWait()
     this.pendingAnswer = null
     this.sessionHandlers.clear()
+    this.guestSessionHandlers.clear()
     for (const conn of this.conns.values()) conn.close()
     this.conns.clear()
     this.guestJoinHandlers.clear()
@@ -1305,6 +1334,10 @@ export class SignalingAdapterChain {
     this.active?.sendSessionMessage?.(data)
   }
 
+  sendGuestSessionMessage(guestId: string, data: unknown) {
+    this.peerAdapter.sendGuestSessionMessage(guestId, data)
+  }
+
   onSessionMessage(handler: (data: unknown) => void) {
     const unsubs = this.adapters
       .map((adapter) => adapter.onSessionMessage?.(handler))
@@ -1312,6 +1345,10 @@ export class SignalingAdapterChain {
     return () => {
       for (const unsub of unsubs) unsub()
     }
+  }
+
+  onGuestSessionMessage(handler: (guestId: string | undefined, data: unknown) => void) {
+    return this.peerAdapter.onGuestSessionMessage(handler)
   }
 
   async waitForAnswer(code: string, guestId?: string, offerFp?: string) {

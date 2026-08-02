@@ -32,6 +32,7 @@ export function useRemoteHost({
   useEffect(() => {
     if (!enabled || !isHost) return
     if (peer.phase !== 'linked' && peer.phase !== 'playing') return
+    if (emu.status !== 'running' && emu.status !== 'paused') return
     if (!supportsCanvasCapture()) return
 
     const canvas = emu.canvasRef.current

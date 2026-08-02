@@ -69,14 +69,24 @@ export function useRemoteGuest({ enabled, peer }: UseRemoteGuestOptions): UseRem
     playStream()
     relayout()
     stream.addEventListener('addtrack', playStream)
+    for (const track of stream.getVideoTracks()) {
+      track.addEventListener('ended', playStream)
+      track.addEventListener('mute', playStream)
+      track.addEventListener('unmute', playStream)
+    }
     video.addEventListener('loadedmetadata', relayout)
     video.addEventListener('resize', relayout)
     return () => {
       stream.removeEventListener('addtrack', playStream)
+      for (const track of stream.getVideoTracks()) {
+        track.removeEventListener('ended', playStream)
+        track.removeEventListener('mute', playStream)
+        track.removeEventListener('unmute', playStream)
+      }
       video.removeEventListener('loadedmetadata', relayout)
       video.removeEventListener('resize', relayout)
     }
-  }, [enabled, peer.remoteStream])
+  }, [enabled, peer.remoteStream, peer.hostGame, peer.streamGeneration])
 
   const unmute = useCallback(() => {
     const video = videoRef.current

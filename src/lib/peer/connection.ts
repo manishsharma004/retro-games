@@ -377,7 +377,14 @@ export class PeerConnection {
       const stream =
         event.streams[0] ??
         (event.track ? new MediaStream([event.track]) : undefined)
-      if (stream) this.handlers.onRemoteStream?.(stream)
+      if (stream) {
+        this.handlers.onRemoteStream?.(stream)
+        if (event.track) {
+          event.track.onended = () => {
+            this.handlers.onRemoteStream?.(stream)
+          }
+        }
+      }
     }
     pc.onconnectionstatechange = () => {
       const s = pc.connectionState

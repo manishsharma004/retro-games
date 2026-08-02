@@ -302,6 +302,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
 
   const applyGameUpdate = useCallback((game: HostGameInfo) => {
     setHostGame(game)
+    setStreamGeneration((n) => n + 1)
     setError((prev) => (prev === 'Host ended the game' ? null : prev))
     optionsRef.current.onGameUpdate?.(game)
   }, [])

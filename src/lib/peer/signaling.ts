@@ -40,10 +40,16 @@ export interface SignalingAdapter {
     timeoutMs?: number,
     stablePeerId?: string,
     initialSeat?: PeerSeat | null,
+    sameBrowser?: boolean,
   ): Promise<string>
   publishGuestOffer?(code: string, guestId: string, offer: string): Promise<void>
   onGuestJoin?(
-    handler: (signalingId: string, stablePeerId?: string, initialSeat?: PeerSeat | null) => void,
+    handler: (
+      signalingId: string,
+      stablePeerId?: string,
+      initialSeat?: PeerSeat | null,
+      sameBrowser?: boolean,
+    ) => void,
   ): () => void
   republishOffer?(code: string, offer: string): Promise<void>
   clearAnswer?(code: string, guestId?: string): void
@@ -572,12 +578,17 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
   private latestMeta: SignalingRoomMeta | null = null
   private conns = new Map<string, DataConn>()
   private guestJoinHandlers = new Set<
-    (signalingId: string, stablePeerId?: string, initialSeat?: PeerSeat | null) => void
+    (
+      signalingId: string,
+      stablePeerId?: string,
+      initialSeat?: PeerSeat | null,
+      sameBrowser?: boolean,
+    ) => void
   >()
   private guestAnswerWaits = new Map<string, { resolve: (a: string) => void; reject: (e: Error) => void }>()
   private pendingGuestJoins = new Map<
     string,
-    { stablePeerId?: string; initialSeat?: PeerSeat | null }
+    { stablePeerId?: string; initialSeat?: PeerSeat | null; sameBrowser?: boolean }
   >()
   private notifiedJoins = new Set<string>()
 
@@ -609,14 +620,15 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     signalingId: string,
     stablePeerId?: string,
     initialSeat?: PeerSeat | null,
+    sameBrowser?: boolean,
   ) {
     if (this.notifiedJoins.has(signalingId)) return
     this.notifiedJoins.add(signalingId)
     if (this.guestJoinHandlers.size === 0) {
-      this.pendingGuestJoins.set(signalingId, { stablePeerId, initialSeat })
+      this.pendingGuestJoins.set(signalingId, { stablePeerId, initialSeat, sameBrowser })
       return
     }
-    for (const h of this.guestJoinHandlers) h(signalingId, stablePeerId, initialSeat)
+    for (const h of this.guestJoinHandlers) h(signalingId, stablePeerId, initialSeat, sameBrowser)
   }
 
   private handleConnData(data: unknown, code: string, guestIdHint?: string) {
@@ -709,11 +721,16 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
   }
 
   onGuestJoin(
-    handler: (signalingId: string, stablePeerId?: string, initialSeat?: PeerSeat | null) => void,
+    handler: (
+      signalingId: string,
+      stablePeerId?: string,
+      initialSeat?: PeerSeat | null,
+      sameBrowser?: boolean,
+    ) => void,
   ) {
     this.guestJoinHandlers.add(handler)
     for (const [guestId, pending] of this.pendingGuestJoins) {
-      handler(guestId, pending.stablePeerId, pending.initialSeat)
+      handler(guestId, pending.stablePeerId, pending.initialSeat, pending.sameBrowser)
     }
     this.pendingGuestJoins.clear()
     return () => this.guestJoinHandlers.delete(handler)
@@ -739,6 +756,7 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     brokerIndex: number,
     stablePeerId?: string,
     initialSeat?: PeerSeat | null,
+    sameBrowser?: boolean,
   ): Promise<string> {
     const peer = await this.openPeer(undefined, brokerIndex)
     const conn = peer.connect(`rg-${normalized}`, { reliable: true })
@@ -787,9 +805,11 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
             guestId: string
             peerId?: string
             seat?: PeerSeat | null
+            sameBrowser?: boolean
           } = { type: 'join-request', guestId }
           if (stablePeerId) payload.peerId = stablePeerId
           if (initialSeat !== undefined) payload.seat = initialSeat
+          if (sameBrowser) payload.sameBrowser = true
           conn.send(payload)
         })
         .catch(() => {
@@ -805,6 +825,7 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     timeoutMs = 45_000,
     stablePeerId?: string,
     initialSeat?: PeerSeat | null,
+    sameBrowser?: boolean,
   ) {
     const normalized = code.trim().toUpperCase()
     const localMeta = readRoom(normalized)?.meta
@@ -825,6 +846,7 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
           brokerIndex,
           stablePeerId,
           initialSeat,
+          sameBrowser,
         )
       } catch (err) {
         lastErr = err instanceof Error ? err : new Error('PeerJS guest connection failed')
@@ -922,11 +944,12 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
           guestId?: string
           peerId?: string
           seat?: PeerSeat | null
+          sameBrowser?: boolean
         }
         if (msg.type === 'join-request' && msg.guestId) {
           boundGuestId = msg.guestId
           this.conns.set(msg.guestId, conn)
-          this.notifyGuestJoin(msg.guestId, msg.peerId, msg.seat)
+          this.notifyGuestJoin(msg.guestId, msg.peerId, msg.seat, msg.sameBrowser)
         } else if (msg.type === 'guest-ready') {
           if (meta.multiGuest) {
             const guestId =
@@ -1335,6 +1358,7 @@ export class SignalingAdapterChain {
     guestId: string,
     stablePeerId?: string,
     initialSeat?: PeerSeat | null,
+    sameBrowser?: boolean,
   ) {
     const normalized = code.trim().toUpperCase()
     const localMeta = readRoom(normalized)?.meta
@@ -1357,6 +1381,7 @@ export class SignalingAdapterChain {
         undefined,
         stablePeerId,
         initialSeat,
+        sameBrowser,
       )
       this.active = this.peerAdapter
       this.lastAdapter = 'peerjs'
@@ -1386,7 +1411,12 @@ export class SignalingAdapterChain {
   }
 
   onGuestJoin(
-    handler: (signalingId: string, stablePeerId?: string, initialSeat?: PeerSeat | null) => void,
+    handler: (
+      signalingId: string,
+      stablePeerId?: string,
+      initialSeat?: PeerSeat | null,
+      sameBrowser?: boolean,
+    ) => void,
   ) {
     const unsubs: Array<() => void> = []
     for (const adapter of this.adapters) {

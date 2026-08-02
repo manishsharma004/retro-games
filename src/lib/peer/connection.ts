@@ -116,7 +116,7 @@ export class PeerConnection {
   private localMigrateTimer: number | null = null
   private connectionPath: ConnectionPath = 'unknown'
   private declareSendonlyMedia: boolean
-  private forceRelay: boolean
+  private readonly forceRelay: boolean
 
   constructor(handlers: PeerConnectionHandlers = {}, options: PeerConnectionOptions = {}) {
     this.handlers = handlers
@@ -124,6 +124,21 @@ export class PeerConnection {
     this.iceTier =
       options.iceTier ?? (options.preferTurn || this.forceRelay ? 'relay' : 'local')
     this.declareSendonlyMedia = options.declareSendonlyMedia ?? false
+  }
+
+  private usesRelayPath(): boolean {
+    return this.forceRelay || this.iceTier === 'relay'
+  }
+
+  private connectWatchMs(): number {
+    return this.usesRelayPath() ? ICE_CONNECT_TIMEOUT_MS : ICE_LOCAL_RETRY_MS
+  }
+
+  private restoreIceSessionDefaults() {
+    this.iceTier = this.forceRelay ? 'relay' : 'local'
+    this.relayRetryDone = false
+    this.localMigrateAttempted = false
+    this.connectionPath = 'unknown'
   }
 
   get activeIceTier(): IceTier {
@@ -148,7 +163,7 @@ export class PeerConnection {
   }
 
   private scheduleLocalMigration() {
-    if (this.localMigrateAttempted || this.iceTier !== 'relay') return
+    if (this.forceRelay || this.localMigrateAttempted || this.iceTier !== 'relay') return
     this.clearLocalMigrateTimer()
     this.localMigrateTimer = window.setTimeout(() => {
       this.localMigrateTimer = null
@@ -540,10 +555,7 @@ export class PeerConnection {
     this.close()
     this.offererAnswerApplied = false
     this.isAnswerer = false
-    this.iceTier = 'local'
-    this.relayRetryDone = false
-    this.localMigrateAttempted = false
-    this.connectionPath = 'unknown'
+    this.restoreIceSessionDefaults()
     this.setState('creating-offer')
     const pc = this.ensurePc()
     this.prepareSendonlyMedia(pc)
@@ -551,7 +563,7 @@ export class PeerConnection {
     this.wireChannel(channel)
     const offer = await pc.createOffer()
     await pc.setLocalDescription(offer)
-    await waitForIceGathering(pc)
+    await waitForIceGathering(pc, this.forceRelay ? 15_000 : 8000)
     const local = pc.localDescription
     if (!local?.sdp) throw new Error('Failed to create offer SDP')
     this.setState('awaiting-answer')
@@ -571,7 +583,7 @@ export class PeerConnection {
       this.setState('awaiting-answer')
       throw err
     }
-    this.watchForConnect(this.iceTier === 'relay' ? ICE_CONNECT_TIMEOUT_MS : ICE_LOCAL_RETRY_MS)
+    this.watchForConnect(this.connectWatchMs())
   }
 
   /** Attach canvas/audio stream for remote mode (host side).
@@ -654,12 +666,12 @@ export class PeerConnection {
     await pc.setRemoteDescription({ type: 'offer', sdp })
     const answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
-    await waitForIceGathering(pc)
+    await waitForIceGathering(pc, this.forceRelay ? 15_000 : 8000)
     const local = pc.localDescription
     if (!local?.sdp) throw new Error('Failed to create answer SDP')
     this.setState('awaiting-answer')
     // Guest ICE runs before host pastes — allow a long wait, with refresh on failure.
-    this.watchForConnect(isRefresh ? 120000 : 180000)
+    this.watchForConnect(isRefresh ? 120000 : this.forceRelay ? ICE_CONNECT_TIMEOUT_MS : 180000)
     return compressSignal(local.sdp)
   }
 
@@ -708,10 +720,7 @@ export class PeerConnection {
     this.clearLocalMigrateTimer()
     this.teardownPc(false)
     this.isAnswerer = false
-    this.iceTier = 'local'
-    this.relayRetryDone = false
-    this.localMigrateAttempted = false
-    this.connectionPath = 'unknown'
+    this.restoreIceSessionDefaults()
     this.setState('closed')
   }
 }

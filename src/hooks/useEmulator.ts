@@ -41,6 +41,8 @@ export interface UseEmulatorResult {
   status: EmulatorStatus
   error: string | null
   game: ActiveGame | null
+  /** Bumps after each successful ROM launch (running/paused). */
+  launchGeneration: number
   canvasRef: React.RefObject<HTMLCanvasElement | null>
   launchFile: (file: File) => void
   launchDemo: () => void
@@ -93,6 +95,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
   const [status, setStatus] = useState<EmulatorStatus>('idle')
   const [error, setError] = useState<string | null>(null)
   const [game, setGame] = useState<ActiveGame | null>(null)
+  const [launchGeneration, setLaunchGeneration] = useState(0)
   const [pending, setPending] = useState<PendingLaunch | null>(null)
   const statusRef = useRef(status)
   const launchWaiterRef = useRef<{
@@ -201,6 +204,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
         } else {
           setStatus('running')
         }
+        setLaunchGeneration((n) => n + 1)
         launchWaiterRef.current?.resolve()
         launchWaiterRef.current = null
       } catch (err) {
@@ -601,6 +605,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     status,
     error,
     game,
+    launchGeneration,
     canvasRef,
     launchFile,
     launchDemo,

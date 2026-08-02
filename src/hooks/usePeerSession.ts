@@ -160,6 +160,7 @@ export interface UsePeerSessionResult {
     libraryFile?: string
   }) => Promise<void>
   sendGameUpdate: (game: HostGameInfo) => void
+  syncHostGameToGuests: (game: HostGameInfo) => void
   refreshMediaStream: () => void
   sendReady: () => void
   sendGo: () => void
@@ -304,6 +305,13 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     setHostGame(game)
     setStreamGeneration((n) => n + 1)
     setError((prev) => (prev === 'Host ended the game' ? null : prev))
+    if (roleRef.current === 'guest') {
+      const stream = connRef.current?.collectRemoteMediaStream()
+      if (stream) {
+        setRemoteStream(stream)
+        optionsRef.current.onRemoteStream?.(stream)
+      }
+    }
     optionsRef.current.onGameUpdate?.(game)
   }, [])
 
@@ -525,6 +533,11 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       try {
         const answer = await conn.acceptMediaRenegotiationOffer(sdp)
         publishRenegotiation('media-reanswer', answer)
+        const stream = conn.collectRemoteMediaStream()
+        if (stream) {
+          setRemoteStream(stream)
+          optionsRef.current.onRemoteStream?.(stream)
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Video stream negotiation failed')
       }
@@ -1142,6 +1155,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
 
   const sendGameUpdate = useCallback((game: HostGameInfo) => {
     if (roleRef.current !== 'host') return
+    setHostGame(game)
     const payload = {
       type: 'game-update' as const,
       name: game.name,
@@ -1159,6 +1173,16 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       // ignore
     }
   }, [multiHost])
+
+  const syncHostGameToGuests = useCallback(
+    (game: HostGameInfo) => {
+      sendGameUpdate(game)
+      if (modeRef.current === 'remote' || multiGuestRef.current) {
+        refreshMediaStreamRef.current()
+      }
+    },
+    [sendGameUpdate],
+  )
 
   const refreshMediaStream = useCallback(() => {
     setStreamGeneration((n) => n + 1)
@@ -1496,6 +1520,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     joinWithRoomCode,
     sendBootstrap,
     sendGameUpdate,
+    syncHostGameToGuests,
     refreshMediaStream,
     sendReady,
     sendGo,

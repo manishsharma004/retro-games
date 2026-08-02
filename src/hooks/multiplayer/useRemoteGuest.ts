@@ -49,13 +49,18 @@ export function useRemoteGuest({ enabled, peer }: UseRemoteGuestOptions): UseRem
 
     const playStream = () => {
       const active = peer.remoteStream
-      if (!active || !videoRef.current) return
-      if (videoRef.current.srcObject !== active) {
-        videoRef.current.srcObject = active
+      const video = videoRef.current
+      if (!active || !video) return
+      if (video.srcObject !== active) {
+        video.srcObject = active
+      } else {
+        // replaceTrack updates may not fire addtrack — force a reload
+        video.srcObject = null
+        video.srcObject = active
       }
       const hasActiveTrack = active.getVideoTracks().some((t) => t.readyState === 'live')
       setHasVideo(hasActiveTrack)
-      void videoRef.current.play().catch(() => setNeedsTap(true))
+      void video.play().catch(() => setNeedsTap(true))
     }
 
     const relayout = () => {

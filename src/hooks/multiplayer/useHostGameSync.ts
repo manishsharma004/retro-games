@@ -36,19 +36,31 @@ export function useHostGameSync({
   sessionMode,
 }: UseHostGameSyncOptions) {
   const lastSyncedKeyRef = useRef<string | null>(null)
+  const lastSyncedLaunchRef = useRef(0)
+  const lastGuestCountRef = useRef(0)
   const sharingRef = useRef(false)
   const pendingKeyRef = useRef<string | null>(null)
+  const emuRef = useRef(emu)
+  const peerRef = useRef(peer)
+  emuRef.current = emu
+  peerRef.current = peer
 
   useEffect(() => {
     if (!enabled || !isHost) return
     if (!hostSessionReady(peer)) {
       lastSyncedKeyRef.current = null
+      lastSyncedLaunchRef.current = 0
       return
     }
 
     const key = gameKey(emu)
     if (!key) return
-    if (lastSyncedKeyRef.current === key) return
+
+    const launchChanged = emu.launchGeneration !== lastSyncedLaunchRef.current
+    const guestsJoined = peer.connectedGuestCount > lastGuestCountRef.current
+    const keyChanged = lastSyncedKeyRef.current !== key
+
+    if (!keyChanged && !launchChanged && !guestsJoined) return
 
     if (sharingRef.current) {
       pendingKeyRef.current = key
@@ -65,23 +77,25 @@ export function useHostGameSync({
           nextKey = null
           pendingKeyRef.current = null
 
+          const liveEmu = emuRef.current
+          const livePeer = peerRef.current
+          const game = liveEmu.game
+          if (!game) break
+
           if (sessionMode === 'coop') {
             await coop.shareGame()
           } else {
-            const game = emu.game
-            if (!game) break
-            peer.sendGameUpdate({
+            livePeer.syncHostGameToGuests({
               name: game.name,
               system: game.system,
               core: game.core,
               libraryFile: game.libraryFile,
             })
-            if (sessionMode === 'remote' || peer.multiGuest) {
-              peer.refreshMediaStream()
-            }
           }
 
           lastSyncedKeyRef.current = currentKey
+          lastSyncedLaunchRef.current = liveEmu.launchGeneration
+          lastGuestCountRef.current = livePeer.connectedGuestCount
 
           const pending = pendingKeyRef.current
           if (pending && pending !== lastSyncedKeyRef.current) {
@@ -91,6 +105,7 @@ export function useHostGameSync({
         }
       } catch {
         lastSyncedKeyRef.current = null
+        lastSyncedLaunchRef.current = 0
       } finally {
         sharingRef.current = false
       }
@@ -100,12 +115,13 @@ export function useHostGameSync({
     isHost,
     emu.game,
     emu.status,
+    emu.launchGeneration,
     peer.connectionState,
     peer.phase,
     peer.multiGuest,
     peer.role,
-    peer.sendGameUpdate,
-    peer.refreshMediaStream,
+    peer.connectedGuestCount,
+    peer.syncHostGameToGuests,
     sessionMode,
     coop.shareGame,
   ])

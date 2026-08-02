@@ -25,6 +25,7 @@ export function useRemoteHost({
 }: UseRemoteHostOptions & { streamGeneration?: number }) {
   const streamRef = useRef<MediaStream | null>(null)
   const disconnectAudioRef = useRef<(() => void) | null>(null)
+  const captureGenRef = useRef(0)
   const [videoOnly, setVideoOnly] = useState(false)
   const [audioShared, setAudioShared] = useState(false)
   const captureFps = peer.latencyProfile.streamFps
@@ -35,32 +36,41 @@ export function useRemoteHost({
     if (emu.status !== 'running' && emu.status !== 'paused') return
     if (!supportsCanvasCapture()) return
 
-    const canvas = emu.canvasRef.current
-    const nostalgist = emu.getNostalgist?.()
-    const target = nostalgist?.getCanvas?.() ?? canvas
-    if (!target) return
+    const captureGen = ++captureGenRef.current
 
-    const { stream, audioIncluded, disconnectAudio } = buildRemoteCaptureStream(
-      target,
-      nostalgist ?? null,
-      captureFps,
-      shareAudio,
-    )
-    streamRef.current = stream
-    disconnectAudioRef.current = disconnectAudio ?? null
-    setAudioShared(audioIncluded)
+    const timer = window.setTimeout(() => {
+      if (captureGen !== captureGenRef.current) return
 
-    void peer.attachMediaStream(stream).catch(() => {
-      setVideoOnly(true)
-      onVideoOnly?.()
-    })
+      const canvas = emu.canvasRef.current
+      const nostalgist = emu.getNostalgist?.()
+      const target = nostalgist?.getCanvas?.() ?? canvas
+      if (!target) return
 
-    return () => {
+      streamRef.current?.getTracks().forEach((t) => t.stop())
       disconnectAudioRef.current?.()
       disconnectAudioRef.current = null
-      stream.getTracks().forEach((t) => t.stop())
-      streamRef.current = null
-      setAudioShared(false)
+
+      const { stream, audioIncluded, disconnectAudio } = buildRemoteCaptureStream(
+        target,
+        nostalgist ?? null,
+        captureFps,
+        shareAudio,
+      )
+      streamRef.current = stream
+      disconnectAudioRef.current = disconnectAudio ?? null
+      setAudioShared(audioIncluded)
+
+      void peer.attachMediaStream(stream).catch(() => {
+        setVideoOnly(true)
+        onVideoOnly?.()
+      })
+    }, 350)
+
+    return () => {
+      window.clearTimeout(timer)
+      if (captureGen === captureGenRef.current) {
+        captureGenRef.current += 1
+      }
     }
   }, [
     enabled,
@@ -68,13 +78,25 @@ export function useRemoteHost({
     shareAudio,
     peer.phase,
     peer.attachMediaStream,
-    emu,
+    emu.canvasRef,
+    emu.getNostalgist,
     emu.game,
     emu.status,
+    emu.launchGeneration,
     onVideoOnly,
     captureFps,
     streamGeneration,
   ])
+
+  useEffect(() => {
+    if (enabled && isHost) return
+    captureGenRef.current += 1
+    disconnectAudioRef.current?.()
+    disconnectAudioRef.current = null
+    streamRef.current?.getTracks().forEach((t) => t.stop())
+    streamRef.current = null
+    setAudioShared(false)
+  }, [enabled, isHost])
 
   return {
     videoOnly,

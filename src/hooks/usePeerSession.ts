@@ -21,7 +21,7 @@ import {
 import {
   SignalingAdapterChain,
   formatSignalingPath,
-  getSignalingRoomMeta,
+  resolveJoinRoomMeta,
   type SignalingAdapterName,
 } from '../lib/peer/signaling'
 import { normalizeRoomCode } from '../lib/peer/joinUrl'
@@ -806,6 +806,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           setSignalingPath(chain.lastAdapter)
           multiHost.start(chain, room.code, playerCap)
           setRoster(multiHost.roster)
+          setConnectionState('connected')
           updatePhase('linked')
           optionsRef.current.onLinked?.()
           optionsRef.current.onGo?.()
@@ -896,8 +897,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       setSessionMode(mode)
       roleRef.current = 'guest'
 
-      const roomMeta = getSignalingRoomMeta(normalized)
-      const useMulti = mode === 'local' && Boolean(roomMeta?.multiGuest)
+      const roomMeta = resolveJoinRoomMeta(normalized, mode)
+      let useMulti = mode === 'local' && Boolean(roomMeta?.multiGuest)
       multiGuestRef.current = useMulti
       setMultiGuest(useMulti)
       if (roomMeta?.maxPlayers) {
@@ -921,9 +922,21 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         const chain = signalingRef.current
 
         try {
-          const offer = useMulti
-            ? await chain.joinRoomAsGuest(normalized, peerIdRef.current)
-            : await chain.guestFetchOffer(normalized)
+          let offer: string
+          try {
+            offer = useMulti
+              ? await chain.joinRoomAsGuest(normalized, peerIdRef.current)
+              : await chain.guestFetchOffer(normalized, 45_000, peerIdRef.current)
+          } catch (fetchErr) {
+            if (mode === 'local' && !useMulti) {
+              useMulti = true
+              multiGuestRef.current = true
+              setMultiGuest(true)
+              offer = await chain.joinRoomAsGuest(normalized, peerIdRef.current)
+            } else {
+              throw fetchErr
+            }
+          }
           setSignalingPath(chain.lastAdapter)
           const conn = createConnection({ preserveSession: reconnectInFlightRef.current })
           const answer = await conn.createAnswerFromOffer(offer)
@@ -1164,6 +1177,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           multiHost.stop()
           multiHost.start(chain, code, maxPlayersRef.current)
           setConnectionLost(false)
+          setConnectionState('connected')
           updatePhase('linked')
           return
         }

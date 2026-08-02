@@ -18,6 +18,7 @@ export {
   SignalingAdapterChain,
   formatSignalingPath,
   getSignalingRoomMeta,
+  resolveJoinRoomMeta,
   DEFAULT_PEERJS_CONFIG,
   type SignalingAdapter,
   type SignalingAdapterName,

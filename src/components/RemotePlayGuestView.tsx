@@ -411,7 +411,7 @@ export function RemotePlayGuestView({
             {remoteGuest.needsTap && (
               <div className="play-overlay">
                 <button type="button" className="btn btn--primary" onClick={remoteGuest.unmute}>
-                  Tap to start video
+                  Tap to start video & audio
                 </button>
               </div>
             )}

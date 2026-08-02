@@ -225,6 +225,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
     peer,
     emu,
     isHost,
+    shareAudio: settings.remoteShareAudio,
     onVideoOnly: () => {},
     streamGeneration: peer.streamGeneration,
   })
@@ -750,6 +751,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
           setSettingsOpen(false)
           setLayoutEditorOpen(true)
         }}
+        remoteHost={sessionMode === 'remote' && isHost && peerActive}
       />
 
       <ControllerPanel

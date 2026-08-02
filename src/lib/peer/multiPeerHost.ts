@@ -70,8 +70,8 @@ export class MultiPeerHostManager {
     this.roomCode = roomCode
     this.unsubGuestJoin?.()
     this.unsubGuestSession?.()
-    this.unsubGuestJoin = chain.onGuestJoin((signalingId, stablePeerId, initialSeat) => {
-      void this.handleGuestJoin(signalingId, stablePeerId, initialSeat)
+    this.unsubGuestJoin = chain.onGuestJoin((signalingId, stablePeerId, initialSeat, sameBrowser) => {
+      void this.handleGuestJoin(signalingId, stablePeerId, initialSeat, sameBrowser)
     })
     this.unsubGuestSession = chain.onGuestSessionMessage((guestId, data) => {
       if (!guestId) return
@@ -222,6 +222,7 @@ export class MultiPeerHostManager {
     signalingId: string,
     stablePeerId?: string,
     initialSeat?: PeerSeat | null,
+    sameBrowser?: boolean,
   ) {
     if (this.connectingGuests.has(signalingId) || this.guests.has(signalingId)) return
 
@@ -266,8 +267,8 @@ export class MultiPeerHostManager {
 
     const conn = new PeerConnection(this.buildConnHandlers(signalingId, peerId), {
       declareSendonlyMedia: this.declareSendonlyMedia,
-      forceRelay: this.declareSendonlyMedia,
-      iceTier: this.declareSendonlyMedia ? 'relay' : 'local',
+      forceRelay: this.declareSendonlyMedia && !sameBrowser,
+      iceTier: this.declareSendonlyMedia && !sameBrowser ? 'relay' : 'local',
     })
     try {
       const offer = await conn.createOffer()
@@ -345,7 +346,7 @@ export class MultiPeerHostManager {
             if (link && (link.connectionState === 'failed' || link.connectionState === 'closed')) {
               this.removeGuest(signalingId)
             }
-          }, 5000)
+          }, 8000)
           this.guestFailTimers.set(signalingId, timer)
           return
         }

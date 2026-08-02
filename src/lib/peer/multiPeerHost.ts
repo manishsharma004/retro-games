@@ -1,10 +1,11 @@
 import { PeerConnection, type PeerConnectionHandlers, type PeerConnectionState } from './connection'
 import type { ControlMessage, PeerSeat, RosterPeer } from './protocol'
-import type { MaxPlayers, RosterEntry } from './roster'
+import type { MaxPlayers, RosterConnectionStatus, RosterEntry } from './roster'
 import { findFreeSeat, isSeatTaken } from './roster'
 import type { SignalingAdapterChain } from './signaling'
 
 export interface GuestLink {
+  signalingId: string
   peerId: string
   seat: PeerSeat | null
   connection: PeerConnection
@@ -21,6 +22,7 @@ export interface MultiPeerHostHandlers {
 }
 
 export class MultiPeerHostManager {
+  /** Keyed by signaling session id (unique per join attempt). */
   private guests = new Map<string, GuestLink>()
   private roster: RosterEntry[] = []
   private hostPeerId: string
@@ -28,12 +30,13 @@ export class MultiPeerHostManager {
   private roomCode: string | null = null
   private chain: SignalingAdapterChain | null = null
   private unsubGuestJoin: (() => void) | null = null
+  private connectingGuests = new Set<string>()
   private handlers: MultiPeerHostHandlers
 
   constructor(hostPeerId: string, handlers: MultiPeerHostHandlers) {
     this.hostPeerId = hostPeerId
     this.handlers = handlers
-    this.roster = [{ peerId: hostPeerId, role: 'host', seat: 1 }]
+    this.roster = [{ peerId: hostPeerId, role: 'host', seat: 1, status: 'connected' }]
   }
 
   setMaxPlayers(n: MaxPlayers) {
@@ -58,8 +61,8 @@ export class MultiPeerHostManager {
     this.chain = chain
     this.roomCode = roomCode
     this.unsubGuestJoin?.()
-    this.unsubGuestJoin = chain.onGuestJoin((guestId) => {
-      void this.handleGuestJoin(guestId)
+    this.unsubGuestJoin = chain.onGuestJoin((signalingId, stablePeerId) => {
+      void this.handleGuestJoin(signalingId, stablePeerId)
     })
   }
 
@@ -68,6 +71,7 @@ export class MultiPeerHostManager {
     this.unsubGuestJoin = null
     for (const g of this.guests.values()) g.connection.close()
     this.guests.clear()
+    this.connectingGuests.clear()
     this.chain = null
     this.roomCode = null
   }
@@ -80,84 +84,170 @@ export class MultiPeerHostManager {
     if (seat !== null && !this.isSeatAvailable(seat, peerId)) return false
     const entry = this.roster.find((e) => e.peerId === peerId)
     if (entry) entry.seat = seat
-    else this.roster.push({ peerId, role: 'guest', seat })
-    const guest = this.guests.get(peerId)
-    if (guest) guest.seat = seat
+    else this.upsertGuestRoster(peerId, { seat, status: 'connected' })
+    for (const g of this.guests.values()) {
+      if (g.peerId === peerId) g.seat = seat
+    }
     this.broadcastRoster()
     return true
   }
 
-  private async handleGuestJoin(guestId: string) {
-    if (this.guests.has(guestId)) return
+  private activeGuestPeerCount(): number {
+    const ids = new Set<string>()
+    for (const g of this.guests.values()) {
+      if (g.connectionState !== 'closed' && g.connectionState !== 'failed') {
+        ids.add(g.peerId)
+      }
+    }
+    for (const e of this.roster) {
+      if (e.role === 'guest' && e.status === 'connecting') ids.add(e.peerId)
+    }
+    return ids.size
+  }
+
+  private upsertGuestRoster(
+    peerId: string,
+    patch: {
+      seat?: PeerSeat | null
+      status?: RosterConnectionStatus
+      signalingId?: string
+      lastSeenAt?: number
+    },
+  ) {
+    const existing = this.roster.find((e) => e.peerId === peerId && e.role === 'guest')
+    if (existing) {
+      if (patch.seat !== undefined) existing.seat = patch.seat
+      if (patch.status !== undefined) existing.status = patch.status
+      if (patch.signalingId !== undefined) existing.signalingId = patch.signalingId
+      if (patch.lastSeenAt !== undefined) existing.lastSeenAt = patch.lastSeenAt
+      return
+    }
+    this.roster.push({
+      peerId,
+      role: 'guest',
+      seat: patch.seat ?? null,
+      status: patch.status ?? 'connecting',
+      signalingId: patch.signalingId,
+      lastSeenAt: patch.lastSeenAt,
+    })
+  }
+
+  private setRosterStatus(peerId: string, status: RosterConnectionStatus) {
+    const entry = this.roster.find((e) => e.peerId === peerId && e.role === 'guest')
+    if (!entry) return
+    entry.status = status
+    if (status === 'disconnected') entry.lastSeenAt = Date.now()
+    if (status === 'connected') entry.signalingId = undefined
+  }
+
+  private async handleGuestJoin(signalingId: string, stablePeerId?: string) {
+    if (this.connectingGuests.has(signalingId) || this.guests.has(signalingId)) return
+
     const chain = this.chain
     const code = this.roomCode
     if (!chain || !code) return
-    if (this.guests.size >= this.maxPlayers - 1) {
+
+    const peerId = stablePeerId ?? signalingId
+
+    if (this.activeGuestPeerCount() >= this.maxPlayers - 1) {
       this.handlers.onError?.('Room is full')
       return
     }
 
-    const conn = new PeerConnection(this.buildConnHandlers(guestId))
+    const prior = this.roster.find(
+      (e) => e.peerId === peerId && e.role === 'guest' && e.status === 'disconnected',
+    )
+    const priorSeat = prior?.seat ?? null
+
+    this.connectingGuests.add(signalingId)
+    chain.clearGuestSlot?.(code, signalingId)
+    chain.clearAnswer?.(code, signalingId)
+
+    const defaultSeat = priorSeat ?? findFreeSeat(this.roster, this.maxPlayers)
+    this.upsertGuestRoster(peerId, {
+      seat: defaultSeat,
+      status: 'connecting',
+      signalingId,
+    })
+    this.emitRosterChange()
+
+    const conn = new PeerConnection(this.buildConnHandlers(signalingId, peerId))
     try {
       const offer = await conn.createOffer()
-      await chain.publishGuestOffer(code, guestId, offer)
-      const answer = await chain.waitForAnswer(code, guestId)
+      await chain.publishGuestOffer(code, signalingId, offer)
+      const answer = await chain.waitForAnswer(code, signalingId)
       await conn.acceptAnswer(answer)
 
-      const defaultSeat = findFreeSeat(this.roster, this.maxPlayers)
       const link: GuestLink = {
-        peerId: guestId,
+        signalingId,
+        peerId,
         seat: defaultSeat,
         connection: conn,
         connectionState: 'connecting',
       }
-      this.guests.set(guestId, link)
-      if (defaultSeat) {
-        this.roster.push({ peerId: guestId, role: 'guest', seat: defaultSeat })
-      } else {
-        this.roster.push({ peerId: guestId, role: 'guest', seat: null })
-      }
+      this.guests.set(signalingId, link)
+      this.setRosterStatus(peerId, 'connected')
       this.broadcastRoster()
-      this.handlers.onGuestConnected?.(guestId)
-      this.handlers.onRosterChange(this.roster, this.getGuests())
+      this.handlers.onGuestConnected?.(peerId)
+      this.emitRosterChange()
     } catch (err) {
       conn.close()
+      this.guests.delete(signalingId)
+      this.setRosterStatus(peerId, 'disconnected')
+      chain.clearGuestSlot?.(code, signalingId)
+      chain.clearAnswer?.(code, signalingId)
+      this.emitRosterChange()
       this.handlers.onError?.(err instanceof Error ? err.message : 'Guest connect failed')
+    } finally {
+      this.connectingGuests.delete(signalingId)
     }
   }
 
-  private buildConnHandlers(guestId: string): PeerConnectionHandlers {
+  private buildConnHandlers(signalingId: string, peerId: string): PeerConnectionHandlers {
     return {
       onState: (state) => {
-        const g = this.guests.get(guestId)
+        const g = this.guests.get(signalingId)
         if (g) {
           g.connectionState = state
-          this.handlers.onRosterChange(this.roster, this.getGuests())
+          if (state === 'connected') {
+            this.setRosterStatus(g.peerId, 'connected')
+            this.sendRosterTo(signalingId)
+          }
+          this.emitRosterChange()
         }
         if (state === 'disconnected' || state === 'closed' || state === 'failed') {
-          this.removeGuest(guestId)
+          this.removeGuest(signalingId)
         }
       },
-      onControl: (msg) => this.handleControl(guestId, msg),
+      onControl: (msg) => this.handleControl(signalingId, peerId, msg),
       onError: (err) => this.handlers.onError?.(err.message),
     }
   }
 
-  private handleControl(guestId: string, msg: ControlMessage) {
-    this.handlers.onGuestControl?.(guestId, msg)
+  private handleControl(signalingId: string, peerId: string, msg: ControlMessage) {
+    const g = this.guests.get(signalingId)
+    const stableId = g?.peerId ?? peerId
+
+    this.handlers.onGuestControl?.(stableId, msg)
+
     if (msg.type === 'hello') {
-      const seat = msg.seat
-      this.claimSeat(guestId, seat)
+      if (msg.peerId && g && msg.peerId !== g.peerId) {
+        const oldId = g.peerId
+        g.peerId = msg.peerId
+        const oldEntry = this.roster.find((e) => e.peerId === oldId && e.role === 'guest')
+        if (oldEntry) oldEntry.peerId = msg.peerId
+      }
+      this.claimSeat(g?.peerId ?? stableId, msg.seat)
       return
     }
     if (msg.type === 'seat-claim') {
-      if (msg.peerId === guestId || !msg.peerId) {
-        this.claimSeat(guestId, msg.seat)
+      if (msg.peerId === stableId || !msg.peerId) {
+        this.claimSeat(stableId, msg.seat)
       }
       return
     }
     if (msg.type === 'seat-pick') {
-      this.claimSeat(guestId, msg.seat)
+      this.claimSeat(stableId, msg.seat)
       return
     }
     if (msg.type === 'input') {
@@ -165,7 +255,6 @@ export class MultiPeerHostManager {
       return
     }
     if (msg.type === 'ping') {
-      const g = this.guests.get(guestId)
       try {
         g?.connection.sendControl({ type: 'pong', t: msg.t })
       } catch {
@@ -174,24 +263,44 @@ export class MultiPeerHostManager {
     }
   }
 
-  private removeGuest(peerId: string) {
-    const g = this.guests.get(peerId)
+  private removeGuest(signalingId: string) {
+    const g = this.guests.get(signalingId)
+    const peerId = g?.peerId ?? signalingId
+    const code = this.roomCode
+    const chain = this.chain
+
     if (g) {
       g.connection.close()
-      this.guests.delete(peerId)
+      this.guests.delete(signalingId)
     }
-    this.roster = this.roster.filter((e) => e.peerId !== peerId || e.role === 'host')
+
+    this.setRosterStatus(peerId, 'disconnected')
+    if (code) {
+      chain?.clearGuestSlot?.(code, signalingId)
+      chain?.clearAnswer?.(code, signalingId)
+    }
+
     this.handlers.onGuestDisconnected?.(peerId)
     this.broadcastRoster()
+    this.emitRosterChange()
+  }
+
+  private rosterPeers(): RosterPeer[] {
+    return this.roster.map((e) => ({
+      peerId: e.peerId,
+      role: e.role,
+      seat: e.seat,
+      name: e.name,
+      status: e.status ?? (e.role === 'host' ? 'connected' : 'disconnected'),
+    }))
+  }
+
+  private emitRosterChange() {
     this.handlers.onRosterChange(this.roster, this.getGuests())
   }
 
   private broadcastRoster() {
-    const peers: RosterPeer[] = this.roster.map((e) => ({
-      peerId: e.peerId,
-      role: e.role,
-      seat: e.seat,
-    }))
+    const peers = this.rosterPeers()
     for (const g of this.guests.values()) {
       if (!g.connection.connected) continue
       try {
@@ -206,18 +315,13 @@ export class MultiPeerHostManager {
     }
   }
 
-  sendRosterTo(guestId: string) {
-    const g = this.guests.get(guestId)
+  sendRosterTo(signalingId: string) {
+    const g = this.guests.get(signalingId)
     if (!g?.connection.connected) return
-    const peers: RosterPeer[] = this.roster.map((e) => ({
-      peerId: e.peerId,
-      role: e.role,
-      seat: e.seat,
-    }))
     try {
       g.connection.sendControl({
         type: 'roster-update',
-        peers,
+        peers: this.rosterPeers(),
         maxPlayers: this.maxPlayers,
       })
     } catch {

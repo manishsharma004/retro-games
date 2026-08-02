@@ -637,9 +637,16 @@ export function PeerLobby({
                 </p>
                 <ul className="peer-lobby__roster">
                   {roster.map((entry) => (
-                    <li key={entry.peerId}>
+                    <li
+                      key={entry.peerId}
+                      className={
+                        entry.status === 'disconnected' ? 'peer-lobby__roster-item--away' : undefined
+                      }
+                    >
                       {entry.role === 'host' ? 'Host' : 'Guest'} ·{' '}
                       {entry.seat === null ? 'Spectator' : `P${entry.seat}`}
+                      {entry.status === 'connecting' && ' · joining…'}
+                      {entry.status === 'disconnected' && ' · left'}
                     </li>
                   ))}
                 </ul>

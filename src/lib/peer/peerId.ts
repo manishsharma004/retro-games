@@ -17,3 +17,9 @@ function generatePeerId(): string {
   crypto.getRandomValues(bytes)
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
 }
+
+/** Unique per join attempt — avoids deduping multiple tabs/devices behind one peerId. */
+export function createSignalingGuestId(peerId: string): string {
+  const suffix = Math.random().toString(36).slice(2, 8)
+  return `${peerId}-${suffix}`
+}

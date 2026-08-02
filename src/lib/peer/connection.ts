@@ -3,6 +3,7 @@ import {
   getIceConfig,
   ICE_CONNECT_TIMEOUT_MS,
   ICE_REMOTE_CONNECT_TIMEOUT_MS,
+  ICE_REMOTE_LOCAL_RETRY_MS,
   ICE_LOCAL_RETRY_MS,
   type ConnectionPath,
   type IceTier,
@@ -19,7 +20,9 @@ export interface PeerConnectionOptions {
   /** @deprecated use iceTier — relay tier forces TURN from the start */
   preferTurn?: boolean
   iceTier?: IceTier
-  /** Force TURN relay candidates only (cross-network remote play). */
+  /** Remote play session — try LAN/STUN first, then TURN fallback (works same-phone multi-browser). */
+  remotePlay?: boolean
+  /** Force TURN relay candidates only (last-resort ICE restart). */
   forceRelay?: boolean
   /** Pre-declare sendonly A/V m-lines so cross-browser answers match (remote stream). */
   declareSendonlyMedia?: boolean
@@ -117,31 +120,29 @@ export class PeerConnection {
   private localMigrateTimer: number | null = null
   private connectionPath: ConnectionPath = 'unknown'
   private declareSendonlyMedia: boolean
-  private readonly forceRelay: boolean
+  private readonly remotePlay: boolean
+  private relayOnlyMode = false
 
   constructor(handlers: PeerConnectionHandlers = {}, options: PeerConnectionOptions = {}) {
     this.handlers = handlers
-    this.forceRelay = options.forceRelay ?? false
-    this.iceTier =
-      options.iceTier ?? (options.preferTurn || this.forceRelay ? 'relay' : 'local')
+    this.remotePlay = options.remotePlay ?? false
     this.declareSendonlyMedia = options.declareSendonlyMedia ?? false
-  }
-
-  private usesRelayPath(): boolean {
-    return this.forceRelay || this.iceTier === 'relay'
+    this.iceTier = options.iceTier ?? (options.preferTurn ? 'relay' : 'local')
   }
 
   private connectWatchMs(): number {
-    if (this.forceRelay) return ICE_REMOTE_CONNECT_TIMEOUT_MS
-    return this.usesRelayPath() ? ICE_CONNECT_TIMEOUT_MS : ICE_LOCAL_RETRY_MS
+    if (this.relayOnlyMode || this.iceTier === 'relay') return ICE_REMOTE_CONNECT_TIMEOUT_MS
+    if (this.remotePlay) return ICE_REMOTE_LOCAL_RETRY_MS
+    return ICE_LOCAL_RETRY_MS
   }
 
   private maxRelayRetries(): number {
-    return this.forceRelay ? 3 : 1
+    return this.remotePlay ? 3 : 1
   }
 
   private restoreIceSessionDefaults() {
-    this.iceTier = this.forceRelay ? 'relay' : 'local'
+    this.iceTier = 'local'
+    this.relayOnlyMode = false
     this.relayRetries = 0
     this.localMigrateAttempted = false
     this.connectionPath = 'unknown'
@@ -169,7 +170,7 @@ export class PeerConnection {
   }
 
   private scheduleLocalMigration() {
-    if (this.forceRelay || this.localMigrateAttempted || this.iceTier !== 'relay') return
+    if (this.relayOnlyMode || this.localMigrateAttempted || this.iceTier !== 'relay') return
     this.clearLocalMigrateTimer()
     this.localMigrateTimer = window.setTimeout(() => {
       this.localMigrateTimer = null
@@ -251,6 +252,7 @@ export class PeerConnection {
 
   private async tryRelayFallback(): Promise<void> {
     if (this.isAnswerer || this.relayRetries >= this.maxRelayRetries()) return
+    this.relayOnlyMode = true
     this.relayRetries++
     if (this.iceTier !== 'relay') {
       this.iceTier = 'relay'
@@ -288,7 +290,7 @@ export class PeerConnection {
   }
 
   private applyIceConfiguration(pc: RTCPeerConnection, tier: IceTier) {
-    const { iceServers, iceTransportPolicy } = getIceConfig(tier, this.forceRelay)
+    const { iceServers, iceTransportPolicy } = getIceConfig(tier, this.relayOnlyMode)
     pc.setConfiguration({
       iceServers,
       iceCandidatePoolSize: 10,
@@ -303,7 +305,7 @@ export class PeerConnection {
     pc.restartIce()
     const offer = await pc.createOffer({ iceRestart: true })
     await pc.setLocalDescription(offer)
-    await waitForIceGathering(pc, this.forceRelay ? 15_000 : 8000)
+    await waitForIceGathering(pc, this.relayOnlyMode ? 15_000 : 8000)
     const local = pc.localDescription
     if (!local?.sdp) throw new Error('Failed to create ICE restart offer')
     return compressSignal(local.sdp)
@@ -313,6 +315,7 @@ export class PeerConnection {
     const pc = this.pc
     if (!pc) throw new Error('No peer connection')
     this.iceTier = tier
+    if (tier === 'relay') this.relayOnlyMode = true
     this.handlers.onIceTierChange?.(tier)
     this.applyIceConfiguration(pc, tier)
     const sdp = decompressSignal(encoded)
@@ -357,7 +360,7 @@ export class PeerConnection {
 
   private ensurePc(): RTCPeerConnection {
     if (this.pc) return this.pc
-    const { iceServers, iceTransportPolicy } = getIceConfig(this.iceTier, this.forceRelay)
+    const { iceServers, iceTransportPolicy } = getIceConfig(this.iceTier, this.relayOnlyMode)
     const pc = new RTCPeerConnection({
       iceServers,
       iceCandidatePoolSize: 10,
@@ -578,7 +581,7 @@ export class PeerConnection {
     this.wireChannel(channel)
     const offer = await pc.createOffer()
     await pc.setLocalDescription(offer)
-    await waitForIceGathering(pc, this.forceRelay ? 15_000 : 8000)
+    await waitForIceGathering(pc, this.relayOnlyMode ? 15_000 : 8000)
     const local = pc.localDescription
     if (!local?.sdp) throw new Error('Failed to create offer SDP')
     this.setState('awaiting-answer')
@@ -681,12 +684,12 @@ export class PeerConnection {
     await pc.setRemoteDescription({ type: 'offer', sdp })
     const answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
-    await waitForIceGathering(pc, this.forceRelay ? 15_000 : 8000)
+    await waitForIceGathering(pc, this.relayOnlyMode ? 15_000 : 8000)
     const local = pc.localDescription
     if (!local?.sdp) throw new Error('Failed to create answer SDP')
     this.setState('awaiting-answer')
     // Guest ICE runs before host pastes — allow a long wait, with refresh on failure.
-    this.watchForConnect(isRefresh ? 120000 : this.forceRelay ? ICE_REMOTE_CONNECT_TIMEOUT_MS : 180000)
+    this.watchForConnect(isRefresh ? 120000 : this.remotePlay ? ICE_REMOTE_CONNECT_TIMEOUT_MS : 180000)
     return compressSignal(local.sdp)
   }
 

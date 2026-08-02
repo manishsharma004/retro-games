@@ -149,4 +149,6 @@ export function suggestedCaptureFps(): number {
 export const ICE_CONNECT_TIMEOUT_MS = 25_000
 /** Cross-network remote play — TURN on mobile can take longer. */
 export const ICE_REMOTE_CONNECT_TIMEOUT_MS = 45_000
+/** Remote play: try direct/STUN before escalating to TURN (same-phone multi-browser). */
+export const ICE_REMOTE_LOCAL_RETRY_MS = 5_000
 export const ICE_LOCAL_RETRY_MS = 8_000

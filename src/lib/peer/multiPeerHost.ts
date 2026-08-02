@@ -222,7 +222,7 @@ export class MultiPeerHostManager {
     signalingId: string,
     stablePeerId?: string,
     initialSeat?: PeerSeat | null,
-    sameBrowser?: boolean,
+    _sameBrowser?: boolean,
   ) {
     if (this.connectingGuests.has(signalingId) || this.guests.has(signalingId)) return
 
@@ -267,8 +267,7 @@ export class MultiPeerHostManager {
 
     const conn = new PeerConnection(this.buildConnHandlers(signalingId, peerId), {
       declareSendonlyMedia: this.declareSendonlyMedia,
-      forceRelay: this.declareSendonlyMedia && !sameBrowser,
-      iceTier: this.declareSendonlyMedia && !sameBrowser ? 'relay' : 'local',
+      remotePlay: this.declareSendonlyMedia,
     })
     try {
       const offer = await conn.createOffer()

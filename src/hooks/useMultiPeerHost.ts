@@ -42,11 +42,18 @@ export function useMultiPeerHost({ hostPeerId, onRemoteInput, onGuestConnected, 
     }
   }, [hostPeerId])
 
-  const start = useCallback((chain: SignalingAdapterChain, roomCode: string, maxPlayers: MaxPlayers) => {
-    const manager = managerRef.current
-    if (!manager) return
-    manager.setMaxPlayers(maxPlayers)
-    manager.start(chain, roomCode)
+  const start = useCallback(
+    (
+      chain: SignalingAdapterChain,
+      roomCode: string,
+      maxPlayers: MaxPlayers,
+      opts?: { declareSendonlyMedia?: boolean },
+    ) => {
+      const manager = managerRef.current
+      if (!manager) return
+      manager.setMaxPlayers(maxPlayers)
+      manager.setDeclareSendonlyMedia(opts?.declareSendonlyMedia ?? false)
+      manager.start(chain, roomCode)
     setRoster(manager.getRoster())
     setGuests(manager.getGuests())
   }, [])

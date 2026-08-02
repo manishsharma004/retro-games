@@ -21,6 +21,8 @@ import {
 import {
   SignalingAdapterChain,
   formatSignalingPath,
+  getSignalingRoomMeta,
+  MultiGuestRoomError,
   resolveJoinRoomMeta,
   type SignalingAdapterName,
 } from '../lib/peer/signaling'
@@ -212,6 +214,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   const signalingSessionUnsubRef = useRef<(() => void) | null>(null)
   const reconnectInFlightRef = useRef(false)
   const remoteSpectatorRef = useRef(false)
+  const joinedAsSpectatorRef = useRef(false)
   const onRoleChangeRef = useRef(options.onRoleChange)
 
   const [phase, setPhase] = useState<PeerPhase>('idle')
@@ -313,9 +316,13 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       if (roleRef.current === 'guest') {
         const me = entries.find((e) => e.peerId === peerIdRef.current)
         if (me) {
-          seatRef.current = me.seat
-          setSeat(me.seat)
-          onRoleChangeRef.current?.(me.seat)
+          if (joinedAsSpectatorRef.current && me.seat !== null) {
+            // Host roster may auto-list a seat before hello — keep spectator choice.
+          } else {
+            seatRef.current = me.seat
+            setSeat(me.seat)
+            onRoleChangeRef.current?.(me.seat)
+          }
         }
       }
     },
@@ -368,6 +375,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         const prev = seatRef.current
         seatRef.current = nextSeat
         setSeat(nextSeat)
+        joinedAsSpectatorRef.current = nextSeat === null
         if (prev !== nextSeat) onRoleChangeRef.current?.(nextSeat)
 
         if (roleRef.current === 'host') {
@@ -817,7 +825,9 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           setRoomCode(room.code)
           setJoinUrl(room.joinUrl)
           setSignalingPath(chain.lastAdapter)
-          multiHost.start(chain, room.code, playerCap)
+          multiHost.start(chain, room.code, playerCap, {
+            declareSendonlyMedia: mode === 'remote',
+          })
           setRoster(multiHost.roster)
           setConnectionState('connected')
           updatePhase('linked')
@@ -933,6 +943,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       }
 
       const guestSeat = opts?.asSpectator ? null : useMulti ? null : 2
+      joinedAsSpectatorRef.current = Boolean(opts?.asSpectator)
       seatRef.current = guestSeat
       setRole('guest')
       setSeat(guestSeat)
@@ -959,10 +970,21 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
               offer = await chain.guestFetchOffer(normalized, offerTimeoutMs, peerIdRef.current)
             }
           } catch (fetchErr) {
-            if (mode === 'local' && !useMulti) {
+            const tryMultiGuest =
+              (mode === 'local' || mode === 'remote') &&
+              !useMulti &&
+              (fetchErr instanceof MultiGuestRoomError ||
+                mode === 'local' ||
+                getSignalingRoomMeta(normalized)?.multiGuest)
+            if (tryMultiGuest) {
               useMulti = true
               multiGuestRef.current = true
               setMultiGuest(true)
+              const meta = getSignalingRoomMeta(normalized)
+              if (meta?.maxPlayers) {
+                maxPlayersRef.current = clampMaxPlayers(meta.maxPlayers)
+                setMaxPlayers(maxPlayersRef.current)
+              }
               signalingId = createSignalingGuestId(peerIdRef.current)
               offer = await chain.joinRoomAsGuest(normalized, signalingId, peerIdRef.current)
             } else {
@@ -1225,7 +1247,9 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
 
         if (multiGuestRef.current) {
           multiHost.stop()
-          multiHost.start(chain, code, maxPlayersRef.current)
+          multiHost.start(chain, code, maxPlayersRef.current, {
+            declareSendonlyMedia: modeRef.current === 'remote',
+          })
           setConnectionLost(false)
           setConnectionState('connected')
           updatePhase('linked')
@@ -1280,6 +1304,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     seatRef.current = null
     remoteSeatRef.current = null
     remoteSpectatorRef.current = false
+    joinedAsSpectatorRef.current = false
     multiGuestRef.current = false
     maxPlayersRef.current = 2
     bootstrapDoneRef.current = false

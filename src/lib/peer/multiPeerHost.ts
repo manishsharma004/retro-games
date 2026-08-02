@@ -1,7 +1,7 @@
 import { PeerConnection, type PeerConnectionHandlers, type PeerConnectionState } from './connection'
 import type { ControlMessage, PeerSeat, RosterPeer } from './protocol'
 import type { MaxPlayers, RosterConnectionStatus, RosterEntry } from './roster'
-import { findFreeSeat, isSeatTaken } from './roster'
+import { isSeatTaken } from './roster'
 import type { SignalingAdapterChain } from './signaling'
 
 export interface GuestLink {
@@ -32,6 +32,7 @@ export class MultiPeerHostManager {
   private unsubGuestJoin: (() => void) | null = null
   private connectingGuests = new Set<string>()
   private activeStream: MediaStream | null = null
+  private declareSendonlyMedia = false
   private handlers: MultiPeerHostHandlers
 
   constructor(hostPeerId: string, handlers: MultiPeerHostHandlers) {
@@ -42,6 +43,10 @@ export class MultiPeerHostManager {
 
   setMaxPlayers(n: MaxPlayers) {
     this.maxPlayers = n
+  }
+
+  setDeclareSendonlyMedia(enabled: boolean) {
+    this.declareSendonlyMedia = enabled
   }
 
   getRoster(): RosterEntry[] {
@@ -131,6 +136,11 @@ export class MultiPeerHostManager {
     return ids.size
   }
 
+  private maxGuestConnections(): number {
+    // Player guests (maxPlayers - 1) plus the same number of spectators.
+    return (this.maxPlayers - 1) * 2
+  }
+
   private upsertGuestRoster(
     peerId: string,
     patch: {
@@ -175,7 +185,7 @@ export class MultiPeerHostManager {
 
     const peerId = stablePeerId ?? signalingId
 
-    if (this.activeGuestPeerCount() >= this.maxPlayers - 1) {
+    if (this.activeGuestPeerCount() >= this.maxGuestConnections()) {
       this.handlers.onError?.('Room is full')
       return
     }
@@ -189,15 +199,17 @@ export class MultiPeerHostManager {
     chain.clearGuestSlot?.(code, signalingId)
     chain.clearAnswer?.(code, signalingId)
 
-    const defaultSeat = priorSeat ?? findFreeSeat(this.roster, this.maxPlayers)
+    const defaultSeat = priorSeat
     this.upsertGuestRoster(peerId, {
-      seat: defaultSeat,
+      seat: defaultSeat ?? null,
       status: 'connecting',
       signalingId,
     })
     this.emitRosterChange()
 
-    const conn = new PeerConnection(this.buildConnHandlers(signalingId, peerId))
+    const conn = new PeerConnection(this.buildConnHandlers(signalingId, peerId), {
+      declareSendonlyMedia: this.declareSendonlyMedia,
+    })
     try {
       const offer = await conn.createOffer()
       await chain.publishGuestOffer(code, signalingId, offer)

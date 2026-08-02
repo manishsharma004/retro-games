@@ -172,7 +172,10 @@ export class PeerConnection {
   }
 
   private scheduleLocalMigration() {
-    if (this.relayOnlyMode || this.localMigrateAttempted || this.iceTier !== 'relay') return
+    // Remote/VPN sessions often only work via TURN — do not downgrade away from relay.
+    if (this.remotePlay || this.relayOnlyMode || this.localMigrateAttempted || this.iceTier !== 'relay') {
+      return
+    }
     this.clearLocalMigrateTimer()
     this.localMigrateTimer = window.setTimeout(() => {
       this.localMigrateTimer = null
@@ -212,7 +215,7 @@ export class PeerConnection {
       }
       this.handlers.onError?.(
         new Error(
-          'Connection timed out — try same Wi‑Fi/hotspot, enable TURN, or use manual SDP paste',
+          'Connection timed out — try same Wi‑Fi/hotspot, disable VPN, or use manual SDP paste',
         ),
       )
       this.setState('failed')
@@ -437,7 +440,9 @@ export class PeerConnection {
         return
       }
       this.handlers.onError?.(
-        new Error('ICE connection failed — use the same Wi‑Fi/hotspot and start a fresh session'),
+        new Error(
+          'ICE connection failed — try same Wi‑Fi/hotspot, disable VPN, or start a fresh session',
+        ),
       )
       this.setState('failed')
     }

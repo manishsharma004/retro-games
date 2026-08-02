@@ -9,7 +9,10 @@ import {
   smoothLatency,
   COOP_GO_DELAY_MS,
   COOP_RESYNC_RESUME_DELAY_MS,
+  probeIceConnectivity,
+  enrichConnectionError,
   type ConnectionPath,
+  type ConnectivityProbeResult,
   type IceTier,
   type LatencyProfile,
   type PeerConnectionState,
@@ -111,6 +114,9 @@ export interface UsePeerSessionResult {
   connectionPath: ConnectionPath
   connectionPathLabel: string
   iceTier: IceTier
+  /** Network probe hints (VPN / firewall) when connection struggles. */
+  connectivityHint: string | null
+  connectivityProbeSummary: string | null
   remoteStream: MediaStream | null
   transfer: PeerTransferStatus
   error: string | null
@@ -236,6 +242,9 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   const [useManualSignaling, setUseManualSignaling] = useState(false)
   const [connectionPath, setConnectionPath] = useState<ConnectionPath>('unknown')
   const [iceTier, setIceTier] = useState<IceTier>('local')
+  const [connectivityHint, setConnectivityHint] = useState<string | null>(null)
+  const [connectivityProbeSummary, setConnectivityProbeSummary] = useState<string | null>(null)
+  const connectivityProbeRef = useRef<ConnectivityProbeResult | null>(null)
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
   const [transfer, setTransfer] = useState<PeerTransferStatus>({
     kind: null,
@@ -549,11 +558,39 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     ],
   )
 
-  const markConnectionLost = useCallback((message: string) => {
-    setConnectionLost(true)
-    setError(message)
-    optionsRef.current.onPeerError?.(message)
+  const runConnectivityProbe = useCallback(async (): Promise<ConnectivityProbeResult | null> => {
+    try {
+      const probe = await probeIceConnectivity()
+      connectivityProbeRef.current = probe
+      setConnectivityProbeSummary(probe.summary)
+      if (probe.hints[0]) setConnectivityHint(probe.hints[0])
+      return probe
+    } catch {
+      return null
+    }
   }, [])
+
+  const markConnectionLost = useCallback(
+    (message: string) => {
+      setConnectionLost(true)
+      setError(message)
+      optionsRef.current.onPeerError?.(message)
+      void runConnectivityProbe().then((probe) => {
+        if (!probe?.hints.length) return
+        setError((prev) => enrichConnectionError(prev ?? message, probe))
+      })
+    },
+    [runConnectivityProbe],
+  )
+
+  useEffect(() => {
+    if (sessionMode !== 'remote') return
+    if (phase !== 'connecting' && connectionState !== 'connecting') return
+    const timer = window.setTimeout(() => {
+      void runConnectivityProbe()
+    }, 12_000)
+    return () => window.clearTimeout(timer)
+  }, [sessionMode, phase, connectionState, runConnectivityProbe])
 
   const createConnection = useCallback((opts?: { preserveSession?: boolean }) => {
     connRef.current?.close()
@@ -979,6 +1016,9 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
 
       setError(null)
       setConnectionLost(false)
+      setConnectivityHint(null)
+      setConnectivityProbeSummary(null)
+      connectivityProbeRef.current = null
       setRoomCode(normalized)
       modeRef.current = mode
       setSessionMode(mode)
@@ -1084,16 +1124,19 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           setUseManualSignaling(mode !== 'remote')
           setSignalingPath('manual')
           const base = err instanceof Error ? err.message : 'Could not join room'
-          setError(
+          const probe = await runConnectivityProbe()
+          const remoteSuffix =
+            'ask the host to open Play with Friends, pick Remote, and create the room, then tap Reconnect'
+          const fallback =
             mode === 'remote'
-              ? `${base} — ask the host to open Play with Friends, pick Remote, and create the room, then tap Reconnect`
-              : `${base} — paste the host offer below`,
-          )
+              ? `${base} — ${remoteSuffix}`
+              : `${base} — paste the host offer below`
+          setError(enrichConnectionError(fallback, probe))
           updatePhase('error')
         }
       }
     },
-    [createConnection, updatePhase, wireSignalingSession],
+    [createConnection, updatePhase, wireSignalingSession, runConnectivityProbe],
   )
 
   const sendGameUpdate = useCallback((game: HostGameInfo) => {
@@ -1397,6 +1440,9 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     setUseManualSignaling(false)
     setConnectionPath('unknown')
     setIceTier('local')
+    setConnectivityHint(null)
+    setConnectivityProbeSummary(null)
+    connectivityProbeRef.current = null
     updatePhase('idle')
     setError(null)
     setTransfer({ kind: null, received: 0, total: 0 })
@@ -1421,6 +1467,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     connectionPath,
     connectionPathLabel: formatConnectionPath(connectionPath),
     iceTier,
+    connectivityHint,
+    connectivityProbeSummary,
     remoteStream,
     transfer,
     error,

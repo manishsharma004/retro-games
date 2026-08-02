@@ -23,6 +23,8 @@ interface PeerLobbyProps {
   joinUrl: string | null
   signalingLabel: string
   connectionPathLabel: string
+  connectivityHint?: string | null
+  connectivityProbeSummary?: string | null
   useManualSignaling: boolean
   transfer: PeerTransferStatus
   error: string | null
@@ -73,6 +75,8 @@ export function PeerLobby({
   joinUrl,
   signalingLabel,
   connectionPathLabel,
+  connectivityHint = null,
+  connectivityProbeSummary = null,
   useManualSignaling,
   transfer,
   error,
@@ -492,6 +496,16 @@ export function PeerLobby({
               </>
             )}
           </p>
+        )}
+
+        {connectivityProbeSummary && phase !== 'idle' && (
+          <p className="peer-lobby__fallback">
+            Network check: <strong>{connectivityProbeSummary}</strong>
+          </p>
+        )}
+
+        {connectivityHint && (phase === 'connecting' || phase === 'error' || connectionLost) && (
+          <p className="peer-lobby__hint">{connectivityHint}</p>
         )}
 
         {roomCode && joinUrl && phase !== 'idle' && (

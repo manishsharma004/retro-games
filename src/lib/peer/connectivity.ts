@@ -50,6 +50,21 @@ const FREE_TURN_SERVERS: RTCIceServer[] = [
     username: 'openrelayproject',
     credential: 'openrelayproject',
   },
+  {
+    urls: 'turns:openrelay.metered.ca:443',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
+    urls: ['turn:turn.freeturn.net:3478', 'turn:turn.freeturn.net:5349'],
+    username: 'free',
+    credential: 'free',
+  },
+  {
+    urls: 'turn:relay.backups.cz',
+    username: 'free',
+    credential: 'free',
+  },
 ]
 
 function readCustomTurnServers(): RTCIceServer[] {
@@ -132,4 +147,6 @@ export function suggestedCaptureFps(): number {
 }
 
 export const ICE_CONNECT_TIMEOUT_MS = 25_000
+/** Cross-network remote play — TURN on mobile can take longer. */
+export const ICE_REMOTE_CONNECT_TIMEOUT_MS = 45_000
 export const ICE_LOCAL_RETRY_MS = 8_000

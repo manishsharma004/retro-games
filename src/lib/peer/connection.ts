@@ -122,6 +122,8 @@ export class PeerConnection {
   private declareSendonlyMedia: boolean
   private readonly remotePlay: boolean
   private relayOnlyMode = false
+  /** Senders created via prepareSendonlyMedia before tracks exist. */
+  private sendonlySenderKinds = new Map<RTCRtpSender, MediaStreamTrack['kind']>()
 
   constructor(handlers: PeerConnectionHandlers = {}, options: PeerConnectionOptions = {}) {
     this.handlers = handlers
@@ -354,6 +356,7 @@ export class PeerConnection {
     this.pc = null
     this.pending.clear()
     this.transferKinds.clear()
+    this.sendonlySenderKinds.clear()
     this.offererAnswerApplied = false
     if (!keepOffer) this.remoteOfferSdp = null
   }
@@ -368,7 +371,9 @@ export class PeerConnection {
       ...(iceTransportPolicy ? { iceTransportPolicy } : {}),
     })
     pc.ontrack = (event) => {
-      const stream = event.streams[0]
+      const stream =
+        event.streams[0] ??
+        (event.track ? new MediaStream([event.track]) : undefined)
       if (stream) this.handlers.onRemoteStream?.(stream)
     }
     pc.onconnectionstatechange = () => {
@@ -565,8 +570,27 @@ export class PeerConnection {
         const track = t.sender.track ?? t.receiver.track
         return track?.kind === kind
       })
-      if (!hasKind) pc.addTransceiver(kind, { direction: 'sendonly' })
+      if (!hasKind) {
+        const transceiver = pc.addTransceiver(kind, { direction: 'sendonly' })
+        this.sendonlySenderKinds.set(transceiver.sender, kind)
+      }
     }
+  }
+
+  private findSenderForTrack(
+    pc: RTCPeerConnection,
+    kind: MediaStreamTrack['kind'],
+  ): { sender?: RTCRtpSender; wasPlaceholder: boolean } {
+    const direct = pc.getSenders().find((s) => s.track?.kind === kind)
+    if (direct) return { sender: direct, wasPlaceholder: false }
+
+    for (const [sender, senderKind] of this.sendonlySenderKinds) {
+      if (senderKind === kind && !sender.track) {
+        return { sender, wasPlaceholder: true }
+      }
+    }
+
+    return { wasPlaceholder: false }
   }
 
   async createOffer(): Promise<string> {
@@ -606,21 +630,23 @@ export class PeerConnection {
   }
 
   /** Attach canvas/audio stream for remote mode (host side).
-   * Returns true when a new track was added and SDP renegotiation is required. */
+   * Returns true when SDP renegotiation is required after attaching tracks. */
   addMediaStream(stream: MediaStream): boolean {
     const pc = this.ensurePc()
     let addedTrack = false
+    let attachedToPlaceholder = false
     for (const track of stream.getTracks()) {
-      const sender = pc.getSenders().find((s) => s.track?.kind === track.kind)
+      const { sender, wasPlaceholder } = this.findSenderForTrack(pc, track.kind)
       if (sender) {
         void sender.replaceTrack(track)
+        if (wasPlaceholder) attachedToPlaceholder = true
       } else {
         pc.addTrack(track, stream)
         addedTrack = true
       }
     }
     return (
-      addedTrack &&
+      (addedTrack || (this.declareSendonlyMedia && attachedToPlaceholder)) &&
       this.offererAnswerApplied &&
       (pc.connectionState === 'connected' || pc.signalingState === 'stable')
     )

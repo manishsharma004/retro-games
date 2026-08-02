@@ -221,9 +221,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   })
 
   useRemoteHost({
-    enabled:
-      isHost &&
-      (sessionMode === 'remote' || (sessionMode === 'local' && peer.multiGuest)),
+    enabled: isHost && (sessionMode === 'remote' || peer.multiGuest),
     peer,
     emu,
     isHost,

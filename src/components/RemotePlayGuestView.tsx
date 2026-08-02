@@ -16,6 +16,7 @@ import { useLandscape } from '../hooks/useLandscape'
 import { usePreventGameTouchGestures } from '../hooks/usePreventGameTouchGestures'
 import type { UsePeerSessionResult } from '../hooks/usePeerSession'
 import type { SystemId } from '../lib/cores'
+import { playerSeats } from '../lib/peer/roster'
 import {
   loadControllerBindings,
   saveControllerBindings,
@@ -68,7 +69,8 @@ export function RemotePlayGuestView({
 
   const peerPlaying = peer.phase === 'playing'
   const peerActive = peer.role !== null && peer.phase !== 'idle' && peer.phase !== 'error'
-  const localSeat = peer.seat === 1 || peer.seat === 2 ? peer.seat : null
+  const seatPickerSeats = playerSeats(peer.multiGuest ? peer.maxPlayers : 2)
+  const localSeat = peer.seat
   const isSpectator = peer.seat === null
   const showRolePicker = peer.connectionState === 'connected' && !isFullscreen
 
@@ -282,7 +284,7 @@ export function RemotePlayGuestView({
       {showRolePicker && (
           <div className="join-page__seats remote-guest__seats" role="radiogroup" aria-label="Your role">
             <p className="join-page__label">Your role</p>
-            {([1, 2] as const).map((player) => {
+            {seatPickerSeats.map((player) => {
               const taken = !peer.isSeatAvailable(player)
               const checked = peer.seat === player
               return (
@@ -311,10 +313,10 @@ export function RemotePlayGuestView({
               />
               <span>Spectator{peer.seat === null ? ' (you)' : ''}</span>
             </label>
-            {peer.remoteSeat && peer.seat && peer.remoteSeat !== peer.seat && (
+            {!peer.multiGuest && peer.remoteSeat && peer.seat && peer.remoteSeat !== peer.seat && (
               <p className="join-page__hint">Host is Player {peer.remoteSeat}.</p>
             )}
-            {peer.remoteSpectator && peer.seat !== null && (
+            {!peer.multiGuest && peer.remoteSpectator && peer.seat !== null && (
               <p className="join-page__hint">Host is spectating.</p>
             )}
           </div>

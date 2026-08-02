@@ -346,7 +346,7 @@ export class MultiPeerHostManager {
             if (link && (link.connectionState === 'failed' || link.connectionState === 'closed')) {
               this.removeGuest(signalingId)
             }
-          }, 8000)
+          }, 12_000)
           this.guestFailTimers.set(signalingId, timer)
           return
         }

@@ -1131,6 +1131,10 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
 
   const attachMediaStream = useCallback(
     async (stream: MediaStream) => {
+      if (multiGuestRef.current) {
+        await multiHost.attachMediaStream(stream)
+        return
+      }
       const conn = connRef.current
       if (!conn) throw new Error('No connection')
       const needsRenegotiation = conn.addMediaStream(stream)
@@ -1139,7 +1143,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         publishRenegotiation('media-reoffer', sdp)
       }
     },
-    [publishRenegotiation],
+    [multiHost, publishRenegotiation],
   )
 
   const getConnection = useCallback(() => connRef.current, [])

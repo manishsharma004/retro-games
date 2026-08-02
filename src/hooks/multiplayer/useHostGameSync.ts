@@ -65,7 +65,10 @@ export function useHostGameSync({
           core: game.core,
           libraryFile: game.libraryFile,
         })
-        if (hadPrevious && sessionMode === 'remote') {
+        if (
+          hadPrevious &&
+          (sessionMode === 'remote' || (sessionMode === 'local' && peer.multiGuest))
+        ) {
           peer.refreshMediaStream()
         }
       } catch {
@@ -83,6 +86,7 @@ export function useHostGameSync({
     peer.connectionState,
     peer.sendGameUpdate,
     peer.refreshMediaStream,
+    peer.multiGuest,
     sessionMode,
     coop.shareGame,
   ])

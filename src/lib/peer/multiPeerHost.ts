@@ -31,6 +31,7 @@ export class MultiPeerHostManager {
   private chain: SignalingAdapterChain | null = null
   private unsubGuestJoin: (() => void) | null = null
   private connectingGuests = new Set<string>()
+  private activeStream: MediaStream | null = null
   private handlers: MultiPeerHostHandlers
 
   constructor(hostPeerId: string, handlers: MultiPeerHostHandlers) {
@@ -72,8 +73,33 @@ export class MultiPeerHostManager {
     for (const g of this.guests.values()) g.connection.close()
     this.guests.clear()
     this.connectingGuests.clear()
+    this.activeStream = null
     this.chain = null
     this.roomCode = null
+  }
+
+  /** Attach canvas capture to every connected guest (spectators and players). */
+  async attachMediaStream(stream: MediaStream): Promise<void> {
+    this.activeStream = stream
+    await Promise.all(
+      [...this.guests.keys()].map((signalingId) => this.attachMediaStreamToGuest(signalingId)),
+    )
+  }
+
+  private async attachMediaStreamToGuest(signalingId: string): Promise<void> {
+    const stream = this.activeStream
+    const g = this.guests.get(signalingId)
+    if (!stream || !g?.connection.connected) return
+
+    const needsRenegotiation = g.connection.addMediaStream(stream)
+    if (!needsRenegotiation) return
+
+    const sdp = await g.connection.createMediaRenegotiationOffer()
+    try {
+      g.connection.sendControl({ type: 'media-reoffer', sdp })
+    } catch {
+      // ignore — guest may reconnect
+    }
   }
 
   isSeatAvailable(seat: PeerSeat, exceptPeerId?: string): boolean {
@@ -212,6 +238,9 @@ export class MultiPeerHostManager {
           if (state === 'connected') {
             this.setRosterStatus(g.peerId, 'connected')
             this.sendRosterTo(signalingId)
+            if (this.activeStream) {
+              void this.attachMediaStreamToGuest(signalingId)
+            }
           }
           this.emitRosterChange()
         }

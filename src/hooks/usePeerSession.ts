@@ -25,6 +25,7 @@ import {
   type SignalingAdapterName,
 } from '../lib/peer/signaling'
 import { normalizeRoomCode } from '../lib/peer/joinUrl'
+import { offerFingerprint, isMlineOrderError } from '../lib/peer/sdpUtils'
 import { getPeerId, createSignalingGuestId } from '../lib/peer/peerId'
 import {
   clampMaxPlayers,
@@ -728,6 +729,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           })
         }
       },
+    }, {
+      declareSendonlyMedia: modeRef.current === 'remote',
     })
     connRef.current = conn
     return conn
@@ -824,6 +827,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
 
         const conn = createConnection()
         const offer = await conn.createOffer()
+        const offerFp = offerFingerprint(offer)
         setLocalSignal(offer)
 
         const room = await chain.hostRoom(offer, { mode, maxPlayers: 2, multiGuest: false })
@@ -834,18 +838,29 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         setSignalingPath(chain.lastAdapter)
         updatePhase('host-offer')
 
-        const answerPromise = chain.waitForAnswer(room.code)
-        void answerPromise
-          .then(async (answer) => {
-            if (generation !== hostGenerationRef.current) return
-            updatePhase('connecting')
+        const waitAnswer = async () => {
+          const answer = await chain.waitForAnswer(room.code, undefined, offerFp)
+          if (generation !== hostGenerationRef.current) return
+          updatePhase('connecting')
+          try {
             await conn.acceptAnswer(answer)
-          })
-          .catch((err) => {
+          } catch (err) {
             if (generation !== hostGenerationRef.current) return
-            setError(err instanceof Error ? err.message : 'Waiting for guest answer failed')
-            updatePhase('error')
-          })
+            if (isMlineOrderError(err)) {
+              chain.clearAnswer(room.code)
+              setError('Guest answer was stale — waiting for a fresh answer…')
+              updatePhase('host-offer')
+              void waitAnswer()
+              return
+            }
+            throw err
+          }
+        }
+        void waitAnswer().catch((err) => {
+          if (generation !== hostGenerationRef.current) return
+          setError(err instanceof Error ? err.message : 'Waiting for guest answer failed')
+          updatePhase('error')
+        })
       } catch {
         if (generation !== hostGenerationRef.current) return
         setUseManualSignaling(true)
@@ -955,11 +970,12 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           setSignalingPath(chain.lastAdapter)
           const conn = createConnection({ preserveSession: reconnectInFlightRef.current })
           const answer = await conn.createAnswerFromOffer(offer)
+          const offerFp = offerFingerprint(offer)
           setLocalSignal(answer)
           if (useMulti && signalingId) {
-            await chain.guestPublishAnswer(normalized, answer, signalingId)
+            await chain.guestPublishAnswer(normalized, answer, signalingId, offerFp)
           } else {
-            await chain.guestPublishAnswer(normalized, answer)
+            await chain.guestPublishAnswer(normalized, answer, undefined, offerFp)
           }
           updatePhase('guest-answer')
           return
@@ -1171,27 +1187,32 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       const existingConn = connRef.current
 
       if (r === 'host' && existingConn && !existingConn.connected) {
-        try {
-          const sdp = await existingConn.createIceRestartOffer()
-          publishRenegotiation('ice-reoffer', sdp, existingConn.activeIceTier)
-          await new Promise<void>((resolve) => {
-            const started = Date.now()
-            const check = () => {
-              if (existingConn.connected) {
-                resolve()
-                return
+        const waitingForGuest =
+          phaseRef.current === 'host-offer' &&
+          existingConn.connectionState === 'awaiting-answer'
+        if (!waitingForGuest) {
+          try {
+            const sdp = await existingConn.createIceRestartOffer()
+            publishRenegotiation('ice-reoffer', sdp, existingConn.activeIceTier)
+            await new Promise<void>((resolve) => {
+              const started = Date.now()
+              const check = () => {
+                if (existingConn.connected) {
+                  resolve()
+                  return
+                }
+                if (Date.now() - started > 3000) {
+                  resolve()
+                  return
+                }
+                window.setTimeout(check, 200)
               }
-              if (Date.now() - started > 3000) {
-                resolve()
-                return
-              }
-              window.setTimeout(check, 200)
-            }
-            check()
-          })
-          if (existingConn.connected) return
-        } catch {
-          // fall through to full re-handshake
+              check()
+            })
+            if (existingConn.connected) return
+          } catch {
+            // fall through to full re-handshake
+          }
         }
       }
 
@@ -1212,11 +1233,12 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         existingConn?.softClose()
         const conn = createConnection({ preserveSession: true })
         const offer = await conn.createOffer()
+        const offerFp = offerFingerprint(offer)
         setLocalSignal(offer)
         chain.clearAnswer(code)
         await chain.republishOffer(code, offer)
-        updatePhase('connecting')
-        const answer = await chain.waitForAnswer(code)
+        updatePhase('host-offer')
+        const answer = await chain.waitForAnswer(code, undefined, offerFp)
         await conn.acceptAnswer(answer)
         return
       }

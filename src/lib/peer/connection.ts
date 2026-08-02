@@ -18,6 +18,8 @@ export interface PeerConnectionOptions {
   /** @deprecated use iceTier — relay tier forces TURN from the start */
   preferTurn?: boolean
   iceTier?: IceTier
+  /** Pre-declare sendonly A/V m-lines so cross-browser answers match (remote stream). */
+  declareSendonlyMedia?: boolean
 }
 
 /** States where we are still exchanging SDP out-of-band — ICE must not kill the session. */
@@ -111,10 +113,12 @@ export class PeerConnection {
   private localMigrateAttempted = false
   private localMigrateTimer: number | null = null
   private connectionPath: ConnectionPath = 'unknown'
+  private declareSendonlyMedia: boolean
 
   constructor(handlers: PeerConnectionHandlers = {}, options: PeerConnectionOptions = {}) {
     this.handlers = handlers
     this.iceTier = options.iceTier ?? (options.preferTurn ? 'relay' : 'local')
+    this.declareSendonlyMedia = options.declareSendonlyMedia ?? false
   }
 
   get activeIceTier(): IceTier {
@@ -320,6 +324,7 @@ export class PeerConnection {
     const pc = new RTCPeerConnection({
       iceServers,
       iceCandidatePoolSize: 10,
+      bundlePolicy: 'max-bundle',
     })
     pc.ontrack = (event) => {
       const stream = event.streams[0]
@@ -512,6 +517,17 @@ export class PeerConnection {
     }
   }
 
+  private prepareSendonlyMedia(pc: RTCPeerConnection) {
+    if (!this.declareSendonlyMedia) return
+    for (const kind of ['video', 'audio'] as const) {
+      const hasKind = pc.getTransceivers().some((t) => {
+        const track = t.sender.track ?? t.receiver.track
+        return track?.kind === kind
+      })
+      if (!hasKind) pc.addTransceiver(kind, { direction: 'sendonly' })
+    }
+  }
+
   async createOffer(): Promise<string> {
     this.close()
     this.offererAnswerApplied = false
@@ -522,6 +538,7 @@ export class PeerConnection {
     this.connectionPath = 'unknown'
     this.setState('creating-offer')
     const pc = this.ensurePc()
+    this.prepareSendonlyMedia(pc)
     const channel = pc.createDataChannel('retro-games', { ordered: true })
     this.wireChannel(channel)
     const offer = await pc.createOffer()
@@ -537,9 +554,15 @@ export class PeerConnection {
     const pc = this.pc
     if (!pc) throw new Error('Create an offer first')
     const sdp = decompressSignal(encoded)
-    this.offererAnswerApplied = true
     this.setState('connecting')
-    await pc.setRemoteDescription({ type: 'answer', sdp })
+    try {
+      await pc.setRemoteDescription({ type: 'answer', sdp })
+      this.offererAnswerApplied = true
+    } catch (err) {
+      this.offererAnswerApplied = false
+      this.setState('awaiting-answer')
+      throw err
+    }
     this.watchForConnect(ICE_LOCAL_RETRY_MS)
   }
 

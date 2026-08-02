@@ -28,10 +28,9 @@ interface JoinPageProps {
 function defaultPreferredSeat(
   mode: SessionMode,
   role: JoinRole,
-  multiGuest: boolean,
+  _multiGuest: boolean,
 ): PeerSeat | null {
   if (role === 'spectator') return null
-  if (multiGuest) return null
   return mode === 'remote' || mode === 'local' ? 2 : null
 }
 
@@ -49,8 +48,9 @@ export function JoinPage({ initialRoom, initialMode, initialRole = 'player' }: J
   const [preferredSeat, setPreferredSeat] = useState<PeerSeat | null>(() =>
     defaultPreferredSeat(initialMode, initialRole, lobbyMultiGuest),
   )
-  const [joined, setJoined] = useState(Boolean(initialRoom))
+  const [joined, setJoined] = useState(false)
   const joinStartedRef = useRef(false)
+  const lastSyncedSeatRef = useRef<PeerSeat | null | undefined>(undefined)
 
   const peer = usePeerSession({
     settings: loadSettings(),
@@ -75,13 +75,22 @@ export function JoinPage({ initialRoom, initialMode, initialRole = 'player' }: J
   })
 
   useEffect(() => {
-    if (!joined || !roomInput.trim() || joinStartedRef.current) return
-    joinStartedRef.current = true
-    void peer.joinWithRoomCode(roomInput.trim(), mode, {
-      asSpectator: preferredSeat === null,
-      initialSeat: preferredSeat,
-    })
-  }, [joined, roomInput, mode, preferredSeat, peer.joinWithRoomCode])
+    if (!joined || !roomInput.trim()) return
+
+    if (!joinStartedRef.current) {
+      joinStartedRef.current = true
+      lastSyncedSeatRef.current = preferredSeat
+      void peer.joinWithRoomCode(roomInput.trim(), mode, {
+        asSpectator: preferredSeat === null,
+        initialSeat: preferredSeat,
+      })
+      return
+    }
+
+    if (lastSyncedSeatRef.current === preferredSeat) return
+    lastSyncedSeatRef.current = preferredSeat
+    peer.pickRole(preferredSeat)
+  }, [joined, roomInput, mode, preferredSeat, peer.joinWithRoomCode, peer.pickRole])
 
   if (mode === 'local') {
     return (
@@ -289,6 +298,9 @@ export function JoinPage({ initialRoom, initialMode, initialRole = 'player' }: J
             >
               Join room
             </button>
+            {initialRoom && (
+              <p className="join-page__hint">Pick your role above, then tap Join room.</p>
+            )}
             {peer.error && <p className="join-page__error">{peer.error}</p>}
           </div>
         </header>

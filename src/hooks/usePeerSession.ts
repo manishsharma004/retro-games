@@ -318,6 +318,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         if (me) {
           if (joinedAsSpectatorRef.current && me.seat !== null) {
             // Host roster may auto-list a seat before hello — keep spectator choice.
+          } else if (me.status === 'connecting' && seatRef.current !== null) {
+            // Guest picked a seat locally; host roster is still pending hello.
           } else {
             seatRef.current = me.seat
             setSeat(me.seat)
@@ -374,10 +376,11 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         }
         setError(null)
         const prev = seatRef.current
+        if (prev === nextSeat) return true
         seatRef.current = nextSeat
         setSeat(nextSeat)
         joinedAsSpectatorRef.current = nextSeat === null
-        if (prev !== nextSeat) onRoleChangeRef.current?.(nextSeat)
+        onRoleChangeRef.current?.(nextSeat)
 
         if (roleRef.current === 'host') {
           multiHost.setHostSeat(nextSeat)
@@ -957,7 +960,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
             : useMulti
               ? null
               : 2
-      joinedAsSpectatorRef.current = Boolean(opts?.asSpectator)
+      joinedAsSpectatorRef.current = opts?.asSpectator === true && guestSeat === null
       seatRef.current = guestSeat
       setRole('guest')
       setSeat(guestSeat)

@@ -659,8 +659,12 @@ export function PeerLobby({
                       }
                     >
                       {entry.role === 'host' ? 'Host' : 'Guest'} ·{' '}
-                      {entry.seat === null ? 'Spectator' : `P${entry.seat}`}
-                      {entry.status === 'connecting' && ' · joining…'}
+                      {entry.status === 'connecting' && entry.seat === null
+                        ? 'joining…'
+                        : entry.seat === null
+                          ? 'Spectator'
+                          : `P${entry.seat}`}
+                      {entry.status === 'connecting' && entry.seat !== null && ' · joining…'}
                       {entry.status === 'disconnected' && ' · left'}
                     </li>
                   ))}
@@ -685,7 +689,11 @@ export function PeerLobby({
             )}
             {phase === 'linked' && role === 'host' && !showCoopFlow && (
               <p className="peer-lobby__hint">
-                Linked — {sessionMode === 'local' ? 'waiting for controller input' : 'starting stream…'}
+                {sessionMode === 'local'
+                  ? 'Linked — waiting for controller input'
+                  : emuReady
+                    ? 'Linked — starting stream…'
+                    : 'Linked — load a ROM from the library to start streaming to guests.'}
               </p>
             )}
             {phase === 'linked' && role === 'guest' && showCoopFlow && (

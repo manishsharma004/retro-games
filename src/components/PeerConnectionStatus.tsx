@@ -11,6 +11,7 @@ interface PeerConnectionStatusProps {
   hasVideo?: boolean
   hostGameName?: string | null
   sessionMode?: SessionMode
+  connectivityHint?: string | null
   /** When false, hide after WebRTC connects (local controller guests). */
   requireVideo?: boolean
   variant?: 'overlay' | 'inline'
@@ -28,6 +29,7 @@ export function PeerConnectionStatus({
   hasVideo = false,
   hostGameName = null,
   sessionMode,
+  connectivityHint = null,
   requireVideo = true,
   variant = 'overlay',
   onReconnect,
@@ -98,6 +100,9 @@ export function PeerConnectionStatus({
     >
       <p className="peer-connection-status__title">{title}</p>
       {detail && <p className="peer-connection-status__detail">{detail}</p>}
+      {connectivityHint && !detail?.includes(connectivityHint) && (
+        <p className="peer-connection-status__hint">{connectivityHint}</p>
+      )}
       {children}
       <div className="peer-connection-status__actions">
         {(connectionLost || phase === 'error' || (error && onReconnect)) && onReconnect && (

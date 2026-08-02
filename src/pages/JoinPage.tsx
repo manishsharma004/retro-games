@@ -172,6 +172,7 @@ export function JoinPage({ initialRoom, initialMode, initialRole = 'player' }: J
               connectionState={peer.connectionState}
               connectionLost={peer.connectionLost}
               error={peer.error}
+              connectivityHint={peer.connectivityHint}
               onReconnect={() => peer.reconnectSession()}
               onLeave={() => {
                 joinStartedRef.current = false

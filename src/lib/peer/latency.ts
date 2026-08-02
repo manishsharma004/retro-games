@@ -116,7 +116,7 @@ export function getLatencyProfile(
         streamFps: 24,
         advice:
           path === 'relay'
-            ? 'Very high latency on relay — same Wi‑Fi or a closer network works best.'
+            ? 'Very high latency on relay — VPN or strict NAT may be involved. Same Wi‑Fi or disabling VPN works best.'
             : mode === 'coop'
               ? 'Very high latency — sync often; inputs are noticeably delayed.'
               : 'Very high latency — expect noticeable input and video delay.',

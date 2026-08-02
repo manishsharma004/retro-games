@@ -2815,6 +2815,14 @@ body.rg-faux-fullscreen {
   line-height: 1.45;
 }
 
+.peer-connection-status__hint {
+  margin: 0.35rem 0 0;
+  max-width: 22rem;
+  color: #e8c547;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
 .peer-connection-status__actions {
   display: flex;
   flex-wrap: wrap;

@@ -413,6 +413,14 @@ export class MultiPeerHostManager {
       } catch {
         // ignore
       }
+      return
+    }
+    if (msg.type === 'media-reanswer' && msg.sdp) {
+      void g?.connection.acceptMediaRenegotiationAnswer(msg.sdp).catch((err) => {
+        this.handlers.onError?.(
+          err instanceof Error ? err.message : 'Video stream negotiation failed',
+        )
+      })
     }
   }
 

@@ -7,6 +7,14 @@ import {
 } from './peerJsBrokers'
 import { offerFingerprint } from './sdpUtils'
 
+/** Thrown when guestFetchOffer discovers a multi-guest room — retry with joinRoomAsGuest. */
+export class MultiGuestRoomError extends Error {
+  constructor() {
+    super('Multi-guest room')
+    this.name = 'MultiGuestRoomError'
+  }
+}
+
 export type SignalingAdapterName = 'peerjs' | 'firebase' | 'broadcast' | 'manual'
 
 export interface SignalingRoomMeta {
@@ -880,6 +888,11 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
         }
         if (msg.type === 'room-meta' && msg.meta) {
           writeRoom(normalized, { meta: msg.meta })
+          if (msg.meta.multiGuest) {
+            window.clearTimeout(timer)
+            reject(new MultiGuestRoomError())
+            return
+          }
         }
         this.handleConnData(data, normalized)
       })

@@ -35,7 +35,7 @@ export function buildJoinUrl(
   if (opts?.spectator) params.set('role', 'spectator')
   if (opts?.multiGuest) params.set('mg', '1')
   if (opts?.maxPlayers && opts.maxPlayers > 2) params.set('mp', String(opts.maxPlayers))
-  if (opts?.peerJsBrokerIndex !== undefined && opts.peerJsBrokerIndex > 0) {
+  if (opts?.peerJsBrokerIndex !== undefined) {
     params.set('pb', String(opts.peerJsBrokerIndex))
   }
   return `${origin}${base}?${params.toString()}`

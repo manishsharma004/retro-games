@@ -308,7 +308,7 @@ export class BroadcastSignalingAdapter implements SignalingAdapter {
   readonly name = 'broadcast' as const
   private codes: string[] = []
   private guestJoinHandlers = new Set<(signalingId: string, stablePeerId?: string) => void>()
-  private pendingGuestJoins = new Set<string>()
+  private pendingGuestJoins = new Map<string, string | undefined>()
   private bc: BroadcastChannel | null = null
 
   constructor() {
@@ -326,7 +326,7 @@ export class BroadcastSignalingAdapter implements SignalingAdapter {
 
   private notifyGuestJoin(signalingId: string, stablePeerId?: string) {
     if (this.guestJoinHandlers.size === 0) {
-      this.pendingGuestJoins.add(signalingId)
+      this.pendingGuestJoins.set(signalingId, stablePeerId)
       return
     }
     for (const h of this.guestJoinHandlers) h(signalingId, stablePeerId)
@@ -334,7 +334,7 @@ export class BroadcastSignalingAdapter implements SignalingAdapter {
 
   onGuestJoin(handler: (signalingId: string, stablePeerId?: string) => void) {
     this.guestJoinHandlers.add(handler)
-    for (const guestId of this.pendingGuestJoins) handler(guestId)
+    for (const [guestId, stablePeerId] of this.pendingGuestJoins) handler(guestId, stablePeerId)
     this.pendingGuestJoins.clear()
     return () => this.guestJoinHandlers.delete(handler)
   }
@@ -554,7 +554,7 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
   private conns = new Map<string, DataConn>()
   private guestJoinHandlers = new Set<(signalingId: string, stablePeerId?: string) => void>()
   private guestAnswerWaits = new Map<string, { resolve: (a: string) => void; reject: (e: Error) => void }>()
-  private pendingGuestJoins = new Set<string>()
+  private pendingGuestJoins = new Map<string, string | undefined>()
   private notifiedJoins = new Set<string>()
 
   get activeBrokerIndex(): number {
@@ -585,7 +585,7 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     if (this.notifiedJoins.has(signalingId)) return
     this.notifiedJoins.add(signalingId)
     if (this.guestJoinHandlers.size === 0) {
-      this.pendingGuestJoins.add(signalingId)
+      this.pendingGuestJoins.set(signalingId, stablePeerId)
       return
     }
     for (const h of this.guestJoinHandlers) h(signalingId, stablePeerId)
@@ -647,15 +647,20 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
 
   onGuestJoin(handler: (signalingId: string, stablePeerId?: string) => void) {
     this.guestJoinHandlers.add(handler)
-    for (const guestId of this.pendingGuestJoins) handler(guestId)
+    for (const [guestId, stablePeerId] of this.pendingGuestJoins) handler(guestId, stablePeerId)
     this.pendingGuestJoins.clear()
     return () => this.guestJoinHandlers.delete(handler)
   }
 
   async publishGuestOffer(code: string, guestId: string, offer: string) {
     writeGuestSlot(code, guestId, { offer, answer: undefined })
-    const conn = this.conns.get(guestId)
-    if (!conn) return
+    const deadline = Date.now() + 12_000
+    let conn = this.conns.get(guestId)
+    while (!conn && Date.now() < deadline) {
+      await new Promise((r) => window.setTimeout(r, 50))
+      conn = this.conns.get(guestId)
+    }
+    if (!conn) throw new Error('Guest signaling channel not ready')
     await waitConnOpen(conn, 12_000)
     conn.send({ type: 'webrtc-offer', guestId, offer })
   }
@@ -674,15 +679,26 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
 
     return new Promise<string>((resolve, reject) => {
       const timer = window.setTimeout(() => reject(new Error('PeerJS guest offer timeout')), timeoutMs)
+      let roomMultiGuest = false
       const onData = (data: unknown) => {
-        const msg = data as { type?: string; offer?: string; guestId?: string }
+        const msg = data as {
+          type?: string
+          offer?: string
+          guestId?: string
+          meta?: SignalingRoomMeta
+        }
+        if (msg.type === 'room-meta' && msg.meta) {
+          writeRoom(normalized, { meta: msg.meta })
+          roomMultiGuest = Boolean(msg.meta.multiGuest)
+          return
+        }
         if (msg.type === 'webrtc-offer' && msg.offer && msg.guestId === guestId) {
           window.clearTimeout(timer)
           conn.off('data', onData)
           resolve(msg.offer)
           return
         }
-        if (msg.type === 'offer' && msg.offer) {
+        if (msg.type === 'offer' && msg.offer && !roomMultiGuest) {
           window.clearTimeout(timer)
           conn.off('data', onData)
           resolve(msg.offer)

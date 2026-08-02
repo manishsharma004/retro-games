@@ -70,8 +70,8 @@ export class MultiPeerHostManager {
     this.roomCode = roomCode
     this.unsubGuestJoin?.()
     this.unsubGuestSession?.()
-    this.unsubGuestJoin = chain.onGuestJoin((signalingId, stablePeerId) => {
-      void this.handleGuestJoin(signalingId, stablePeerId)
+    this.unsubGuestJoin = chain.onGuestJoin((signalingId, stablePeerId, initialSeat) => {
+      void this.handleGuestJoin(signalingId, stablePeerId, initialSeat)
     })
     this.unsubGuestSession = chain.onGuestSessionMessage((guestId, data) => {
       if (!guestId) return
@@ -193,7 +193,25 @@ export class MultiPeerHostManager {
     if (status === 'connected') entry.signalingId = undefined
   }
 
-  private async handleGuestJoin(signalingId: string, stablePeerId?: string) {
+  private cancelGuestAttempt(signalingId: string) {
+    const g = this.guests.get(signalingId)
+    if (g) {
+      g.connection.close()
+      this.guests.delete(signalingId)
+    }
+    this.connectingGuests.delete(signalingId)
+    const code = this.roomCode
+    if (code) {
+      this.chain?.clearGuestSlot?.(code, signalingId)
+      this.chain?.clearAnswer?.(code, signalingId)
+    }
+  }
+
+  private async handleGuestJoin(
+    signalingId: string,
+    stablePeerId?: string,
+    initialSeat?: PeerSeat | null,
+  ) {
     if (this.connectingGuests.has(signalingId) || this.guests.has(signalingId)) return
 
     const chain = this.chain
@@ -207,16 +225,27 @@ export class MultiPeerHostManager {
       return
     }
 
+    const staleConnecting = this.roster.find(
+      (e) =>
+        e.role === 'guest' &&
+        e.peerId === peerId &&
+        e.status === 'connecting' &&
+        e.signalingId &&
+        e.signalingId !== signalingId,
+    )
+    if (staleConnecting?.signalingId) {
+      this.cancelGuestAttempt(staleConnecting.signalingId)
+    }
+
     const prior = this.roster.find(
       (e) => e.peerId === peerId && e.role === 'guest' && e.status === 'disconnected',
     )
-    const priorSeat = prior?.seat ?? null
+    const defaultSeat =
+      initialSeat !== undefined ? initialSeat : (prior?.seat ?? null)
 
     this.connectingGuests.add(signalingId)
     chain.clearGuestStorage?.(code, signalingId)
     chain.clearAnswer?.(code, signalingId)
-
-    const defaultSeat = priorSeat
     this.upsertGuestRoster(peerId, {
       seat: defaultSeat ?? null,
       status: 'connecting',

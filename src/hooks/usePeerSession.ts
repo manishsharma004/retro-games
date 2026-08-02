@@ -213,6 +213,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   const hostOfferInFlightRef = useRef(false)
   const signalingSessionUnsubRef = useRef<(() => void) | null>(null)
   const reconnectInFlightRef = useRef(false)
+  const signalingGuestIdRef = useRef<string | null>(null)
   const remoteSpectatorRef = useRef(false)
   const joinedAsSpectatorRef = useRef(false)
   const onRoleChangeRef = useRef(options.onRoleChange)
@@ -453,7 +454,12 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           // fall through to signaling channel
         }
       }
-      chain?.sendSessionMessage(payload)
+      const guestId = signalingGuestIdRef.current
+      if (guestId) {
+        chain?.sendGuestSessionMessage(guestId, payload)
+      } else {
+        chain?.sendSessionMessage(payload)
+      }
     },
     [],
   )
@@ -946,10 +952,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       roleRef.current = 'guest'
 
       const roomMeta = resolveJoinRoomMeta(normalized, mode)
-      const localMeta = getSignalingRoomMeta(normalized)
       let useMulti =
         (mode === 'local' || mode === 'remote') && Boolean(roomMeta?.multiGuest)
-      const urlOnlyMulti = useMulti && !localMeta?.multiGuest
       multiGuestRef.current = useMulti
       setMultiGuest(useMulti)
       if (roomMeta?.maxPlayers) {
@@ -985,7 +989,13 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
 
           const joinAsMultiGuest = async () => {
             signalingId = createSignalingGuestId(peerIdRef.current)
-            return chain.joinRoomAsGuest(normalized, signalingId, peerIdRef.current)
+            signalingGuestIdRef.current = signalingId
+            return chain.joinRoomAsGuest(
+              normalized,
+              signalingId,
+              peerIdRef.current,
+              guestSeat,
+            )
           }
 
           try {
@@ -1010,15 +1020,6 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
                 setMaxPlayers(maxPlayersRef.current)
               }
               offer = await joinAsMultiGuest()
-            } else if (useMulti && urlOnlyMulti) {
-              useMulti = false
-              multiGuestRef.current = false
-              setMultiGuest(false)
-              if (!opts?.asSpectator) {
-                seatRef.current = 2
-                setSeat(2)
-              }
-              offer = await chain.guestFetchOffer(normalized, offerTimeoutMs, peerIdRef.current)
             } else {
               throw fetchErr
             }
@@ -1329,6 +1330,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     signalingSessionUnsubRef.current = null
     signalingRef.current?.close({ rejectPending: true })
     signalingRef.current = null
+    signalingGuestIdRef.current = null
     multiHost.stop()
     connRef.current?.close()
     connRef.current = null

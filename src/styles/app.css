@@ -2581,6 +2581,17 @@ body.rg-faux-fullscreen {
   margin: 0.75rem 0 1rem;
 }
 
+.peer-lobby__roster {
+  margin: 0;
+  padding-left: 1.1rem;
+  list-style: disc;
+}
+
+.peer-lobby__roster-item--away {
+  opacity: 0.55;
+  font-style: italic;
+}
+
 .peer-lobby__mode {
   display: flex;
   align-items: flex-start;

@@ -25,7 +25,7 @@ import {
   type SignalingAdapterName,
 } from '../lib/peer/signaling'
 import { normalizeRoomCode } from '../lib/peer/joinUrl'
-import { getPeerId } from '../lib/peer/peerId'
+import { getPeerId, createSignalingGuestId } from '../lib/peer/peerId'
 import {
   clampMaxPlayers,
   type MaxPlayers,
@@ -287,12 +287,22 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   }, [])
 
   const applyRosterUpdate = useCallback(
-    (peers: Array<{ peerId: string; role: 'host' | 'guest'; seat: PeerSeat | null; name?: string }>, nextMax?: number) => {
+    (
+      peers: Array<{
+        peerId: string
+        role: 'host' | 'guest'
+        seat: PeerSeat | null
+        name?: string
+        status?: 'connected' | 'connecting' | 'disconnected'
+      }>,
+      nextMax?: number,
+    ) => {
       const entries: RosterEntry[] = peers.map((p) => ({
         peerId: p.peerId,
         role: p.role,
         seat: p.seat,
         name: p.name,
+        status: p.status,
       }))
       setRoster(entries)
       if (nextMax) {
@@ -924,16 +934,21 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
 
         try {
           let offer: string
+          let signalingId: string | undefined
           try {
-            offer = useMulti
-              ? await chain.joinRoomAsGuest(normalized, peerIdRef.current)
-              : await chain.guestFetchOffer(normalized, offerTimeoutMs, peerIdRef.current)
+            if (useMulti) {
+              signalingId = createSignalingGuestId(peerIdRef.current)
+              offer = await chain.joinRoomAsGuest(normalized, signalingId, peerIdRef.current)
+            } else {
+              offer = await chain.guestFetchOffer(normalized, offerTimeoutMs, peerIdRef.current)
+            }
           } catch (fetchErr) {
             if (mode === 'local' && !useMulti) {
               useMulti = true
               multiGuestRef.current = true
               setMultiGuest(true)
-              offer = await chain.joinRoomAsGuest(normalized, peerIdRef.current)
+              signalingId = createSignalingGuestId(peerIdRef.current)
+              offer = await chain.joinRoomAsGuest(normalized, signalingId, peerIdRef.current)
             } else {
               throw fetchErr
             }
@@ -942,8 +957,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           const conn = createConnection({ preserveSession: reconnectInFlightRef.current })
           const answer = await conn.createAnswerFromOffer(offer)
           setLocalSignal(answer)
-          if (useMulti) {
-            await chain.guestPublishAnswer(normalized, answer, peerIdRef.current)
+          if (useMulti && signalingId) {
+            await chain.guestPublishAnswer(normalized, answer, signalingId)
           } else {
             await chain.guestPublishAnswer(normalized, answer)
           }

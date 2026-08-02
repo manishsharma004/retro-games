@@ -25,17 +25,16 @@ export interface SignalingAdapter {
   guestPublishAnswer(code: string, answer: string, guestId?: string): Promise<void>
   waitForAnswer(code: string, timeoutMs?: number, guestId?: string): Promise<string>
   guestFetchOffer(code: string, timeoutMs?: number, guestId?: string): Promise<string>
-  joinRoomAsGuest?(code: string, guestId: string, timeoutMs?: number): Promise<string>
+  joinRoomAsGuest?(code: string, guestId: string, timeoutMs?: number, stablePeerId?: string): Promise<string>
   publishGuestOffer?(code: string, guestId: string, offer: string): Promise<void>
-  onGuestJoin?(handler: (guestId: string) => void): () => void
+  onGuestJoin?(handler: (signalingId: string, stablePeerId?: string) => void): () => void
   republishOffer?(code: string, offer: string): Promise<void>
   clearAnswer?(code: string, guestId?: string): void
+  clearGuestSlot?(code: string, guestId: string): void
   sendSessionMessage?(data: unknown): void
   onSessionMessage?(handler: (data: unknown) => void): () => void
   close(opts?: { rejectPending?: boolean }): void
 }
-
-/** Free public PeerJS cloud broker — default signaling path, no API key required. */
 export const DEFAULT_PEERJS_CONFIG = {
   host: '0.peerjs.com',
   secure: true,
@@ -109,6 +108,14 @@ function writeGuestSlot(
   const guests = { ...prev.guests }
   const slot = guests[guestId] ?? { joinedAt: Date.now() }
   guests[guestId] = { ...slot, ...patch, joinedAt: slot.joinedAt ?? Date.now() }
+  writeRoom(code, { guests })
+}
+
+function clearGuestSlot(code: string, guestId: string) {
+  const prev = readRoom(code)
+  if (!prev?.guests?.[guestId]) return
+  const guests = { ...prev.guests }
+  delete guests[guestId]
   writeRoom(code, { guests })
 }
 
@@ -272,7 +279,7 @@ function waitConnOpen(conn: DataConn, timeoutMs: number): Promise<void> {
 export class BroadcastSignalingAdapter implements SignalingAdapter {
   readonly name = 'broadcast' as const
   private codes: string[] = []
-  private guestJoinHandlers = new Set<(guestId: string) => void>()
+  private guestJoinHandlers = new Set<(signalingId: string, stablePeerId?: string) => void>()
   private pendingGuestJoins = new Set<string>()
   private bc: BroadcastChannel | null = null
 
@@ -289,15 +296,15 @@ export class BroadcastSignalingAdapter implements SignalingAdapter {
     }
   }
 
-  private notifyGuestJoin(guestId: string) {
+  private notifyGuestJoin(signalingId: string, stablePeerId?: string) {
     if (this.guestJoinHandlers.size === 0) {
-      this.pendingGuestJoins.add(guestId)
+      this.pendingGuestJoins.add(signalingId)
       return
     }
-    for (const h of this.guestJoinHandlers) h(guestId)
+    for (const h of this.guestJoinHandlers) h(signalingId, stablePeerId)
   }
 
-  onGuestJoin(handler: (guestId: string) => void) {
+  onGuestJoin(handler: (signalingId: string, stablePeerId?: string) => void) {
     this.guestJoinHandlers.add(handler)
     for (const guestId of this.pendingGuestJoins) handler(guestId)
     this.pendingGuestJoins.clear()
@@ -361,6 +368,10 @@ export class BroadcastSignalingAdapter implements SignalingAdapter {
       return
     }
     writeRoom(code, { answer: undefined })
+  }
+
+  clearGuestSlot(code: string, guestId: string) {
+    clearGuestSlot(code, guestId)
   }
 
   close(_opts?: { rejectPending?: boolean }) {
@@ -507,9 +518,10 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
   private latestOffer: string | null = null
   private latestMeta: SignalingRoomMeta | null = null
   private conns = new Map<string, DataConn>()
-  private guestJoinHandlers = new Set<(guestId: string) => void>()
+  private guestJoinHandlers = new Set<(signalingId: string, stablePeerId?: string) => void>()
   private guestAnswerWaits = new Map<string, { resolve: (a: string) => void; reject: (e: Error) => void }>()
   private pendingGuestJoins = new Set<string>()
+  private notifiedJoins = new Set<string>()
 
   get activeBrokerIndex(): number {
     return this.brokerIndex
@@ -535,12 +547,14 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     return peer
   }
 
-  private notifyGuestJoin(guestId: string) {
+  private notifyGuestJoin(signalingId: string, stablePeerId?: string) {
+    if (this.notifiedJoins.has(signalingId)) return
+    this.notifiedJoins.add(signalingId)
     if (this.guestJoinHandlers.size === 0) {
-      this.pendingGuestJoins.add(guestId)
+      this.pendingGuestJoins.add(signalingId)
       return
     }
-    for (const h of this.guestJoinHandlers) h(guestId)
+    for (const h of this.guestJoinHandlers) h(signalingId, stablePeerId)
   }
 
   private handleConnData(data: unknown, code: string, guestIdHint?: string) {
@@ -552,14 +566,6 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
       guestId?: string
     }
     const guestId = msg.guestId ?? guestIdHint
-
-    if (msg.type === 'join-request' && guestId) {
-      const conn = this.conns.get(guestId)
-      if (conn) {
-        this.notifyGuestJoin(guestId)
-      }
-      return
-    }
 
     if (msg.type === 'webrtc-answer' && guestId && msg.answer) {
       writeGuestSlot(code, guestId, { answer: msg.answer })
@@ -603,7 +609,7 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     return () => this.sessionHandlers.delete(handler)
   }
 
-  onGuestJoin(handler: (guestId: string) => void) {
+  onGuestJoin(handler: (signalingId: string, stablePeerId?: string) => void) {
     this.guestJoinHandlers.add(handler)
     for (const guestId of this.pendingGuestJoins) handler(guestId)
     this.pendingGuestJoins.clear()
@@ -611,9 +617,11 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
   }
 
   async publishGuestOffer(code: string, guestId: string, offer: string) {
-    writeGuestSlot(code, guestId, { offer })
+    writeGuestSlot(code, guestId, { offer, answer: undefined })
     const conn = this.conns.get(guestId)
-    if (conn?.open) conn.send({ type: 'webrtc-offer', guestId, offer })
+    if (!conn) return
+    await waitConnOpen(conn, 12_000)
+    conn.send({ type: 'webrtc-offer', guestId, offer })
   }
 
   private async joinRoomAsGuestOnBroker(
@@ -621,6 +629,7 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     guestId: string,
     timeoutMs: number,
     brokerIndex: number,
+    stablePeerId?: string,
   ): Promise<string> {
     const peer = await this.openPeer(undefined, brokerIndex)
     const conn = peer.connect(`rg-${normalized}`, { reliable: true })
@@ -646,7 +655,13 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
       }
       conn.on('data', onData)
       void waitConnOpen(conn, 12_000)
-        .then(() => conn.send({ type: 'join-request', guestId }))
+        .then(() =>
+          conn.send(
+            stablePeerId
+              ? { type: 'join-request', guestId, peerId: stablePeerId }
+              : { type: 'join-request', guestId },
+          ),
+        )
         .catch(() => {
           window.clearTimeout(timer)
           reject(new Error('PeerJS guest connection failed'))
@@ -654,7 +669,12 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     })
   }
 
-  async joinRoomAsGuest(code: string, guestId: string, timeoutMs = 45_000) {
+  async joinRoomAsGuest(
+    code: string,
+    guestId: string,
+    timeoutMs = 45_000,
+    stablePeerId?: string,
+  ) {
     const normalized = code.trim().toUpperCase()
     const localMeta = readRoom(normalized)?.meta
     const urlParams =
@@ -667,7 +687,13 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     let lastErr: Error | null = null
     for (const brokerIndex of this.brokerIndicesToTry(hint)) {
       try {
-        return await this.joinRoomAsGuestOnBroker(normalized, guestId, timeoutMs, brokerIndex)
+        return await this.joinRoomAsGuestOnBroker(
+          normalized,
+          guestId,
+          timeoutMs,
+          brokerIndex,
+          stablePeerId,
+        )
       } catch (err) {
         lastErr = err instanceof Error ? err : new Error('PeerJS guest connection failed')
         this.close({ rejectPending: true })
@@ -734,7 +760,8 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     writeRoom(code, { offer, meta: roomMeta, answer: undefined, guests: {} })
 
     peer.on('connection', (conn) => {
-      this.conn = conn
+      const multi = Boolean(meta.multiGuest)
+      if (!multi) this.conn = conn
       let boundGuestId: string | null = null
       void waitConnOpen(conn, 12_000).then(() => {
         if (!meta.multiGuest) {
@@ -749,11 +776,11 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
         }
       })
       conn.on('data', (data: unknown) => {
-        const msg = data as { type?: string; guestId?: string }
+        const msg = data as { type?: string; guestId?: string; peerId?: string }
         if (msg.type === 'join-request' && msg.guestId) {
           boundGuestId = msg.guestId
           this.conns.set(msg.guestId, conn)
-          this.notifyGuestJoin(msg.guestId)
+          this.notifyGuestJoin(msg.guestId, msg.peerId)
         } else if (msg.type === 'guest-ready') {
           if (meta.multiGuest) {
             const guestId =
@@ -762,7 +789,7 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
               `guest-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
             boundGuestId = guestId
             this.conns.set(guestId, conn)
-            this.notifyGuestJoin(guestId)
+            this.notifyGuestJoin(guestId, msg.peerId)
           } else if (this.latestOffer) {
             conn.send({
               type: 'offer',
@@ -772,6 +799,12 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
           }
         }
         this.handleConnData(data, code, boundGuestId ?? msg.guestId)
+      })
+      conn.on('close', () => {
+        if (boundGuestId) {
+          this.conns.delete(boundGuestId)
+          this.notifiedJoins.delete(boundGuestId)
+        }
       })
     })
 
@@ -915,6 +948,13 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     writeRoom(code, { answer: undefined })
     this.pendingAnswer = null
     this.clearAnswerWait()
+  }
+
+  clearGuestSlot(code: string, guestId: string) {
+    clearGuestSlot(code, guestId)
+    this.conns.delete(guestId)
+    this.notifiedJoins.delete(guestId)
+    this.guestAnswerWaits.delete(guestId)
   }
 
   close(opts?: { rejectPending?: boolean }) {
@@ -1116,7 +1156,7 @@ export class SignalingAdapterChain {
     }
   }
 
-  async joinRoomAsGuest(code: string, guestId: string) {
+  async joinRoomAsGuest(code: string, guestId: string, stablePeerId?: string) {
     const normalized = code.trim().toUpperCase()
     const localMeta = readRoom(normalized)?.meta
 
@@ -1132,7 +1172,7 @@ export class SignalingAdapterChain {
     }
 
     try {
-      const offer = await this.peerAdapter.joinRoomAsGuest!(code, guestId)
+      const offer = await this.peerAdapter.joinRoomAsGuest!(code, guestId, undefined, stablePeerId)
       this.active = this.peerAdapter
       this.lastAdapter = 'peerjs'
       return offer
@@ -1160,7 +1200,7 @@ export class SignalingAdapterChain {
     await this.broadcastAdapter.publishGuestOffer!(code, guestId, offer)
   }
 
-  onGuestJoin(handler: (guestId: string) => void) {
+  onGuestJoin(handler: (signalingId: string, stablePeerId?: string) => void) {
     const unsubs: Array<() => void> = []
     for (const adapter of this.adapters) {
       const unsub = adapter.onGuestJoin?.(handler)
@@ -1226,6 +1266,12 @@ export class SignalingAdapterChain {
   clearAnswer(code: string, guestId?: string) {
     this.active?.clearAnswer?.(code, guestId)
     this.broadcastAdapter.clearAnswer?.(code, guestId)
+  }
+
+  clearGuestSlot(code: string, guestId: string) {
+    this.active?.clearGuestSlot?.(code, guestId)
+    this.broadcastAdapter.clearGuestSlot?.(code, guestId)
+    this.peerAdapter.clearGuestSlot?.(code, guestId)
   }
 
   close(opts?: { rejectPending?: boolean }) {

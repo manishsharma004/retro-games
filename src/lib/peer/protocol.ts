@@ -44,6 +44,7 @@ export interface RosterPeer {
   role: PeerRole
   seat: PeerParticipationSeat
   name?: string
+  status?: 'connected' | 'connecting' | 'disconnected'
 }
 
 export type ControlMessage =

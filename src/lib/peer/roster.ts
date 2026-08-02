@@ -1,10 +1,17 @@
 import type { PeerParticipationSeat, PeerRole, PeerSeat } from './protocol'
 
+export type RosterConnectionStatus = 'connected' | 'connecting' | 'disconnected'
+
 export interface RosterEntry {
   peerId: string
   role: PeerRole
   seat: PeerParticipationSeat
   name?: string
+  /** Live connection state — guests stay listed when disconnected for rejoin tracking. */
+  status?: RosterConnectionStatus
+  lastSeenAt?: number
+  /** Active signaling session id while connected or handshaking. */
+  signalingId?: string
 }
 
 export const MAX_SNES_PLAYERS = 5 as const

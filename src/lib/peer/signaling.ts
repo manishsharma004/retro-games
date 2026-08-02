@@ -696,14 +696,22 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
           boundGuestId = msg.guestId
           this.conns.set(msg.guestId, conn)
           this.notifyGuestJoin(msg.guestId)
-        } else if (msg.type === 'guest-ready' && meta.multiGuest) {
-          const guestId =
-            msg.guestId ??
-            boundGuestId ??
-            `guest-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
-          boundGuestId = guestId
-          this.conns.set(guestId, conn)
-          this.notifyGuestJoin(guestId)
+        } else if (msg.type === 'guest-ready') {
+          if (meta.multiGuest) {
+            const guestId =
+              msg.guestId ??
+              boundGuestId ??
+              `guest-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+            boundGuestId = guestId
+            this.conns.set(guestId, conn)
+            this.notifyGuestJoin(guestId)
+          } else if (this.latestOffer) {
+            conn.send({
+              type: 'offer',
+              offer: this.latestOffer,
+              meta: this.latestMeta ?? meta,
+            })
+          }
         }
         this.handleConnData(data, code, boundGuestId ?? msg.guestId)
       })
@@ -782,13 +790,13 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     this.clearAnswerWait()
   }
 
-  async guestFetchOffer(code: string, timeoutMs = 45_000, guestId?: string) {
+  async guestFetchOffer(code: string, timeoutMs = 20_000, guestId?: string) {
     const normalized = code.trim().toUpperCase()
     const Peer = await this.loadPeer()
     const cfg = readPeerJsConfig()
     const peer = new Peer(cfg)
     this.peer = peer
-    await waitPeerOpen(peer, 12_000)
+    await waitPeerOpen(peer, 10_000)
     const conn = peer.connect(`rg-${normalized}`, { reliable: true })
     this.conn = conn
 
@@ -817,13 +825,13 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
         }
         this.handleConnData(data, normalized)
       })
-      void waitConnOpen(conn, 12_000)
+      void waitConnOpen(conn, 8_000)
         .then(() =>
           conn.send(guestId ? { type: 'guest-ready', guestId } : { type: 'guest-ready' }),
         )
         .catch(() => {
           window.clearTimeout(timer)
-          reject(new Error('PeerJS guest connection failed'))
+          reject(new Error('PeerJS guest connection failed — host may be offline'))
         })
     })
   }

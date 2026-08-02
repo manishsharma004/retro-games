@@ -342,6 +342,7 @@ export function RemotePlayGuestView({
               error={peer.error}
               hasVideo={remoteGuest.hasVideo}
               hostGameName={peer.hostGame?.name ?? null}
+              sessionMode="remote"
               onReconnect={() => peer.reconnectSession()}
               onLeave={() => {
                 peer.disconnect()

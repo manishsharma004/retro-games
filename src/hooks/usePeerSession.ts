@@ -912,7 +912,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       setSeat(guestSeat)
       updatePhase('connecting')
 
-      const maxAttempts = 6
+      const offerTimeoutMs = mode === 'remote' || mode === 'coop' ? 20_000 : 30_000
+      const maxAttempts = 4
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         if (!signalingRef.current) {
           const chain = new SignalingAdapterChain()
@@ -926,7 +927,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           try {
             offer = useMulti
               ? await chain.joinRoomAsGuest(normalized, peerIdRef.current)
-              : await chain.guestFetchOffer(normalized, 45_000, peerIdRef.current)
+              : await chain.guestFetchOffer(normalized, offerTimeoutMs, peerIdRef.current)
           } catch (fetchErr) {
             if (mode === 'local' && !useMulti) {
               useMulti = true
@@ -949,16 +950,24 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           updatePhase('guest-answer')
           return
         } catch (err) {
+          signalingRef.current?.close({ rejectPending: true })
+          signalingRef.current = null
           if (attempt < maxAttempts - 1) {
-            await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)))
+            setError(
+              attempt === 0
+                ? 'Host not reachable yet — retrying…'
+                : `Still trying (${attempt + 1}/${maxAttempts})…`,
+            )
+            await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)))
             continue
           }
-          setUseManualSignaling(true)
+          setUseManualSignaling(mode !== 'remote')
           setSignalingPath('manual')
+          const base = err instanceof Error ? err.message : 'Could not join room'
           setError(
-            err instanceof Error
-              ? `${err.message} — paste the host offer below`
-              : 'Could not join room — paste host offer manually',
+            mode === 'remote'
+              ? `${base} — ask the host to open Play with Friends, pick Remote, and create the room, then tap Reconnect`
+              : `${base} — paste the host offer below`,
           )
           updatePhase('error')
         }

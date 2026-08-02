@@ -1,4 +1,4 @@
-import type { PeerConnectionState } from '../lib/peer'
+import type { PeerConnectionState, SessionMode } from '../lib/peer'
 import type { PeerPhase } from '../hooks/usePeerSession'
 
 interface PeerConnectionStatusProps {
@@ -9,6 +9,7 @@ interface PeerConnectionStatusProps {
   error?: string | null
   hasVideo?: boolean
   hostGameName?: string | null
+  sessionMode?: SessionMode
   /** When false, hide after WebRTC connects (local controller guests). */
   requireVideo?: boolean
   variant?: 'overlay' | 'inline'
@@ -24,6 +25,7 @@ export function PeerConnectionStatus({
   error = null,
   hasVideo = false,
   hostGameName = null,
+  sessionMode,
   requireVideo = true,
   variant = 'overlay',
   onReconnect,
@@ -65,9 +67,17 @@ export function PeerConnectionStatus({
     detail = 'Finishing handshake with the host…'
   } else if (connecting) {
     title = 'Joining room…'
-    detail = roomCode
-      ? `Connecting to ${roomCode}. Make sure the host has started the session.`
-      : 'Connecting to the host…'
+    if (error && phase === 'connecting') {
+      detail = error
+    } else if (sessionMode === 'remote') {
+      detail = roomCode
+        ? `Connecting to ${roomCode}. The host must open Remote play and create this room first.`
+        : 'Connecting to the host…'
+    } else {
+      detail = roomCode
+        ? `Connecting to ${roomCode}. Make sure the host has started the session.`
+        : 'Connecting to the host…'
+    }
   } else if (waitingForStream) {
     title = 'Connected'
     detail = hostGameName
@@ -86,7 +96,7 @@ export function PeerConnectionStatus({
       <p className="peer-connection-status__title">{title}</p>
       {detail && <p className="peer-connection-status__detail">{detail}</p>}
       <div className="peer-connection-status__actions">
-        {(connectionLost || phase === 'error' || error) && onReconnect && (
+        {(connectionLost || phase === 'error' || (error && onReconnect)) && onReconnect && (
           <button type="button" className="btn btn--primary" onClick={() => void onReconnect()}>
             Reconnect
           </button>

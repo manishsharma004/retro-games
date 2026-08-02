@@ -13,6 +13,7 @@ import {
   type SessionMode,
 } from '../lib/peer'
 import { DEFAULT_LAYOUT } from '../lib/virtualLayout'
+import { playerSeats } from '../lib/peer/roster'
 import { loadSettings } from '../lib/settings'
 import '../styles/app.css'
 
@@ -29,12 +30,14 @@ function RolePicker({
   peer: ReturnType<typeof usePeerSession>
   name: string
 }) {
-  if (peer.connectionState !== 'connected') return null
+  if (peer.connectionState !== 'connected' && !(peer.multiGuest && peer.role === 'guest')) return null
+
+  const seats = playerSeats(peer.multiGuest ? peer.maxPlayers : 2)
 
   return (
     <div className="join-page__seats" role="radiogroup" aria-label="Your role">
       <p className="join-page__label">Your role</p>
-      {([1, 2] as const).map((player) => {
+      {seats.map((player) => {
         const taken = !peer.isSeatAvailable(player)
         const checked = peer.seat === player
         return (
@@ -63,10 +66,10 @@ function RolePicker({
         />
         <span>Spectator{peer.seat === null ? ' (you)' : ''}</span>
       </label>
-      {peer.remoteSeat && peer.seat && peer.remoteSeat !== peer.seat && (
+      {peer.remoteSeat && peer.seat && !peer.multiGuest && peer.remoteSeat !== peer.seat && (
         <p className="join-page__hint">Other device is Player {peer.remoteSeat}.</p>
       )}
-      {peer.remoteSpectator && peer.seat !== null && (
+      {!peer.multiGuest && peer.remoteSpectator && peer.seat !== null && (
         <p className="join-page__hint">Other device is spectating.</p>
       )}
     </div>

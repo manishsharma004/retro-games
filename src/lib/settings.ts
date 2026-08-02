@@ -22,6 +22,8 @@ export interface EmulatorSettings {
   nesRegion: 'Auto' | 'NTSC' | 'PAL'
   nesTurbo: 'None' | 'Both' | 'Player 1' | 'Player 2'
   snesRegion: 'auto' | 'ntsc' | 'pal'
+  /** SNES multitap player count (2–5). Requires relaunch. */
+  snesPlayerCount: 2 | 3 | 4 | 5
 }
 
 export const DEFAULT_SETTINGS: EmulatorSettings = {
@@ -44,6 +46,7 @@ export const DEFAULT_SETTINGS: EmulatorSettings = {
   nesRegion: 'Auto',
   nesTurbo: 'None',
   snesRegion: 'auto',
+  snesPlayerCount: 2,
 }
 
 const STORAGE_KEY = 'retro-games-settings-v1'
@@ -105,9 +108,66 @@ const PLAYER2_BINDS: Record<string, string> = {
   input_player2_select: 'semicolon',
 }
 
+const PLAYER3_BINDS: Record<string, string> = {
+  input_player3_up: 't',
+  input_player3_down: 'g',
+  input_player3_left: 'f',
+  input_player3_right: 'h',
+  input_player3_b: 'comma',
+  input_player3_a: 'period',
+  input_player3_y: 'q',
+  input_player3_x: 'w',
+  input_player3_l: 'e',
+  input_player3_r: 'r',
+  input_player3_start: 'y',
+  input_player3_select: 'u',
+}
+
+const PLAYER4_BINDS: Record<string, string> = {
+  input_player4_up: '7',
+  input_player4_down: '8',
+  input_player4_left: '9',
+  input_player4_right: '0',
+  input_player4_b: 'minus',
+  input_player4_a: 'equal',
+  input_player4_y: 'bracketleft',
+  input_player4_x: 'bracketright',
+  input_player4_l: 'backslash',
+  input_player4_r: 'quote',
+  input_player4_start: 'enter',
+  input_player4_select: 'backspace',
+}
+
+const PLAYER5_BINDS: Record<string, string> = {
+  input_player5_up: 'kp8',
+  input_player5_down: 'kp5',
+  input_player5_left: 'kp4',
+  input_player5_right: 'kp6',
+  input_player5_b: 'kp1',
+  input_player5_a: 'kp2',
+  input_player5_y: 'kp7',
+  input_player5_x: 'kp9',
+  input_player5_l: 'kp0',
+  input_player5_r: 'kpperiod',
+  input_player5_start: 'kpenter',
+  input_player5_select: 'kpplus',
+}
+
+export function snesMultitapEnabled(settings: EmulatorSettings): boolean {
+  return settings.snesPlayerCount > 2
+}
+
+function playerBindsForCount(count: number): Record<string, string> {
+  let binds: Record<string, string> = { ...PLAYER2_BINDS }
+  if (count >= 3) binds = { ...binds, ...PLAYER3_BINDS }
+  if (count >= 4) binds = { ...binds, ...PLAYER4_BINDS }
+  if (count >= 5) binds = { ...binds, ...PLAYER5_BINDS }
+  return binds
+}
+
 export function buildRetroarchConfig(
   settings: EmulatorSettings,
-  options?: RetroarchConfigOptions,
+  options?: RetroarchConfigOptions & { system?: 'nes' | 'snes' },
 ): Record<string, string | number | boolean> {
   const effective = options?.coop ? coopTimingSettings(settings) : settings
   // RetroArch audio_volume is in dB; map 0–100% → -80–0 dB
@@ -139,6 +199,18 @@ export function buildRetroarchConfig(
     input_libretro_device_p1: 1,
     input_libretro_device_p2: 1,
     ...PLAYER2_BINDS,
+  }
+
+  const snesCount = effective.snesPlayerCount
+  if (options?.system === 'snes' && snesCount > 2) {
+    Object.assign(base, {
+      input_max_users: 5,
+      input_libretro_device_p2: 257,
+      input_player3_joypad_index: 99,
+      input_player4_joypad_index: 99,
+      input_player5_joypad_index: 99,
+      ...playerBindsForCount(snesCount),
+    })
   }
 
   if (options?.coop) {

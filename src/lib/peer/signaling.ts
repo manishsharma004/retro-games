@@ -6,16 +6,21 @@ export type SignalingAdapterName = 'peerjs' | 'firebase' | 'broadcast' | 'manual
 export interface SignalingRoomMeta {
   mode: SessionMode
   hostName?: string
+  maxPlayers?: 2 | 3 | 4 | 5
+  multiGuest?: boolean
 }
 
 export interface SignalingAdapter {
   readonly name: SignalingAdapterName
   hostRoom(offer: string, meta: SignalingRoomMeta): Promise<{ code: string; joinUrl: string }>
-  guestPublishAnswer(code: string, answer: string): Promise<void>
-  waitForAnswer(code: string, timeoutMs?: number): Promise<string>
-  guestFetchOffer(code: string, timeoutMs?: number): Promise<string>
+  guestPublishAnswer(code: string, answer: string, guestId?: string): Promise<void>
+  waitForAnswer(code: string, timeoutMs?: number, guestId?: string): Promise<string>
+  guestFetchOffer(code: string, timeoutMs?: number, guestId?: string): Promise<string>
+  joinRoomAsGuest?(code: string, guestId: string, timeoutMs?: number): Promise<string>
+  publishGuestOffer?(code: string, guestId: string, offer: string): Promise<void>
+  onGuestJoin?(handler: (guestId: string) => void): () => void
   republishOffer?(code: string, offer: string): Promise<void>
-  clearAnswer?(code: string): void
+  clearAnswer?(code: string, guestId?: string): void
   sendSessionMessage?(data: unknown): void
   onSessionMessage?(handler: (data: unknown) => void): () => void
   close(opts?: { rejectPending?: boolean }): void
@@ -36,7 +41,66 @@ type RoomRecord = {
   offer?: string
   answer?: string
   meta?: SignalingRoomMeta
+  guests?: Record<string, { offer?: string; answer?: string; joinedAt: number }>
   updatedAt: number
+}
+
+function waitForGuestField(
+  code: string,
+  guestId: string,
+  field: 'offer' | 'answer',
+  timeoutMs: number,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const started = Date.now()
+    let bc: BroadcastChannel | null = null
+    const check = () => {
+      const rec = readRoom(code)
+      const slot = rec?.guests?.[guestId]
+      const value = field === 'offer' ? slot?.offer : slot?.answer
+      if (value) {
+        cleanup()
+        resolve(value)
+        return
+      }
+      if (Date.now() - started > timeoutMs) {
+        cleanup()
+        reject(new Error(`Timed out waiting for guest ${field}`))
+        return
+      }
+      window.setTimeout(check, 400)
+    }
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === roomKey(code)) check()
+    }
+    const onBc = (e: MessageEvent) => {
+      if (e.data?.type === 'room-update' && e.data?.code === code) check()
+    }
+    const cleanup = () => {
+      window.removeEventListener('storage', onStorage)
+      bc?.close()
+    }
+    window.addEventListener('storage', onStorage)
+    try {
+      bc = new BroadcastChannel(BC_CHANNEL)
+      bc.onmessage = onBc
+    } catch {
+      // polling only
+    }
+    check()
+  })
+}
+
+function writeGuestSlot(
+  code: string,
+  guestId: string,
+  patch: { offer?: string; answer?: string },
+) {
+  const prev = readRoom(code) ?? { updatedAt: Date.now() }
+  const guests = { ...prev.guests }
+  const slot = guests[guestId] ?? { joinedAt: Date.now() }
+  guests[guestId] = { ...slot, ...patch, joinedAt: slot.joinedAt ?? Date.now() }
+  writeRoom(code, { guests })
 }
 
 function roomKey(code: string): string {
@@ -69,6 +133,10 @@ function readRoom(code: string): RoomRecord | null {
   } catch {
     return null
   }
+}
+
+export function getSignalingRoomMeta(code: string): SignalingRoomMeta | null {
+  return readRoom(code.trim().toUpperCase())?.meta ?? null
 }
 
 function waitForRoomField(
@@ -172,33 +240,77 @@ function waitConnOpen(conn: DataConn, timeoutMs: number): Promise<void> {
 export class BroadcastSignalingAdapter implements SignalingAdapter {
   readonly name = 'broadcast' as const
   private codes: string[] = []
+  private guestJoinHandlers = new Set<(guestId: string) => void>()
+  private bc: BroadcastChannel | null = null
+
+  constructor() {
+    try {
+      this.bc = new BroadcastChannel(BC_CHANNEL)
+      this.bc.onmessage = (e) => {
+        if (e.data?.type === 'guest-join' && typeof e.data.guestId === 'string') {
+          for (const h of this.guestJoinHandlers) h(e.data.guestId)
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  onGuestJoin(handler: (guestId: string) => void) {
+    this.guestJoinHandlers.add(handler)
+    return () => this.guestJoinHandlers.delete(handler)
+  }
 
   async hostRoom(offer: string, meta: SignalingRoomMeta) {
     const code = generateRoomCode(4)
     this.codes.push(code)
-    writeRoom(code, { offer, meta, answer: undefined })
+    writeRoom(code, { offer, meta, answer: undefined, guests: {} })
     return { code, joinUrl: buildJoinUrl(code, meta.mode) }
   }
 
-  async guestPublishAnswer(code: string, answer: string) {
+  async guestPublishAnswer(code: string, answer: string, guestId?: string) {
+    if (guestId) {
+      writeGuestSlot(code, guestId, { answer })
+      return
+    }
     writeRoom(code, { answer })
   }
 
-  async waitForAnswer(code: string, timeoutMs = 120_000) {
+  async waitForAnswer(code: string, timeoutMs = 120_000, guestId?: string) {
+    if (guestId) return waitForGuestField(code, guestId, 'answer', timeoutMs)
     return waitForRoomField(code, 'answer', timeoutMs)
   }
 
-  async guestFetchOffer(code: string, timeoutMs = 30_000) {
+  async guestFetchOffer(code: string, timeoutMs = 30_000, guestId?: string) {
+    if (guestId) return waitForGuestField(code, guestId, 'offer', timeoutMs)
     const existing = readRoom(code)?.offer
     if (existing) return existing
     return waitForRoomField(code, 'offer', timeoutMs)
+  }
+
+  async joinRoomAsGuest(code: string, guestId: string, timeoutMs = 45_000) {
+    writeGuestSlot(code, guestId, {})
+    try {
+      this.bc?.postMessage({ type: 'guest-join', guestId, code })
+    } catch {
+      // ignore
+    }
+    return waitForGuestField(code, guestId, 'offer', timeoutMs)
+  }
+
+  async publishGuestOffer(code: string, guestId: string, offer: string) {
+    writeGuestSlot(code, guestId, { offer })
   }
 
   async republishOffer(code: string, offer: string) {
     writeRoom(code, { offer, answer: undefined })
   }
 
-  clearAnswer(code: string) {
+  clearAnswer(code: string, guestId?: string) {
+    if (guestId) {
+      writeGuestSlot(code, guestId, { answer: undefined })
+      return
+    }
     writeRoom(code, { answer: undefined })
   }
 
@@ -207,6 +319,8 @@ export class BroadcastSignalingAdapter implements SignalingAdapter {
       localStorage.removeItem(roomKey(code))
     }
     this.codes = []
+    this.bc?.close()
+    this.bc = null
   }
 }
 
@@ -238,8 +352,17 @@ export class FirebaseSignalingAdapter implements SignalingAdapter {
     return { code, joinUrl: buildJoinUrl(code, meta.mode) }
   }
 
-  async guestPublishAnswer(code: string, answer: string) {
+  async guestPublishAnswer(code: string, answer: string, guestId?: string) {
     if (!this.enabled()) throw new Error('Firebase not configured')
+    if (guestId) {
+      const res = await fetch(this.url(`rooms/${code}/guests/${guestId}/answer`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(answer),
+      })
+      if (!res.ok) throw new Error('Firebase guest answer publish failed')
+      return
+    }
     const res = await fetch(this.url(`rooms/${code}/answer`), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -248,11 +371,12 @@ export class FirebaseSignalingAdapter implements SignalingAdapter {
     if (!res.ok) throw new Error('Firebase answer publish failed')
   }
 
-  async waitForAnswer(code: string, timeoutMs = 120_000) {
+  async waitForAnswer(code: string, timeoutMs = 120_000, guestId?: string) {
     if (!this.enabled()) throw new Error('Firebase not configured')
     const started = Date.now()
     while (Date.now() - started < timeoutMs) {
-      const res = await fetch(this.url(`rooms/${code}/answer`))
+      const path = guestId ? `rooms/${code}/guests/${guestId}/answer` : `rooms/${code}/answer`
+      const res = await fetch(this.url(path))
       if (res.ok) {
         const answer = await res.json()
         if (typeof answer === 'string' && answer.length > 0) return answer
@@ -262,8 +386,20 @@ export class FirebaseSignalingAdapter implements SignalingAdapter {
     throw new Error('Firebase answer timeout')
   }
 
-  async guestFetchOffer(code: string, timeoutMs = 30_000) {
+  async guestFetchOffer(code: string, timeoutMs = 30_000, guestId?: string) {
     if (!this.enabled()) throw new Error('Firebase not configured')
+    if (guestId) {
+      const started = Date.now()
+      while (Date.now() - started < timeoutMs) {
+        const res = await fetch(this.url(`rooms/${code}/guests/${guestId}/offer`))
+        if (res.ok) {
+          const offer = await res.json()
+          if (typeof offer === 'string' && offer.length > 0) return offer
+        }
+        await new Promise((r) => setTimeout(r, 500))
+      }
+      throw new Error('Firebase guest offer timeout')
+    }
     const started = Date.now()
     while (Date.now() - started < timeoutMs) {
       const res = await fetch(this.url(`rooms/${code}`))
@@ -286,8 +422,12 @@ export class FirebaseSignalingAdapter implements SignalingAdapter {
     await fetch(this.url(`rooms/${code}/answer`), { method: 'DELETE' })
   }
 
-  clearAnswer(code: string) {
+  clearAnswer(code: string, guestId?: string) {
     if (!this.enabled()) return
+    if (guestId) {
+      void fetch(this.url(`rooms/${code}/guests/${guestId}/answer`), { method: 'DELETE' })
+      return
+    }
     void fetch(this.url(`rooms/${code}/answer`), { method: 'DELETE' })
   }
 
@@ -316,14 +456,38 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
   private sessionHandlers = new Set<(data: unknown) => void>()
   private latestOffer: string | null = null
   private latestMeta: SignalingRoomMeta | null = null
+  private conns = new Map<string, DataConn>()
+  private guestJoinHandlers = new Set<(guestId: string) => void>()
+  private guestAnswerWaits = new Map<string, { resolve: (a: string) => void; reject: (e: Error) => void }>()
 
-  private handleConnData(data: unknown, code: string) {
+  private handleConnData(data: unknown, code: string, guestIdHint?: string) {
     const msg = data as {
       type?: string
       answer?: string
       offer?: string
       sdp?: string
+      guestId?: string
     }
+    const guestId = msg.guestId ?? guestIdHint
+
+    if (msg.type === 'join-request' && guestId) {
+      const conn = this.conns.get(guestId)
+      if (conn) {
+        for (const h of this.guestJoinHandlers) h(guestId)
+      }
+      return
+    }
+
+    if (msg.type === 'webrtc-answer' && guestId && msg.answer) {
+      writeGuestSlot(code, guestId, { answer: msg.answer })
+      const wait = this.guestAnswerWaits.get(guestId)
+      if (wait) {
+        this.guestAnswerWaits.delete(guestId)
+        wait.resolve(msg.answer)
+      }
+      return
+    }
+
     if (msg.type === 'answer' && msg.answer) {
       writeRoom(code, { answer: msg.answer })
       this.deliverAnswer(msg.answer)
@@ -354,6 +518,55 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
   onSessionMessage(handler: (data: unknown) => void) {
     this.sessionHandlers.add(handler)
     return () => this.sessionHandlers.delete(handler)
+  }
+
+  onGuestJoin(handler: (guestId: string) => void) {
+    this.guestJoinHandlers.add(handler)
+    return () => this.guestJoinHandlers.delete(handler)
+  }
+
+  async publishGuestOffer(code: string, guestId: string, offer: string) {
+    writeGuestSlot(code, guestId, { offer })
+    const conn = this.conns.get(guestId)
+    if (conn?.open) conn.send({ type: 'webrtc-offer', guestId, offer })
+  }
+
+  async joinRoomAsGuest(code: string, guestId: string, timeoutMs = 45_000) {
+    const normalized = code.trim().toUpperCase()
+    const Peer = await this.loadPeer()
+    const cfg = readPeerJsConfig()
+    const peer = new Peer(cfg)
+    this.peer = peer
+    await waitPeerOpen(peer, 12_000)
+    const conn = peer.connect(`rg-${normalized}`, { reliable: true })
+    this.conn = conn
+    this.conns.set(guestId, conn)
+
+    return new Promise<string>((resolve, reject) => {
+      const timer = window.setTimeout(() => reject(new Error('PeerJS guest offer timeout')), timeoutMs)
+      const onData = (data: unknown) => {
+        const msg = data as { type?: string; offer?: string; guestId?: string }
+        if (msg.type === 'webrtc-offer' && msg.offer && msg.guestId === guestId) {
+          window.clearTimeout(timer)
+          conn.off('data', onData)
+          resolve(msg.offer)
+          return
+        }
+        if (msg.type === 'offer' && msg.offer) {
+          window.clearTimeout(timer)
+          conn.off('data', onData)
+          resolve(msg.offer)
+        }
+        this.handleConnData(data, normalized, guestId)
+      }
+      conn.on('data', onData)
+      void waitConnOpen(conn, 12_000)
+        .then(() => conn.send({ type: 'join-request', guestId }))
+        .catch(() => {
+          window.clearTimeout(timer)
+          reject(new Error('PeerJS guest connection failed'))
+        })
+    })
   }
 
   private deliverAnswer(answer: string) {
@@ -413,22 +626,31 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     this.latestMeta = meta
 
     // Same-browser / offline fallback while PeerJS broker is flaky.
-    writeRoom(code, { offer, meta, answer: undefined })
+    writeRoom(code, { offer, meta, answer: undefined, guests: {} })
 
     this.attachPeerLifecycle(peer)
 
     peer.on('connection', (conn) => {
       this.conn = conn
+      let boundGuestId: string | null = null
       void waitConnOpen(conn, 12_000).then(() => {
-        const payload = {
-          type: 'offer',
-          offer: this.latestOffer ?? offer,
-          meta: this.latestMeta ?? meta,
+        if (!meta.multiGuest) {
+          const payload = {
+            type: 'offer',
+            offer: this.latestOffer ?? offer,
+            meta: this.latestMeta ?? meta,
+          }
+          conn.send(payload)
         }
-        conn.send(payload)
       })
       conn.on('data', (data: unknown) => {
-        this.handleConnData(data, code)
+        const msg = data as { type?: string; guestId?: string }
+        if (msg.type === 'join-request' && msg.guestId) {
+          boundGuestId = msg.guestId
+          this.conns.set(msg.guestId, conn)
+          for (const h of this.guestJoinHandlers) h(msg.guestId)
+        }
+        this.handleConnData(data, code, boundGuestId ?? msg.guestId)
       })
     })
 
@@ -437,13 +659,32 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     return { code, joinUrl: buildJoinUrl(code, meta.mode) }
   }
 
-  async guestPublishAnswer(code: string, answer: string) {
+  async guestPublishAnswer(code: string, answer: string, guestId?: string) {
+    if (guestId) {
+      writeGuestSlot(code, guestId, { answer })
+      const conn = this.conns.get(guestId) ?? this.conn
+      if (conn?.open) conn.send({ type: 'webrtc-answer', guestId, answer })
+      return
+    }
     writeRoom(code, { answer })
     if (!this.conn?.open) throw new Error('PeerJS guest connection not open')
     this.conn.send({ type: 'answer', answer })
   }
 
-  async waitForAnswer(code: string, timeoutMs = 120_000) {
+  async waitForAnswer(code: string, timeoutMs = 120_000, guestId?: string) {
+    if (guestId) {
+      const existing = readRoom(code)?.guests?.[guestId]?.answer
+      if (existing) return existing
+      return new Promise<string>((resolve, reject) => {
+        this.guestAnswerWaits.set(guestId, { resolve, reject })
+        window.setTimeout(() => {
+          if (this.guestAnswerWaits.has(guestId)) {
+            this.guestAnswerWaits.delete(guestId)
+            reject(new Error('PeerJS guest answer timeout'))
+          }
+        }, timeoutMs)
+      })
+    }
     this.clearAnswerWait()
 
     const existing = readRoom(code)?.answer
@@ -476,7 +717,11 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     }
   }
 
-  clearAnswer(code: string) {
+  clearAnswer(code: string, guestId?: string) {
+    if (guestId) {
+      writeGuestSlot(code, guestId, { answer: undefined })
+      return
+    }
     writeRoom(code, { answer: undefined })
     this.pendingAnswer = null
     this.clearAnswerWait()
@@ -520,6 +765,10 @@ export class PeerJSSignalingAdapter implements SignalingAdapter {
     this.clearAnswerWait()
     this.pendingAnswer = null
     this.sessionHandlers.clear()
+    for (const conn of this.conns.values()) conn.close()
+    this.conns.clear()
+    this.guestJoinHandlers.clear()
+    this.guestAnswerWaits.clear()
     this.conn?.close()
     this.peer?.destroy()
     this.conn = null
@@ -615,19 +864,61 @@ export class SignalingAdapterChain {
     throw new Error('Could not fetch offer — try manual SDP paste')
   }
 
-  async guestPublishAnswer(code: string, answer: string) {
+  async guestPublishAnswer(code: string, answer: string, guestId?: string) {
     if (this.active) {
-      await this.active.guestPublishAnswer(code, answer)
+      await this.active.guestPublishAnswer(code, answer, guestId)
       return
     }
     for (const adapter of this.adapters) {
       try {
-        await adapter.guestPublishAnswer(code, answer)
+        await adapter.guestPublishAnswer(code, answer, guestId)
         this.active = adapter
         return
       } catch {
         adapter.close()
       }
+    }
+  }
+
+  async joinRoomAsGuest(code: string, guestId: string) {
+    const order = [
+      this.adapters.find((a) => a.name === 'peerjs'),
+      this.broadcastAdapter,
+      ...this.adapters.filter((a) => a.name !== 'peerjs' && a.name !== 'broadcast'),
+    ].filter(Boolean) as SignalingAdapter[]
+
+    for (const adapter of order) {
+      if (!adapter.joinRoomAsGuest) continue
+      try {
+        this.active = adapter
+        const offer = await adapter.joinRoomAsGuest(code, guestId)
+        this.lastAdapter = adapter.name
+        return offer
+      } catch {
+        adapter.close()
+      }
+    }
+    throw new Error('Could not join room as guest')
+  }
+
+  async publishGuestOffer(code: string, guestId: string, offer: string) {
+    if (this.active?.publishGuestOffer) {
+      await this.active.publishGuestOffer(code, guestId, offer)
+      return
+    }
+    await this.broadcastAdapter.publishGuestOffer!(code, guestId, offer)
+  }
+
+  onGuestJoin(handler: (guestId: string) => void) {
+    const unsubs: Array<() => void> = []
+    for (const adapter of this.adapters) {
+      const unsub = adapter.onGuestJoin?.(handler)
+      if (unsub) unsubs.push(unsub)
+    }
+    const broadcastUnsub = this.broadcastAdapter.onGuestJoin(handler)
+    unsubs.push(broadcastUnsub)
+    return () => {
+      for (const u of unsubs) u()
     }
   }
 
@@ -644,22 +935,25 @@ export class SignalingAdapterChain {
     }
   }
 
-  async waitForAnswer(code: string) {
+  async waitForAnswer(code: string, guestId?: string) {
     const waits: Promise<string>[] = []
 
     if (this.active) {
-      waits.push(this.active.waitForAnswer(code))
+      waits.push(this.active.waitForAnswer(code, 120_000, guestId))
     }
 
-    // PeerJS host also mirrors the offer to localStorage — listen there too.
-    if (this.active?.name === 'peerjs') {
+    if (this.active?.name === 'peerjs' && !guestId) {
       waits.push(this.broadcastAdapter.waitForAnswer(code))
+    }
+
+    if (guestId && this.broadcastAdapter) {
+      waits.push(this.broadcastAdapter.waitForAnswer(code, 120_000, guestId))
     }
 
     if (waits.length === 0) {
       for (const adapter of this.adapters) {
         try {
-          return await adapter.waitForAnswer(code)
+          return await adapter.waitForAnswer(code, 120_000, guestId)
         } catch {
           adapter.close()
         }
@@ -678,9 +972,9 @@ export class SignalingAdapterChain {
     await this.broadcastAdapter.republishOffer!(code, offer)
   }
 
-  clearAnswer(code: string) {
-    this.active?.clearAnswer?.(code)
-    this.broadcastAdapter.clearAnswer?.(code)
+  clearAnswer(code: string, guestId?: string) {
+    this.active?.clearAnswer?.(code, guestId)
+    this.broadcastAdapter.clearAnswer?.(code, guestId)
   }
 
   close(opts?: { rejectPending?: boolean }) {

@@ -1,5 +1,7 @@
 import type { ConnectedGamepad } from '../hooks/useGamepads'
 import type { PeerSeat } from '../lib/peer/protocol'
+import type { MaxPlayers } from '../lib/peer/roster'
+import { playerSeats } from '../lib/peer/roster'
 import {
   shortGamepadName,
   type ControllerBindings,
@@ -12,13 +14,16 @@ interface ControllerPanelProps {
   pads: ConnectedGamepad[]
   bindings: ControllerBindings
   onChange: (next: ControllerBindings) => void
-  peerSeat: 1 | 2 | null
+  peerSeat: PeerSeat | null
+  maxLocalSeats?: MaxPlayers
   /** Co-op: pick P1/P2 with mutual exclusion across devices. */
   remoteSeat?: PeerSeat | null
-  onPickSeat?: (seat: 1 | 2) => void
-  onPickRole?: (seat: 1 | 2 | null) => void
-  isSeatAvailable?: (seat: 1 | 2) => boolean
+  onPickSeat?: (seat: PeerSeat) => void
+  onPickRole?: (seat: PeerSeat | null) => void
+  isSeatAvailable?: (seat: PeerSeat) => boolean
   remoteSpectator?: boolean
+  multiGuest?: boolean
+  maxPlayers?: MaxPlayers
 }
 
 function slotOptions(
@@ -50,18 +55,22 @@ export function ControllerPanel({
   bindings,
   onChange,
   peerSeat,
+  maxLocalSeats = 2,
   remoteSeat = null,
   onPickSeat,
   onPickRole,
   isSeatAvailable,
   remoteSpectator = false,
+  multiGuest = false,
+  maxPlayers = 2,
 }: ControllerPanelProps) {
   if (!open) return null
 
   const pickRoleFn = onPickRole ?? onPickSeat
-
-  const pad1Options = slotOptions(pads, true)
-  const pad2Options = slotOptions(pads, true)
+  const seatPickerSeats = playerSeats(multiGuest ? maxPlayers : 2)
+  const padOptions = slotOptions(pads, true)
+  const showLocalPads = peerSeat === null
+  const localSeats = playerSeats(maxLocalSeats)
 
   return (
     <div className="peer-lobby" role="dialog" aria-modal="true" aria-label="Controllers">
@@ -100,7 +109,7 @@ export function ControllerPanel({
         {pickRoleFn && isSeatAvailable && (
           <div className="controller-panel__seats" role="radiogroup" aria-label="Player slot">
             <p className="peer-lobby__label">Your role</p>
-            {([1, 2] as const).map((player) => {
+            {seatPickerSeats.map((player) => {
               const taken = !isSeatAvailable(player)
               const checked = peerSeat === player
               return (
@@ -132,55 +141,44 @@ export function ControllerPanel({
                 </span>
               </label>
             )}
-            {remoteSeat && peerSeat && remoteSeat !== peerSeat && (
+            {!multiGuest && remoteSeat && peerSeat && remoteSeat !== peerSeat && (
               <p className="peer-lobby__hint">
                 Other device is Player {remoteSeat}.
               </p>
             )}
-            {remoteSpectator && peerSeat !== null && (
+            {!multiGuest && remoteSpectator && peerSeat !== null && (
               <p className="peer-lobby__hint">Other device is spectating.</p>
             )}
           </div>
         )}
 
-        <label className="controller-panel__field">
-          <span>
-            {peerSeat
-              ? `Gamepad for Player ${peerSeat}`
-              : 'Player 1 pad'}
-          </span>
-          <select
-            value={String(bindings.pad1)}
-            onChange={(e) => onChange({ ...bindings, pad1: parseSlot(e.target.value) })}
-          >
-            {pad1Options.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {!peerSeat && (
-          <label className="controller-panel__field">
-            <span>Player 2 pad (same device couch co-op)</span>
+        {(showLocalPads ? localSeats : peerSeat ? [peerSeat] : []).map((seat) => {
+          const padKey = `pad${seat}` as keyof ControllerBindings
+          return (
+          <label key={seat} className="controller-panel__field">
+            <span>
+              {peerSeat ? `Gamepad for Player ${peerSeat}` : `Player ${seat} pad`}
+            </span>
             <select
-              value={String(bindings.pad2)}
-              onChange={(e) => onChange({ ...bindings, pad2: parseSlot(e.target.value) })}
+              value={String(bindings[padKey])}
+              onChange={(e) =>
+                onChange({ ...bindings, [padKey]: parseSlot(e.target.value) })
+              }
             >
-              {pad2Options.map((opt) => (
+              {padOptions.map((opt) => (
                 <option key={opt.value} value={opt.value}>
                   {opt.label}
                 </option>
               ))}
             </select>
           </label>
-        )}
+          )
+        })}
 
         {peerSeat && !pickRoleFn && (
           <p className="peer-lobby__hint">
-            In a 2-player link, only your seat (P{peerSeat}) is sent to the peer. The other player
-            uses their own device.
+            In a peer link, only your seat (P{peerSeat}) is sent to the host. Other players use their
+            own devices.
           </p>
         )}
 
@@ -188,7 +186,15 @@ export function ControllerPanel({
           <button
             type="button"
             className="btn btn--ghost"
-            onClick={() => onChange({ pad1: 'auto', pad2: 'auto' })}
+            onClick={() =>
+              onChange({
+                pad1: 'auto',
+                pad2: 'auto',
+                pad3: 'auto',
+                pad4: 'none',
+                pad5: 'none',
+              })
+            }
           >
             Reset to auto
           </button>

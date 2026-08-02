@@ -5,6 +5,9 @@ import { copySignalString, type LatencyProfile } from '../lib/peer'
 import type { SessionMode } from '../lib/peer/protocol'
 import type { PeerPhase, PeerTransferStatus } from '../hooks/usePeerSession'
 import type { PeerConnectionState, PeerRole, PeerSeat } from '../lib/peer'
+import type { MaxPlayers, RosterEntry } from '../lib/peer/roster'
+import { playerSeats } from '../lib/peer/roster'
+import type { SystemId } from '../lib/cores'
 
 interface PeerLobbyProps {
   open: boolean
@@ -37,9 +40,9 @@ interface PeerLobbyProps {
   onDisconnect: () => void
   remoteSeat?: PeerSeat | null
   remoteSpectator?: boolean
-  onPickRole?: (seat: 1 | 2 | null) => void
-  onPickSeat?: (seat: 1 | 2) => void
-  isSeatAvailable?: (seat: 1 | 2) => boolean
+  onPickRole?: (seat: PeerSeat | null) => void
+  onPickSeat?: (seat: PeerSeat) => void
+  isSeatAvailable?: (seat: PeerSeat) => boolean
   onJoinRoomCode?: (code: string, opts: { asSpectator: boolean }) => void | Promise<void>
   onReconnect?: () => void | Promise<void>
   connectionLost?: boolean
@@ -48,6 +51,12 @@ interface PeerLobbyProps {
   latencyProfile?: LatencyProfile
   suggestStateSync?: boolean
   onOpenControllers?: () => void
+  gameSystem?: SystemId | null
+  multiGuest?: boolean
+  maxPlayers?: MaxPlayers
+  onMaxPlayersChange?: (n: MaxPlayers) => void
+  roster?: RosterEntry[]
+  connectedGuestCount?: number
 }
 
 export function PeerLobby({
@@ -92,6 +101,12 @@ export function PeerLobby({
   latencyProfile,
   suggestStateSync = false,
   onOpenControllers,
+  gameSystem = null,
+  multiGuest = false,
+  maxPlayers = 2,
+  onMaxPlayersChange,
+  roster = [],
+  connectedGuestCount = 0,
 }: PeerLobbyProps) {
   const [pasteValue, setPasteValue] = useState('')
   const [qrUrl, setQrUrl] = useState<string | null>(null)
@@ -150,8 +165,10 @@ export function PeerLobby({
 
   const showCoopFlow = sessionMode === 'coop'
   const pickRoleFn = onPickRole ?? onPickSeat
+  const seatPickerSeats = playerSeats(multiGuest ? maxPlayers : 2)
   const showRolePicker =
-    connectionState === 'connected' && Boolean(pickRoleFn && isSeatAvailable)
+    Boolean(pickRoleFn && isSeatAvailable) &&
+    (connectionState === 'connected' || (multiGuest && role === 'host' && phase !== 'idle'))
   const showManualExchange =
     manualOpen ||
     useManualSignaling ||
@@ -326,6 +343,22 @@ export function PeerLobby({
                   />
                   <span>Manual SDP WebRTC paste</span>
                 </label>
+                {sessionMode === 'local' && gameSystem === 'snes' && onMaxPlayersChange && (
+                  <label className="peer-lobby__mode">
+                    <span>Max players (SNES multitap)</span>
+                    <select
+                      value={maxPlayers}
+                      onChange={(e) =>
+                        onMaxPlayersChange(Number(e.target.value) as MaxPlayers)
+                      }
+                    >
+                      <option value={2}>2</option>
+                      <option value={3}>3</option>
+                      <option value={4}>4</option>
+                      <option value={5}>5</option>
+                    </select>
+                  </label>
+                )}
                 {sessionMode === 'local' && (
                   <label className="peer-lobby__mode">
                     <input
@@ -534,7 +567,7 @@ export function PeerLobby({
             {showRolePicker && (
               <div className="peer-lobby__modes" role="radiogroup" aria-label="Your role">
                 <p className="peer-lobby__label">Your role</p>
-                {([1, 2] as const).map((player) => {
+                {seatPickerSeats.map((player) => {
                   const taken = !isSeatAvailable!(player)
                   const checked = seat === player
                   return (
@@ -565,12 +598,27 @@ export function PeerLobby({
                     <span>Spectator{seat === null ? ' (you)' : ''}</span>
                   </label>
                 )}
-                {remoteSeat && seat && remoteSeat !== seat && (
+                {!multiGuest && remoteSeat && seat && remoteSeat !== seat && (
                   <p className="peer-lobby__hint">Other device is Player {remoteSeat}.</p>
                 )}
-                {remoteSpectator && seat !== null && (
+                {!multiGuest && remoteSpectator && seat !== null && (
                   <p className="peer-lobby__hint">Other device is spectating.</p>
                 )}
+              </div>
+            )}
+            {multiGuest && roster.length > 0 && (
+              <div className="peer-lobby__modes">
+                <p className="peer-lobby__label">
+                  Players ({connectedGuestCount + 1}/{maxPlayers} connected)
+                </p>
+                <ul className="peer-lobby__roster">
+                  {roster.map((entry) => (
+                    <li key={entry.peerId}>
+                      {entry.role === 'host' ? 'Host' : 'Guest'} ·{' '}
+                      {entry.seat === null ? 'Spectator' : `P${entry.seat}`}
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
             {phase === 'linked' && role === 'host' && showCoopFlow && (

@@ -776,9 +776,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       hostOfferInFlightRef.current = true
       const generation = ++hostGenerationRef.current
 
-      const system = opts?.system ?? optionsRef.current.system ?? null
       const playerCap = clampMaxPlayers(opts?.maxPlayers ?? 2)
-      const useMultiGuest = mode === 'local' && system === 'snes' && playerCap > 2
+      const useMultiGuest = mode === 'local' && playerCap > 2
 
       setError(null)
       setConnectionLost(false)

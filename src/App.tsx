@@ -363,7 +363,11 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   })
 
   const maxLocalSeats =
-    emu.game?.system === 'snes' ? settings.snesPlayerCount : 2
+    peer.multiGuest && peer.maxPlayers > 2
+      ? peer.maxPlayers
+      : emu.game?.system === 'snes'
+        ? settings.snesPlayerCount
+        : 2
 
   useGamepadControls({
     enabled: inputEnabled,
@@ -836,7 +840,12 @@ export default function App({ initialCoopJoin = null }: AppProps) {
         gameSystem={emu.game?.system ?? null}
         multiGuest={peer.multiGuest}
         maxPlayers={peer.multiGuest ? peer.maxPlayers : hostMaxPlayers}
-        onMaxPlayersChange={setHostMaxPlayers}
+        onMaxPlayersChange={(n) => {
+          setHostMaxPlayers(n)
+          if (n > 2) {
+            setSettings((s) => ({ ...s, snesPlayerCount: n }))
+          }
+        }}
         roster={peer.roster}
         connectedGuestCount={peer.connectedGuestCount}
       />

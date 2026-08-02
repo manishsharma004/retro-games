@@ -316,6 +316,32 @@ export function PeerLobby({
               </label>
             </div>
 
+            {sessionMode === 'local' && onMaxPlayersChange && (
+              <div className="peer-lobby__modes">
+                <label className="peer-lobby__mode peer-lobby__mode--row">
+                  <span>Max players</span>
+                  <select
+                    value={maxPlayers}
+                    onChange={(e) =>
+                      onMaxPlayersChange(Number(e.target.value) as MaxPlayers)
+                    }
+                  >
+                    <option value={2}>2</option>
+                    <option value={3}>3</option>
+                    <option value={4}>4</option>
+                    <option value={5}>5</option>
+                  </select>
+                </label>
+                {maxPlayers > 2 && (
+                  <p className="peer-lobby__hint">
+                    {gameSystem === 'snes'
+                      ? 'SNES multitap — each guest joins as P2–P5 from their phone.'
+                      : 'Load an SNES ROM for 3–5 player multitap (NES supports 2 players only).'}
+                  </p>
+                )}
+              </div>
+            )}
+
             <button
               type="button"
               className="btn btn--ghost peer-lobby__advanced"
@@ -343,22 +369,6 @@ export function PeerLobby({
                   />
                   <span>Manual SDP WebRTC paste</span>
                 </label>
-                {sessionMode === 'local' && gameSystem === 'snes' && onMaxPlayersChange && (
-                  <label className="peer-lobby__mode">
-                    <span>Max players (SNES multitap)</span>
-                    <select
-                      value={maxPlayers}
-                      onChange={(e) =>
-                        onMaxPlayersChange(Number(e.target.value) as MaxPlayers)
-                      }
-                    >
-                      <option value={2}>2</option>
-                      <option value={3}>3</option>
-                      <option value={4}>4</option>
-                      <option value={5}>5</option>
-                    </select>
-                  </label>
-                )}
                 {sessionMode === 'local' && (
                   <label className="peer-lobby__mode">
                     <input

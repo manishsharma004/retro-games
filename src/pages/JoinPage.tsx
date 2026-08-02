@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { LatencyBadge } from '../components/LatencyBadge'
+import { PeerConnectionStatus } from '../components/PeerConnectionStatus'
 import { RemotePlayGuestView } from '../components/RemotePlayGuestView'
 import { VirtualController } from '../components/VirtualController'
 import { usePeerSession } from '../hooks/usePeerSession'
@@ -176,6 +177,21 @@ export function JoinPage({ initialRoom, initialMode, initialRole = 'player' }: J
           </div>
         ) : (
           <>
+            <PeerConnectionStatus
+              variant="inline"
+              requireVideo={false}
+              roomCode={roomInput.trim()}
+              phase={peer.phase}
+              connectionState={peer.connectionState}
+              connectionLost={peer.connectionLost}
+              error={peer.error}
+              onReconnect={() => peer.reconnectSession()}
+              onLeave={() => {
+                joinStartedRef.current = false
+                peer.disconnect()
+                setJoined(false)
+              }}
+            />
             <RolePicker peer={peer} name="join-local-role" />
             {(peer.connectionLost || peer.error) && (
               <div className="join-page__row">

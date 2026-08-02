@@ -353,6 +353,12 @@ button {
   overflow: hidden;
 }
 
+.player > .toolbar,
+.player > .remote-guest__seats,
+.player > .join-page__seats {
+  flex-shrink: 0;
+}
+
 .player--parked {
   /* Keep real layout size so a launch that races the idle→playing transition
      still sees an 800×600 canvas (1×1 clip caused WASM OOB / black screen). */
@@ -2697,6 +2703,50 @@ body.rg-faux-fullscreen {
 
 .join-page__hint {
   margin: 0.25rem 0 0;
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   color: var(--muted);
+}
+
+.peer-connection-status {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  padding: 1.25rem;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.82);
+}
+
+.peer-connection-status__title {
+  margin: 0;
+  font-family: var(--brand);
+  font-size: 1.1rem;
+  color: var(--text);
+}
+
+.peer-connection-status__detail {
+  margin: 0;
+  max-width: 22rem;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.peer-connection-status__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+  margin-top: 0.35rem;
+}
+
+.peer-connection-status--inline {
+  position: static;
+  margin: 0 1rem 0.75rem;
+  border-radius: var(--radius);
+  background: var(--surface-2);
 }

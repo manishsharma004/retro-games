@@ -146,9 +146,10 @@ export class MultiPeerHostManager {
 
     try {
       const needsRenegotiation = await g.connection.addMediaStream(stream)
-      if (!needsRenegotiation && !this.remotePlay) return
-      const sdp = await g.connection.createMediaRenegotiationOffer()
-      await this.sendMediaOffer(signalingId, sdp)
+      if (this.remotePlay || needsRenegotiation) {
+        const sdp = await g.connection.createMediaRenegotiationOffer()
+        await this.sendMediaOffer(signalingId, sdp)
+      }
     } catch (err) {
       this.handlers.onError?.(
         err instanceof Error ? err.message : 'Video stream negotiation failed',

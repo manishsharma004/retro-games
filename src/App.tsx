@@ -159,7 +159,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
         return
       }
       if (sessionMode === 'local' || sessionMode === 'remote') {
-        peerRef.current.sendGameUpdate({
+        peerRef.current.syncHostGameToGuests({
           name: game.name,
           system: game.system,
           core: game.core,

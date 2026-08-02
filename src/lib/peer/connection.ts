@@ -701,6 +701,17 @@ export class PeerConnection {
     return this.pc
   }
 
+  /** Rebuild a MediaStream from current inbound RTP receivers (guest remote play). */
+  collectRemoteMediaStream(): MediaStream | null {
+    const pc = this.pc
+    if (!pc) return null
+    const stream = new MediaStream()
+    for (const receiver of pc.getReceivers()) {
+      if (receiver.track) stream.addTrack(receiver.track)
+    }
+    return stream.getTracks().length > 0 ? stream : null
+  }
+
   async createOfferWithMedia(stream?: MediaStream): Promise<string> {
     if (stream) await this.addMediaStream(stream)
     return this.createOffer()

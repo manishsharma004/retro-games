@@ -499,16 +499,34 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
 
   const pressDown = useCallback(
     (button: string, player = 1) => {
-      const emu = nostalgistRef.current
-      if (!emu || stateIoBusyRef.current) return
-      const mapped = mapButton(button)
-      const key = pressKey(player, mapped)
-      const next = (pressCountsRef.current.get(key) ?? 0) + 1
-      pressCountsRef.current.set(key, next)
-      if (next === 1) {
-        if (player === 1) emu.pressDown(mapped)
-        else emu.pressDown({ button: mapped, player })
+      const apply = () => {
+        const emu = nostalgistRef.current
+        if (!emu) return
+        const mapped = mapButton(button)
+        const key = pressKey(player, mapped)
+        const next = (pressCountsRef.current.get(key) ?? 0) + 1
+        pressCountsRef.current.set(key, next)
+        if (next === 1) {
+          if (player === 1) emu.pressDown(mapped)
+          else emu.pressDown({ button: mapped, player })
+        }
       }
+
+      if (stateIoBusyRef.current) {
+        let attempts = 0
+        const retry = () => {
+          if (!stateIoBusyRef.current) {
+            apply()
+            return
+          }
+          attempts += 1
+          if (attempts < 120) window.setTimeout(retry, 16)
+        }
+        retry()
+        return
+      }
+
+      apply()
     },
     [mapButton],
   )

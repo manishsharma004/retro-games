@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { UsePeerSessionResult } from '../usePeerSession'
 import type { UseEmulatorResult } from '../useEmulator'
-import { compressStateBlob, COOP_RESYNC_RESUME_DELAY_MS, decompressStateBlob } from '../../lib/peer'
+import { compressStateBlob, decompressStateBlob } from '../../lib/peer'
 import { buildCoopProfile, profileHash, type EmulatorSettings } from '../../lib/settings'
 import { romUrl } from '../../lib/library'
 import type { ModeHookBase } from './types'
@@ -94,7 +94,8 @@ export function useCoopSession({
 
   const finishResync = useCallback(
     (resumeAt?: number) => {
-      const at = resumeAt ?? Date.now() + COOP_RESYNC_RESUME_DELAY_MS
+      const at =
+        resumeAt ?? Date.now() + peer.latencyProfile.coopResyncResumeDelayMs
       peer.sendResyncDone(at)
       resumeAfterResync(at)
     },
@@ -132,14 +133,16 @@ export function useCoopSession({
     lastStateSyncAtRef.current = Date.now()
   }, [enabled, isHost, emu, peer, settings, lastProfileHashRef])
 
-  const pushGameState = useCallback(async () => {
+  const pushGameState = useCallback(async (opts?: { syncSettings?: boolean }) => {
     if (!enabled || !isHost || !emu.game) throw new Error('Host must have a game loaded')
     if (pushing) return
     setPushing(true)
     const conn = peer.getConnection()
     try {
       pauseForResync()
-      peer.sendSettingsSync(buildCoopProfile(settings))
+      if (opts?.syncSettings !== false) {
+        peer.sendSettingsSync(buildCoopProfile(settings))
+      }
       try {
         conn?.sendControl({ type: 'resync-start' })
       } catch {
@@ -220,7 +223,7 @@ export function useCoopSession({
     const id = window.setInterval(() => {
       if (autoSyncBusyRef.current || pushing || importing || syncPending) return
       autoSyncBusyRef.current = true
-      void pushGameState()
+      void pushGameState({ syncSettings: false })
         .catch(() => {})
         .finally(() => {
           autoSyncBusyRef.current = false

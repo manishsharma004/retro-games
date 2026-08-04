@@ -744,9 +744,9 @@ export function PeerLobby({
             {phase === 'playing' && showCoopFlow && (
               <>
                 <p className="peer-lobby__hint">
-                  Input sync active — P{seat} on this device. Both emulators run locked
-                  60&nbsp;Hz NTSC timing with latency-buffered inputs on both sides. State
-                  sync runs automatically in the background; use manual sync if you notice drift.
+                  Input sync active — P{seat} on this device. Both emulators share inputs with
+                  latency buffering; the host pushes save-state sync every few seconds to correct
+                  drift. Use separate windows or devices (not two tabs in one browser).
                 </p>
                 {suggestStateSync && latencyProfile?.advice && (
                   <p className="peer-lobby__hint peer-lobby__hint--warn">

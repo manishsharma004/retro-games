@@ -6,25 +6,17 @@ import { buildCoopProfile, profileHash, type EmulatorSettings } from '../../lib/
 import { romUrl } from '../../lib/library'
 import type { ModeHookBase } from './types'
 
-export interface LockstepSessionBridge {
-  stopStepper: () => void
-  startStepper: (at?: number) => void
-  handleCoordinatedPause: () => void
-}
-
 export interface UseCoopSessionOptions extends ModeHookBase {
   peer: UsePeerSessionResult
   emu: UseEmulatorResult
   isHost: boolean
   settings: EmulatorSettings
-  lockstepRef: React.MutableRefObject<LockstepSessionBridge | null>
   lastProfileHashRef: React.MutableRefObject<string | null>
 }
 
 /**
  * Dual-emulator co-op: host shares ROM + initial save state once at setup.
- * During play, frame lockstep keeps both emulators in sync; save-state resync
- * corrects rare hash mismatches or reconnects.
+ * During play, delayed inputs keep peers aligned; save-state resync corrects drift.
  */
 export function useCoopSession({
   enabled,
@@ -32,14 +24,13 @@ export function useCoopSession({
   emu,
   isHost,
   settings,
-  lockstepRef,
   lastProfileHashRef,
 }: UseCoopSessionOptions) {
   const [syncPending, setSyncPending] = useState(false)
   const [pushing, setPushing] = useState(false)
   const [importing, setImporting] = useState(false)
   const [, setSyncTick] = useState(0)
-  const wasSteppingRef = useRef(false)
+  const wasRunningBeforeResyncRef = useRef(false)
   const resyncActiveRef = useRef(false)
   const lastStateSyncAtRef = useRef(Date.now())
   const autoSyncBusyRef = useRef(false)
@@ -60,30 +51,28 @@ export function useCoopSession({
   const pauseForResync = useCallback(() => {
     if (!enabled) return
     if (!resyncActiveRef.current) {
-      wasSteppingRef.current = emu.isLockstepActive()
+      wasRunningBeforeResyncRef.current = emu.isRunning()
       resyncActiveRef.current = true
     }
     emu.releaseAllInputs()
-    lockstepRef.current?.stopStepper()
-    if (emu.isRunning() && !emu.isLockstepActive()) {
+    if (emu.isRunning()) {
       emu.pause()
     }
-  }, [enabled, emu, lockstepRef])
+  }, [enabled, emu])
 
   const resumeAfterResync = useCallback(
     (resumeAt?: number) => {
       if (!enabled) return
 
       const shouldResume =
-        wasSteppingRef.current || (resyncActiveRef.current && peer.phase === 'playing')
+        wasRunningBeforeResyncRef.current ||
+        (resyncActiveRef.current && peer.phase === 'playing')
 
       const run = () => {
         if (shouldResume && peer.phase === 'playing') {
-          lockstepRef.current?.startStepper(resumeAt)
-        } else if (shouldResume) {
           emu.resumeAfterStateLoad()
         }
-        wasSteppingRef.current = false
+        wasRunningBeforeResyncRef.current = false
         resyncActiveRef.current = false
         setSyncPending(false)
         setImporting(false)
@@ -97,7 +86,7 @@ export function useCoopSession({
       if (delay <= 0) run()
       else window.setTimeout(run, delay)
     },
-    [enabled, emu, lockstepRef, peer.phase],
+    [enabled, emu, peer.phase],
   )
 
   const finishResync = useCallback(
@@ -116,7 +105,6 @@ export function useCoopSession({
   const shareGame = useCallback(async () => {
     if (!enabled || !isHost || !emu.game) throw new Error('Host must have a game loaded')
     await emu.applyCoopTiming()
-    lockstepRef.current?.stopStepper()
     emu.pause()
     let rom = await emu.getRomBytes()
     if (!rom && emu.game.source === 'demo') {
@@ -139,7 +127,7 @@ export function useCoopSession({
       libraryFile: emu.game.libraryFile,
     })
     lastStateSyncAtRef.current = Date.now()
-  }, [enabled, isHost, emu, peer, settings, lockstepRef, lastProfileHashRef])
+  }, [enabled, isHost, emu, peer, settings, lastProfileHashRef])
 
   const pushGameState = useCallback(async () => {
     if (!enabled || !isHost || !emu.game) throw new Error('Host must have a game loaded')
@@ -148,8 +136,7 @@ export function useCoopSession({
     const conn = peer.getConnection()
     try {
       pauseForResync()
-      const profile = buildCoopProfile(settings)
-      peer.sendSettingsSync(profile)
+      peer.sendSettingsSync(buildCoopProfile(settings))
       try {
         conn?.sendControl({ type: 'resync-start' })
       } catch {

@@ -76,11 +76,6 @@ export interface UseEmulatorResult {
   relaunchWithSettings: () => void
   /** Relaunch with co-op timing config (host, before sharing ROM). */
   applyCoopTiming: () => Promise<void>
-  /** Frame-stepped co-op lockstep — core stays paused, app drives FRAMEADVANCE. */
-  beginLockstep: () => void
-  stopLockstep: () => void
-  stepFrame: () => void
-  isLockstepActive: () => boolean
   getNostalgist: () => Nostalgist | null
 }
 
@@ -107,7 +102,6 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     resolve: () => void
     reject: (err: Error) => void
   } | null>(null)
-  const lockstepActiveRef = useRef(false)
 
   settingsRef.current = settings
   statusRef.current = status
@@ -124,7 +118,6 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
       nostalgistRef.current = null
     }
     pressCountsRef.current.clear()
-    lockstepActiveRef.current = false
   }, [])
 
   useEffect(() => () => cleanup(), [cleanup])
@@ -368,10 +361,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     }
   }, [sendPressUp])
 
-  const isRunning = useCallback(
-    () => statusRef.current === 'running' || lockstepActiveRef.current,
-    [],
-  )
+  const isRunning = useCallback(() => statusRef.current === 'running', [])
 
   const exit = useCallback(() => {
     setPending(null)
@@ -384,50 +374,18 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
 
   const pause = useCallback(() => {
     releaseAllInputs()
-    lockstepActiveRef.current = false
     nostalgistRef.current?.pause()
     setStatus('paused')
   }, [releaseAllInputs])
 
   const resume = useCallback(() => {
     releaseAllInputs()
-    lockstepActiveRef.current = false
     nostalgistRef.current?.resume()
     setStatus('running')
   }, [releaseAllInputs])
 
-  const beginLockstep = useCallback(() => {
-    const emu = nostalgistRef.current
-    if (!emu) return
-    releaseAllInputs()
-    emu.pause()
-    lockstepActiveRef.current = true
-    setStatus('running')
-  }, [releaseAllInputs])
-
-  const stopLockstep = useCallback(() => {
-    lockstepActiveRef.current = false
-    nostalgistRef.current?.pause()
-    setStatus('paused')
-  }, [])
-
-  const stepFrame = useCallback(() => {
-    nostalgistRef.current?.sendCommand('FRAMEADVANCE')
-  }, [])
-
-  const isLockstepActive = useCallback(() => lockstepActiveRef.current, [])
-
   const resumeAfterStateLoad = useCallback(() => {
     releaseAllInputs()
-    const activeGame = gameRef.current
-    if (
-      lockstepActiveRef.current ||
-      activeGame?.coopMode ||
-      activeGame?.source === 'peer'
-    ) {
-      beginLockstep()
-      return
-    }
     const emu = nostalgistRef.current
     if (!emu) return
     emu.resume()
@@ -440,7 +398,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
         setStatus('running')
       }
     })
-  }, [releaseAllInputs, beginLockstep])
+  }, [releaseAllInputs])
 
   const restart = useCallback(() => {
     nostalgistRef.current?.restart()
@@ -672,10 +630,6 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     isRunning,
     relaunchWithSettings,
     applyCoopTiming,
-    beginLockstep,
-    stopLockstep,
-    stepFrame,
-    isLockstepActive,
     getNostalgist,
   }
 }

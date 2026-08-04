@@ -86,12 +86,8 @@ export type ControlMessage =
     }
   | { type: 'transfer-start'; id: number; kind: 'rom' | 'state'; size: number }
   | { type: 'transfer-end'; id: number; kind: 'rom' | 'state' }
-  | { type: 'input'; seat: PeerSeat; button: string; down: boolean; t?: number; frame?: number }
-  | { type: 'input-horizon'; f: number }
-  | { type: 'lockstep-pause' }
-  | { type: 'lockstep-resume'; at: number }
+  | { type: 'input'; seat: PeerSeat; button: string; down: boolean; t?: number }
   | { type: 'settings-sync'; profile: CoopEmulatorProfile; hash: string }
-  | { type: 'state-hash'; hash: string; frame: number }
   | { type: 'rumble'; seat: PeerSeat; pattern: number[] }
   | { type: 'resync-request' }
   | { type: 'resync-start' }

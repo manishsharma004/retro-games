@@ -76,8 +76,6 @@ export function saveSettings(settings: EmulatorSettings): void {
 /** NTSC content rate — both co-op emulators must match. */
 export const COOP_REFRESH_RATE_HZ = 60
 export const COOP_AUDIO_LATENCY_MS = 128
-/** Deeper buffer for frame-stepped lockstep (absorbs step-timing jitter). */
-export const COOP_LOCKSTEP_AUDIO_LATENCY_MS = 160
 
 /** Explicit profile for dual-emulator co-op — timing + core options that affect state. */
 export interface CoopEmulatorProfile {
@@ -98,7 +96,7 @@ export function buildCoopProfile(settings: EmulatorSettings): CoopEmulatorProfil
   const coop = coopTimingSettings(settings)
   return {
     refreshRateHz: COOP_REFRESH_RATE_HZ,
-    audioLatencyMs: COOP_LOCKSTEP_AUDIO_LATENCY_MS,
+    audioLatencyMs: COOP_AUDIO_LATENCY_MS,
     videoVsync: false,
     frameSkip: 0,
     rewindEnable: false,
@@ -172,7 +170,7 @@ export function legacySettingsToProfile(
 ): CoopEmulatorProfile {
   return {
     refreshRateHz: COOP_REFRESH_RATE_HZ,
-    audioLatencyMs: COOP_LOCKSTEP_AUDIO_LATENCY_MS,
+    audioLatencyMs: COOP_AUDIO_LATENCY_MS,
     videoVsync: false,
     frameSkip: 0,
     rewindEnable: false,
@@ -325,7 +323,6 @@ export function buildRetroarchConfig(
   }
 
   if (options?.coop) {
-    const audioLatency = COOP_LOCKSTEP_AUDIO_LATENCY_MS
     return {
       ...base,
       audio_sync: true,
@@ -333,7 +330,7 @@ export function buildRetroarchConfig(
       fastforward_frameskip: false,
       fastforward_ratio: 1,
       video_refresh_rate: COOP_REFRESH_RATE_HZ,
-      audio_latency: audioLatency,
+      audio_latency: COOP_AUDIO_LATENCY_MS,
       rewind_enable: false,
       pause_nonactive: true,
     }

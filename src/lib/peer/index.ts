@@ -53,7 +53,6 @@ export {
   classifyLatency,
   formatLatency,
   getCoopInputDelayMs,
-  getCoopLookaheadFrames,
   getLatencyProfile,
   LATENCY_PING_INTERVAL_MS,
   LATENCY_STALE_MS,

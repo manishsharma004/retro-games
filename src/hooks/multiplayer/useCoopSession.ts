@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { UsePeerSessionResult } from '../usePeerSession'
 import type { UseEmulatorResult } from '../useEmulator'
-import { compressStateBlob, decompressStateBlob } from '../../lib/peer'
+import { compressStateBlob, decompressStateBlob, getCoopResyncLeadMs } from '../../lib/peer'
 import { buildCoopProfile, profileHash, type EmulatorSettings } from '../../lib/settings'
 import { romUrl } from '../../lib/library'
 import type { ModeHookBase } from './types'
@@ -93,10 +93,12 @@ export function useCoopSession({
   )
 
   const finishResync = useCallback(
-    (resumeAt?: number) => {
+    (resumeAt?: number, opts?: { notifyPeer?: boolean }) => {
       const at =
         resumeAt ?? Date.now() + peer.latencyProfile.coopResyncResumeDelayMs
-      peer.sendResyncDone(at)
+      if (opts?.notifyPeer !== false) {
+        peer.sendResyncDone(at)
+      }
       resumeAfterResync(at)
     },
     [peer, resumeAfterResync],
@@ -140,20 +142,22 @@ export function useCoopSession({
     const conn = peer.getConnection()
     try {
       pauseForResync()
-      if (opts?.syncSettings !== false) {
-        peer.sendSettingsSync(buildCoopProfile(settings))
-      }
       try {
         conn?.sendControl({ type: 'resync-start' })
       } catch {
         // ignore
       }
+      if (opts?.syncSettings !== false) {
+        peer.sendSettingsSync(buildCoopProfile(settings))
+      }
 
       const blob = await emu.exportStateBlob({ keepPaused: true })
       if (!blob) throw new Error('Could not capture save state')
       const raw = new Uint8Array(await blob.arrayBuffer())
-      const { payload, compressed } = compressStateBlob(raw)
-      await peer.sendResyncState(payload, compressed)
+      const { payload, compressed } = compressStateBlob(raw, { fast: true })
+      const resumeAt = Date.now() + getCoopResyncLeadMs(peer.latencyMs, raw.byteLength)
+      await peer.sendResyncState(payload, compressed, resumeAt)
+      resumeAfterResync(resumeAt)
       lastStateSyncAtRef.current = Date.now()
     } catch (err) {
       abortResync()
@@ -161,7 +165,7 @@ export function useCoopSession({
     } finally {
       setPushing(false)
     }
-  }, [enabled, isHost, emu, peer, settings, pushing, pauseForResync, abortResync])
+  }, [enabled, isHost, emu, peer, settings, pushing, pauseForResync, abortResync, resumeAfterResync])
 
   const handleResyncRequest = useCallback(async () => {
     if (!enabled || !isHost) return
@@ -184,7 +188,7 @@ export function useCoopSession({
   )
 
   const handleResyncState = useCallback(
-    async (data: Uint8Array, compressed = false) => {
+    async (data: Uint8Array, compressed = false, resumeAt?: number) => {
       if (!enabled) return
       pauseForResync()
       setImporting(true)
@@ -194,7 +198,11 @@ export function useCoopSession({
           raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer,
         ])
         await emu.importStateBlob(blob, { keepPaused: true })
-        finishResync()
+        const at =
+          resumeAt !== undefined
+            ? Math.max(resumeAt, Date.now() + 16)
+            : undefined
+        finishResync(at, { notifyPeer: resumeAt === undefined })
         lastStateSyncAtRef.current = Date.now()
       } catch (err) {
         console.error(err)

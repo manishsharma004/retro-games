@@ -95,7 +95,7 @@ interface UsePeerSessionOptions {
   onBootstrap?: (payload: PeerBootstrapPayload) => void | Promise<void>
   onGo?: (resumeAt?: number) => void
   onHostExit?: () => void
-  onResyncState?: (state: Uint8Array, compressed?: boolean) => void | Promise<void>
+  onResyncState?: (state: Uint8Array, compressed?: boolean, resumeAt?: number) => void | Promise<void>
   onResyncRequest?: () => void
   onResyncStart?: () => void
   onResyncDone?: (resumeAt?: number) => void
@@ -186,7 +186,7 @@ export interface UsePeerSessionResult {
   sendCoopHold: () => void
   sendCoopHoldRelease: (at: number) => void
   sendPing: (t: number) => void
-  sendResyncState: (state: Uint8Array, compressed?: boolean) => Promise<void>
+  sendResyncState: (state: Uint8Array, compressed?: boolean, resumeAt?: number) => Promise<void>
   sendResyncDone: (resumeAt?: number) => void
   requestResync: () => void
   attachMediaStream: (stream: MediaStream) => Promise<void>
@@ -826,12 +826,14 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         setTransfer({ kind, received, total })
         if (!bootstrapDoneRef.current) updatePhase('transferring')
       },
-      onTransferComplete: ({ kind, data }) => {
+      onTransferComplete: ({ kind, data, resumeAt }) => {
         if (bootstrapDoneRef.current && kind === 'state') {
           const compressed = resyncCompressedRef.current
           resyncCompressedRef.current = false
           setTransfer({ kind: null, received: 0, total: 0 })
-          void Promise.resolve(optionsRef.current.onResyncState?.(data, compressed)).catch(
+          void Promise.resolve(
+            optionsRef.current.onResyncState?.(data, compressed, resumeAt),
+          ).catch(
             (err) => {
               setError(err instanceof Error ? err.message : 'Failed to import game state')
             },
@@ -1360,12 +1362,15 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     return () => window.clearInterval(id)
   }, [connectionState, sendPing])
 
-  const sendResyncState = useCallback(async (state: Uint8Array, compressed = false) => {
-    const conn = connRef.current
-    if (!conn?.connected) return
-    resyncCompressedRef.current = compressed
-    await conn.sendBlob('state', state)
-  }, [])
+  const sendResyncState = useCallback(
+    async (state: Uint8Array, compressed = false, resumeAt?: number) => {
+      const conn = connRef.current
+      if (!conn?.connected) return
+      resyncCompressedRef.current = compressed
+      await conn.sendBlob('state', state, { resumeAt })
+    },
+    [],
+  )
 
   const requestResync = useCallback(() => {
     connRef.current?.sendControl({ type: 'resync-request' })

@@ -10,6 +10,7 @@ import {
 } from './connectivity'
 import {
   CHUNK_PAYLOAD_SIZE,
+  COOP_RESYNC_CHUNK_SIZE,
   decodeChunk,
   encodeChunk,
   isControlMessage,
@@ -59,6 +60,7 @@ export interface PeerConnectionHandlers {
     id: number
     kind: 'rom' | 'state'
     data: Uint8Array
+    resumeAt?: number
   }) => void
   onError?: (error: Error) => void
   /** Guest regenerated answer after ICE died while waiting for host — re-share this string. */
@@ -78,6 +80,7 @@ interface PendingTransfer {
   size: number
   chunks: (Uint8Array | undefined)[]
   received: number
+  resumeAt?: number
 }
 
 function waitForIceGathering(pc: RTCPeerConnection, timeoutMs = 8000): Promise<void> {
@@ -536,6 +539,7 @@ export class PeerConnection {
             size: parsed.size,
             chunks: [],
             received: 0,
+            resumeAt: parsed.resumeAt,
           })
           this.transferKinds.set(parsed.id, parsed.kind)
         } else if (parsed.type === 'transfer-end') {
@@ -559,6 +563,7 @@ export class PeerConnection {
                 id: parsed.id,
                 kind: parsed.kind,
                 data: merged,
+                resumeAt: pending.resumeAt,
               })
             }
             this.pending.delete(parsed.id)
@@ -784,19 +789,31 @@ export class PeerConnection {
     this.channel.send(JSON.stringify(msg))
   }
 
-  async sendBlob(kind: 'rom' | 'state', data: Uint8Array): Promise<number> {
+  async sendBlob(
+    kind: 'rom' | 'state',
+    data: Uint8Array,
+    options?: { resumeAt?: number },
+  ): Promise<number> {
     if (!this.channel || this.channel.readyState !== 'open') {
       throw new Error('Peer channel is not open')
     }
     const id = this.nextTransferId++
-    const count = Math.max(1, Math.ceil(data.byteLength / CHUNK_PAYLOAD_SIZE))
-    this.sendControl({ type: 'transfer-start', id, kind, size: data.byteLength })
+    const chunkSize = kind === 'state' ? COOP_RESYNC_CHUNK_SIZE : CHUNK_PAYLOAD_SIZE
+    const count = Math.max(1, Math.ceil(data.byteLength / chunkSize))
+    const tight = kind === 'state' && data.byteLength <= 512 * 1024
+    this.sendControl({
+      type: 'transfer-start',
+      id,
+      kind,
+      size: data.byteLength,
+      resumeAt: options?.resumeAt,
+    })
     for (let i = 0; i < count; i++) {
-      const start = i * CHUNK_PAYLOAD_SIZE
-      const end = Math.min(start + CHUNK_PAYLOAD_SIZE, data.byteLength)
+      const start = i * chunkSize
+      const end = Math.min(start + chunkSize, data.byteLength)
       const payload = data.subarray(start, end)
       this.channel.send(encodeChunk(id, i, count, payload))
-      if (i % 4 === 3) await new Promise<void>((r) => setTimeout(r, 0))
+      if (!tight && i % 16 === 15) await new Promise<void>((r) => setTimeout(r, 0))
     }
     this.sendControl({ type: 'transfer-end', id, kind })
     return id

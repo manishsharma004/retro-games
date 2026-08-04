@@ -233,7 +233,6 @@ export default function App({ initialCoopJoin = null }: AppProps) {
     localSeat: localSeat === 1 || localSeat === 2 ? localSeat : null,
     lookaheadFrames: getCoopLookaheadFrames(peer.latencyMs),
     connected: peer.connectionState === 'connected',
-    isHost,
     handlers: {
       pressDown: emu.pressDown,
       pressUp: emu.pressUp,

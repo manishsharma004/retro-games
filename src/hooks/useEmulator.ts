@@ -467,8 +467,8 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     const emu = nostalgistRef.current
     if (!emu) return
 
-    for (let i = 0; i < 60 && stateIoBusyRef.current; i++) {
-      await new Promise<void>((r) => window.setTimeout(r, 50))
+    for (let i = 0; i < 80 && stateIoBusyRef.current; i++) {
+      await new Promise<void>((r) => window.setTimeout(r, 16))
     }
     if (stateIoBusyRef.current) {
       throw new Error('Emulator busy during state import')

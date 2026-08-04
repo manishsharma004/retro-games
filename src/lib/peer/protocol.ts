@@ -84,7 +84,7 @@ export type ControlMessage =
       profile?: CoopEmulatorProfile
       stateSize: number
     }
-  | { type: 'transfer-start'; id: number; kind: 'rom' | 'state'; size: number }
+  | { type: 'transfer-start'; id: number; kind: 'rom' | 'state'; size: number; resumeAt?: number }
   | { type: 'transfer-end'; id: number; kind: 'rom' | 'state' }
   | { type: 'input'; seat: PeerSeat; button: string; down: boolean; t?: number }
   | { type: 'settings-sync'; profile: CoopEmulatorProfile; hash: string }
@@ -107,6 +107,8 @@ export const CHUNK_MAGIC0 = 0x52 // R
 export const CHUNK_MAGIC1 = 0x47 // G
 export const CHUNK_TYPE = 1
 export const CHUNK_PAYLOAD_SIZE = 16 * 1024
+/** Larger chunks for co-op save-state resync (LAN / low-latency links). */
+export const COOP_RESYNC_CHUNK_SIZE = 64 * 1024
 
 export function encodeChunk(
   id: number,

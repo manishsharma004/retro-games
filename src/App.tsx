@@ -203,9 +203,9 @@ export default function App({ initialCoopJoin = null }: AppProps) {
       if (sessionMode !== 'coop') return
       void coopRef.current?.handleResyncRequest()
     },
-    onResyncState: (state, compressed) => {
+    onResyncState: (state, compressed, resumeAt) => {
       if (sessionMode !== 'coop') return
-      void coopRef.current?.handleResyncState(state, compressed)
+      void coopRef.current?.handleResyncState(state, compressed, resumeAt)
     },
     onResyncStart: () => {
       if (sessionMode !== 'coop') return

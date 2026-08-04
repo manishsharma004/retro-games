@@ -1,10 +1,18 @@
 import { deflateSync, inflateSync } from 'fflate'
 
-const MIN_COMPRESS_BYTES = 50_000
-const MIN_RATIO = 1.1
+const MIN_COMPRESS_BYTES = 24_000
+const MIN_RATIO = 1.08
+
+export interface CompressStateOptions {
+  /** Level 1 is much faster than 6 with acceptable ratio for resync. */
+  fast?: boolean
+}
 
 /** Compress save-state blob for co-op resync; falls back to raw on poor ratio. */
-export function compressStateBlob(data: Uint8Array): {
+export function compressStateBlob(
+  data: Uint8Array,
+  options?: CompressStateOptions,
+): {
   payload: Uint8Array
   compressed: boolean
 } {
@@ -12,7 +20,8 @@ export function compressStateBlob(data: Uint8Array): {
     return { payload: data, compressed: false }
   }
   try {
-    const compressed = deflateSync(data, { level: 6 })
+    const level = options?.fast === false ? 6 : 1
+    const compressed = deflateSync(data, { level })
     const ratio = data.byteLength / compressed.byteLength
     if (ratio < MIN_RATIO) {
       return { payload: data, compressed: false }

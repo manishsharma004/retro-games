@@ -61,10 +61,19 @@ export function getCoopInputDelayMs(latencyMs: number | null): number {
 
 export function getCoopResyncResumeDelayMs(latencyMs: number | null): number {
   const tier = classifyLatency(latencyMs)
-  if (tier === 'excellent') return 120
-  if (tier === 'good') return 200
-  if (tier === 'fair') return 300
-  return 400
+  if (tier === 'excellent') return 50
+  if (tier === 'good') return 80
+  if (tier === 'fair') return 120
+  return 200
+}
+
+/** Wall-clock budget from resync start until both peers should resume. */
+export function getCoopResyncLeadMs(latencyMs: number | null, stateBytes: number): number {
+  const tier = classifyLatency(latencyMs)
+  const base =
+    tier === 'excellent' ? 100 : tier === 'good' ? 160 : tier === 'fair' ? 280 : tier === 'poor' ? 420 : 600
+  const sizeSlack = Math.min(280, Math.ceil(stateBytes / 16_384) * 16)
+  return base + sizeSlack
 }
 
 export function getLatencyProfile(
@@ -81,7 +90,7 @@ export function getLatencyProfile(
     label: tier === 'unknown' ? 'Measuring…' : formatLatency(ms),
     advice: null,
     coopSyncIntervalMs: mode === 'coop' ? 15_000 : null,
-    coopAutoSyncIntervalMs: mode === 'coop' ? 5_000 : null,
+    coopAutoSyncIntervalMs: mode === 'coop' ? 10_000 : null,
     coopResyncResumeDelayMs: getCoopResyncResumeDelayMs(ms),
     coopInputDelayMs: getCoopInputDelayMs(ms),
     warnInputDelay: false,

@@ -12,6 +12,7 @@ import {
   buildRetroarchConfig,
   type EmulatorSettings,
 } from '../lib/settings'
+import { fastExportStateBlob, fastImportStateBlob } from '../lib/emulator/fastState'
 
 export type EmulatorStatus = 'idle' | 'loading' | 'running' | 'paused' | 'error'
 
@@ -452,7 +453,13 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     try {
       releaseAllInputs()
       if (wasRunning) emu.pause()
-      const { state } = await emu.saveState()
+      const active = gameRef.current
+      let state: Blob | null =
+        active && isCoopLaunch(active) ? fastExportStateBlob(emu) : null
+      if (!state) {
+        const saved = await emu.saveState()
+        state = saved.state
+      }
       return state
     } finally {
       if (wasRunning && !options?.keepPaused && nostalgistRef.current === emu) {
@@ -479,7 +486,12 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     try {
       releaseAllInputs()
       if (wasRunning) emu.pause()
-      await emu.loadState(state)
+      const active = gameRef.current
+      const loaded =
+        Boolean(active && isCoopLaunch(active)) && (await fastImportStateBlob(emu, state))
+      if (!loaded) {
+        await emu.loadState(state)
+      }
       releaseAllInputs()
     } finally {
       if (wasRunning && !options?.keepPaused && nostalgistRef.current === emu) {

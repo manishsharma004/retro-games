@@ -145,6 +145,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   const coopInputDelayRef = useRef<
     ((seat: PeerSeat, button: string, down: boolean, executeAt?: number) => void) | null
   >(null)
+  const coopInputClearRef = useRef<(() => void) | null>(null)
   const lastProfileHashRef = useRef<string | null>(null)
   const lastProfileRef = useRef<CoopEmulatorProfile | null>(null)
 
@@ -203,6 +204,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
     },
     onResyncStart: () => {
       if (sessionMode !== 'coop') return
+      coopInputClearRef.current?.()
       coopRef.current?.handleResyncStart()
     },
     onResyncDone: (resumeAt) => {
@@ -236,6 +238,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
     isHost,
     settings,
     lastProfileHashRef,
+    onResyncPause: () => coopInputClearRef.current?.(),
   })
   coopRef.current = coop
 
@@ -255,10 +258,11 @@ export default function App({ initialCoopJoin = null }: AppProps) {
     settingsSyncRef.current = handleSettingsSync
   }, [handleSettingsSync])
 
-  const { queueLocalInput, applyRemoteInput } = useCoopInputDelay({
+  const { queueLocalInput, applyRemoteInput, clearPending } = useCoopInputDelay({
     enabled: sessionMode === 'coop' && peerPlaying,
     delayMs: peer.latencyProfile.coopInputDelayMs,
-    localSeat: localSeat === 1 || localSeat === 2 ? localSeat : null,
+    clockOffsetMs: peer.clockOffsetMs,
+    localSeat: peer.getSeat(),
     handlers: {
       pressDown: emu.pressDown,
       pressUp: emu.pressUp,
@@ -268,7 +272,8 @@ export default function App({ initialCoopJoin = null }: AppProps) {
 
   useEffect(() => {
     coopInputDelayRef.current = sessionMode === 'coop' ? applyRemoteInput : null
-  }, [sessionMode, applyRemoteInput])
+    coopInputClearRef.current = sessionMode === 'coop' ? clearPending : null
+  }, [sessionMode, applyRemoteInput, clearPending])
 
   useLocalHost({
     enabled: sessionMode === 'local' && isHost,

@@ -51,10 +51,10 @@ export function formatLatency(ms: number | null): string {
 
 export function getCoopInputDelayMs(latencyMs: number | null): number {
   const rtt = latencyMs ?? 80
-  // One-way transit (RTT/2) plus ~4 frames at 60 Hz so both peers land on the same frame.
+  // One-way transit (RTT/2) plus ~2 frames at 60 Hz for jitter absorption.
   const oneWay = Math.ceil(rtt / 2)
-  const frameBuffer = 67
-  return Math.min(250, Math.max(80, oneWay + frameBuffer))
+  const frameBuffer = 34
+  return Math.min(200, Math.max(50, oneWay + frameBuffer))
 }
 
 export function getLatencyProfile(
@@ -71,7 +71,7 @@ export function getLatencyProfile(
     label: tier === 'unknown' ? 'Measuring…' : formatLatency(ms),
     advice: null,
     coopSyncIntervalMs: null,
-    coopAutoSyncIntervalMs: mode === 'coop' ? 20_000 : null,
+    coopAutoSyncIntervalMs: mode === 'coop' ? 45_000 : null,
     coopInputDelayMs: getCoopInputDelayMs(ms),
     warnInputDelay: false,
   }
@@ -91,7 +91,7 @@ export function getLatencyProfile(
               ? 'Fair latency — stream quality reduced slightly.'
               : 'Fair latency — controller input may feel slightly delayed.',
         coopSyncIntervalMs: 90_000,
-        coopAutoSyncIntervalMs: 30_000,
+        coopAutoSyncIntervalMs: 60_000,
         coopInputDelayMs: getCoopInputDelayMs(ms),
         warnInputDelay: mode !== 'remote',
       }
@@ -106,7 +106,7 @@ export function getLatencyProfile(
               ? 'High latency — stream capped at 30 FPS.'
               : 'High latency — inputs will feel delayed on the host.',
         coopSyncIntervalMs: 45_000,
-        coopAutoSyncIntervalMs: 25_000,
+        coopAutoSyncIntervalMs: 45_000,
         coopInputDelayMs: getCoopInputDelayMs(ms),
         warnInputDelay: true,
       }
@@ -121,7 +121,7 @@ export function getLatencyProfile(
               ? 'Very high latency — sync often; inputs are noticeably delayed.'
               : 'Very high latency — expect noticeable input and video delay.',
         coopSyncIntervalMs: 30_000,
-        coopAutoSyncIntervalMs: 20_000,
+        coopAutoSyncIntervalMs: 35_000,
         coopInputDelayMs: getCoopInputDelayMs(ms),
         warnInputDelay: true,
       }

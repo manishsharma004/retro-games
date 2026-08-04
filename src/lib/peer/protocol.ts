@@ -93,7 +93,7 @@ export type ControlMessage =
   | { type: 'resync-start' }
   | { type: 'resync-done'; at: number }
   | { type: 'ping'; t: number }
-  | { type: 'pong'; t: number }
+  | { type: 'pong'; t: number; peerRecv?: number }
   | { type: 'ice-reoffer'; sdp: string; tier?: 'local' | 'relay' }
   | { type: 'ice-reanswer'; sdp: string }
   | { type: 'media-reoffer'; sdp: string }

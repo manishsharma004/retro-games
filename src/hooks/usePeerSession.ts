@@ -8,6 +8,8 @@ import {
   buildCoopProfile,
   pickSyncSettings,
   smoothLatency,
+  estimateClockOffset,
+  smoothClockOffset,
   COOP_GO_DELAY_MS,
   COOP_RESYNC_RESUME_DELAY_MS,
   probeIceConnectivity,
@@ -133,6 +135,8 @@ export interface UsePeerSessionResult {
   remoteReady: boolean
   /** Round-trip latency (EMA-smoothed); null until first pong. */
   latencyMs: number | null
+  /** Remote clock minus local clock; null until ping/pong estimates it. */
+  clockOffsetMs: number | null
   /** Tier, advice, and mode-specific thresholds derived from latency. */
   latencyProfile: LatencyProfile
   /** Seat claimed by the remote peer; null when remote is spectating or unknown. */
@@ -269,6 +273,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   const [error, setError] = useState<string | null>(null)
   const [remoteReady, setRemoteReady] = useState(false)
   const [latencyMs, setLatencyMs] = useState<number | null>(null)
+  const [clockOffsetMs, setClockOffsetMs] = useState<number | null>(null)
   const lastPongAtRef = useRef<number | null>(null)
   const [remoteSeat, setRemoteSeat] = useState<PeerSeat | null>(null)
   const [remoteSpectator, setRemoteSpectator] = useState(false)
@@ -785,14 +790,19 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           optionsRef.current.onResyncDone?.('at' in msg ? msg.at : undefined)
         } else if (msg.type === 'ping') {
           try {
-            conn.sendControl({ type: 'pong', t: msg.t })
+            conn.sendControl({ type: 'pong', t: msg.t, peerRecv: Date.now() })
           } catch {
             // ignore
           }
         } else if (msg.type === 'pong') {
-          const sample = Date.now() - msg.t
-          lastPongAtRef.current = Date.now()
+          const now = Date.now()
+          const sample = now - msg.t
+          lastPongAtRef.current = now
           setLatencyMs((prev) => smoothLatency(prev, sample))
+          if (msg.peerRecv !== undefined) {
+            const offset = estimateClockOffset(msg.t, now, msg.peerRecv)
+            setClockOffsetMs((prev) => smoothClockOffset(prev, offset))
+          }
           optionsRef.current.onLatency?.(sample)
         } else if (msg.type === 'ice-reoffer') {
           void handleRenegotiationOffer(msg.sdp, msg.tier)
@@ -1317,6 +1327,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       ) {
         lastPongAtRef.current = null
         setLatencyMs(null)
+        setClockOffsetMs(null)
       }
       sendPing(now)
     }
@@ -1513,6 +1524,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     setRemoteReady(false)
     lastPongAtRef.current = null
     setLatencyMs(null)
+    setClockOffsetMs(null)
   }, [multiHost, updatePhase])
 
   return {
@@ -1537,6 +1549,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     error,
     remoteReady,
     latencyMs,
+    clockOffsetMs,
     latencyProfile,
     remoteSeat,
     remoteSpectator,

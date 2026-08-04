@@ -12,6 +12,7 @@ export interface UseCoopSessionOptions extends ModeHookBase {
   isHost: boolean
   settings: EmulatorSettings
   lastProfileHashRef: React.MutableRefObject<string | null>
+  onResyncPause?: () => void
 }
 
 /**
@@ -25,6 +26,7 @@ export function useCoopSession({
   isHost,
   settings,
   lastProfileHashRef,
+  onResyncPause,
 }: UseCoopSessionOptions) {
   const [syncPending, setSyncPending] = useState(false)
   const [pushing, setPushing] = useState(false)
@@ -50,6 +52,7 @@ export function useCoopSession({
 
   const pauseForResync = useCallback(() => {
     if (!enabled) return
+    onResyncPause?.()
     if (!resyncActiveRef.current) {
       wasRunningBeforeResyncRef.current = emu.isRunning()
       resyncActiveRef.current = true
@@ -58,7 +61,7 @@ export function useCoopSession({
     if (emu.isRunning()) {
       emu.pause()
     }
-  }, [enabled, emu])
+  }, [enabled, emu, onResyncPause])
 
   const resumeAfterResync = useCallback(
     (resumeAt?: number) => {

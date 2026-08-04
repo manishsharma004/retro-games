@@ -48,6 +48,7 @@ export {
   type MaxPlayers,
   type RosterEntry,
 } from './roster'
+export { estimateClockOffset, smoothClockOffset } from './clockOffset'
 export { copySignalString, shareSignalString } from './share'
 export {
   classifyLatency,

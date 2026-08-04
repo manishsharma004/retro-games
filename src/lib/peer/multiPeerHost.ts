@@ -523,7 +523,7 @@ export class MultiPeerHostManager {
     }
     if (msg.type === 'ping') {
       try {
-        g?.connection.sendControl({ type: 'pong', t: msg.t })
+        g?.connection.sendControl({ type: 'pong', t: msg.t, peerRecv: Date.now() })
       } catch {
         // ignore
       }

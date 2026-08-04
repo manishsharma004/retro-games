@@ -76,6 +76,114 @@ export function saveSettings(settings: EmulatorSettings): void {
 /** NTSC content rate — both co-op emulators must match. */
 export const COOP_REFRESH_RATE_HZ = 60
 export const COOP_AUDIO_LATENCY_MS = 128
+/** Deeper buffer for frame-stepped lockstep (absorbs step-timing jitter). */
+export const COOP_LOCKSTEP_AUDIO_LATENCY_MS = 160
+
+/** Explicit profile for dual-emulator co-op — timing + core options that affect state. */
+export interface CoopEmulatorProfile {
+  refreshRateHz: 60
+  audioLatencyMs: number
+  videoVsync: false
+  frameSkip: 0
+  rewindEnable: false
+  nesRegion: 'NTSC'
+  snesRegion: 'ntsc'
+  swapAB: boolean
+  allowOpposingDirections: boolean
+  nesTurbo: EmulatorSettings['nesTurbo']
+  snesPlayerCount: 2 | 3 | 4 | 5
+}
+
+export function buildCoopProfile(settings: EmulatorSettings): CoopEmulatorProfile {
+  const coop = coopTimingSettings(settings)
+  return {
+    refreshRateHz: COOP_REFRESH_RATE_HZ,
+    audioLatencyMs: COOP_LOCKSTEP_AUDIO_LATENCY_MS,
+    videoVsync: false,
+    frameSkip: 0,
+    rewindEnable: false,
+    nesRegion: 'NTSC',
+    snesRegion: 'ntsc',
+    swapAB: coop.swapAB,
+    allowOpposingDirections: coop.allowOpposingDirections,
+    nesTurbo: coop.nesTurbo,
+    snesPlayerCount: coop.snesPlayerCount,
+  }
+}
+
+export function profileHash(profile: CoopEmulatorProfile): string {
+  return JSON.stringify(profile)
+}
+
+export function profilesEqual(a: CoopEmulatorProfile, b: CoopEmulatorProfile): boolean {
+  return profileHash(a) === profileHash(b)
+}
+
+export function profileToEmulatorSettings(
+  prev: EmulatorSettings,
+  profile: CoopEmulatorProfile,
+): EmulatorSettings {
+  return coopTimingSettings({
+    ...prev,
+    swapAB: profile.swapAB,
+    allowOpposingDirections: profile.allowOpposingDirections,
+    nesTurbo: profile.nesTurbo,
+    snesPlayerCount: profile.snesPlayerCount,
+    videoVsync: profile.videoVsync,
+    frameSkip: profile.frameSkip,
+    rewindEnable: profile.rewindEnable,
+    nesRegion: profile.nesRegion,
+    snesRegion: profile.snesRegion,
+  })
+}
+
+export function profileRequiresRelaunch(
+  prev: CoopEmulatorProfile | null,
+  next: CoopEmulatorProfile,
+): boolean {
+  if (!prev) return true
+  return (
+    prev.swapAB !== next.swapAB ||
+    prev.allowOpposingDirections !== next.allowOpposingDirections ||
+    prev.nesTurbo !== next.nesTurbo ||
+    prev.snesPlayerCount !== next.snesPlayerCount ||
+    prev.nesRegion !== next.nesRegion ||
+    prev.snesRegion !== next.snesRegion ||
+    prev.refreshRateHz !== next.refreshRateHz ||
+    prev.audioLatencyMs !== next.audioLatencyMs
+  )
+}
+
+/** @deprecated Use buildCoopProfile — kept for bootstrap compat mapping. */
+export interface PeerSyncSettingsLegacy {
+  swapAB: boolean
+  allowOpposingDirections: boolean
+  nesRegion: EmulatorSettings['nesRegion']
+  nesTurbo: EmulatorSettings['nesTurbo']
+  snesRegion: EmulatorSettings['snesRegion']
+  frameSkip: number
+  rewindEnable: boolean
+  videoVsync: boolean
+}
+
+export function legacySettingsToProfile(
+  legacy: PeerSyncSettingsLegacy,
+  snesPlayerCount: 2 | 3 | 4 | 5 = 2,
+): CoopEmulatorProfile {
+  return {
+    refreshRateHz: COOP_REFRESH_RATE_HZ,
+    audioLatencyMs: COOP_LOCKSTEP_AUDIO_LATENCY_MS,
+    videoVsync: false,
+    frameSkip: 0,
+    rewindEnable: false,
+    nesRegion: 'NTSC',
+    snesRegion: 'ntsc',
+    swapAB: legacy.swapAB,
+    allowOpposingDirections: legacy.allowOpposingDirections,
+    nesTurbo: legacy.nesTurbo,
+    snesPlayerCount,
+  }
+}
 
 /** Lock gameplay settings so both peers run the same content framerate. */
 export function coopTimingSettings(settings: EmulatorSettings): EmulatorSettings {
@@ -217,6 +325,7 @@ export function buildRetroarchConfig(
   }
 
   if (options?.coop) {
+    const audioLatency = COOP_LOCKSTEP_AUDIO_LATENCY_MS
     return {
       ...base,
       audio_sync: true,
@@ -224,7 +333,7 @@ export function buildRetroarchConfig(
       fastforward_frameskip: false,
       fastforward_ratio: 1,
       video_refresh_rate: COOP_REFRESH_RATE_HZ,
-      audio_latency: COOP_AUDIO_LATENCY_MS,
+      audio_latency: audioLatency,
       rewind_enable: false,
       pause_nonactive: true,
     }

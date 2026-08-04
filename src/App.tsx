@@ -9,9 +9,10 @@ import { PeerLobby } from './components/PeerLobby'
 import { RomLoader } from './components/RomLoader'
 import { VirtualController } from './components/VirtualController'
 import { VirtualLayoutEditor } from './components/VirtualLayoutEditor'
-import { useCoopInputDelay } from './hooks/useCoopInputDelay'
-import { useCoopSession } from './hooks/multiplayer/useCoopSession'
+import { useCoopLockstep } from './hooks/useCoopLockstep'
+import { useCoopSession, type LockstepSessionBridge } from './hooks/multiplayer/useCoopSession'
 import { useCoopAutoStart } from './hooks/multiplayer/useCoopAutoStart'
+import { useCoopSettingsSync } from './hooks/multiplayer/useCoopSettingsSync'
 import { useHostGameSync } from './hooks/multiplayer/useHostGameSync'
 import { useLocalHost } from './hooks/multiplayer/useLocalHost'
 import { useRemoteHost } from './hooks/multiplayer/useRemoteHost'
@@ -24,14 +25,23 @@ import { useLandscape } from './hooks/useLandscape'
 import { useKeyboardControls } from './hooks/useKeyboardControls'
 import { usePeerSession } from './hooks/usePeerSession'
 import { usePreventGameTouchGestures } from './hooks/usePreventGameTouchGestures'
-import type { PeerSeat, SessionMode } from './lib/peer/protocol'
+import type { SessionMode } from './lib/peer/protocol'
 import {
   loadControllerBindings,
   saveControllerBindings,
   type ControllerBindings,
 } from './lib/gamepad'
 import { fetchLibrary, type LibraryRom } from './lib/library'
-import { coopTimingSettings, loadSettings, saveSettings, type EmulatorSettings } from './lib/settings'
+import { getCoopLookaheadFrames } from './lib/peer'
+import {
+  legacySettingsToProfile,
+  loadSettings,
+  profileHash,
+  profileToEmulatorSettings,
+  saveSettings,
+  type CoopEmulatorProfile,
+  type EmulatorSettings,
+} from './lib/settings'
 import type { MaxPlayers } from './lib/peer/roster'
 import './styles/app.css'
 
@@ -79,23 +89,25 @@ export default function App({ initialCoopJoin = null }: AppProps) {
       rom: Uint8Array
       state: Uint8Array
       settings: Partial<EmulatorSettings>
+      profile?: CoopEmulatorProfile
     }) => {
       skipAutoLoadRef.current = true
       autoLoadedRef.current = true
-      setSettings((prev) =>
-        coopTimingSettings({
-          ...prev,
-          swapAB: payload.settings.swapAB ?? prev.swapAB,
-          allowOpposingDirections:
-            payload.settings.allowOpposingDirections ?? prev.allowOpposingDirections,
-          nesRegion: payload.settings.nesRegion ?? prev.nesRegion,
-          nesTurbo: payload.settings.nesTurbo ?? prev.nesTurbo,
-          snesRegion: payload.settings.snesRegion ?? prev.snesRegion,
-          frameSkip: payload.settings.frameSkip ?? prev.frameSkip,
-          rewindEnable: payload.settings.rewindEnable ?? prev.rewindEnable,
-          videoVsync: payload.settings.videoVsync ?? prev.videoVsync,
-        }),
-      )
+      const profile =
+        payload.profile ??
+        legacySettingsToProfile({
+          swapAB: payload.settings.swapAB ?? false,
+          allowOpposingDirections: payload.settings.allowOpposingDirections ?? true,
+          nesRegion: payload.settings.nesRegion ?? 'NTSC',
+          nesTurbo: payload.settings.nesTurbo ?? 'None',
+          snesRegion: payload.settings.snesRegion ?? 'ntsc',
+          frameSkip: payload.settings.frameSkip ?? 0,
+          rewindEnable: payload.settings.rewindEnable ?? false,
+          videoVsync: payload.settings.videoVsync ?? false,
+        })
+      lastProfileRef.current = profile
+      lastProfileHashRef.current = profileHash(profile)
+      setSettings((prev) => profileToEmulatorSettings(prev, profile))
       const ext = payload.system === 'nes' ? 'nes' : 'sfc'
       emu.launchPeer({
         name: payload.name,
@@ -120,35 +132,38 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   )
 
   const handleGo = useCallback((resumeAt?: number) => {
-    const run = () => emu.resume()
-    if (!resumeAt) {
-      run()
-      return
-    }
-    const delay = resumeAt - Date.now()
-    if (delay <= 0) run()
-    else window.setTimeout(run, delay)
-  }, [emu])
+    lockstepApiRef.current?.startStepper(resumeAt)
+  }, [])
 
   const coopRef = useRef<ReturnType<typeof useCoopSession> | null>(null)
-  const coopInputDelayRef = useRef<
-    ((seat: PeerSeat, button: string, down: boolean, executeAt?: number) => void) | null
-  >(null)
+  const lockstepRef = useRef<LockstepSessionBridge | null>(null)
+  const lockstepApiRef = useRef<ReturnType<typeof useCoopLockstep> | null>(null)
+  const lastProfileHashRef = useRef<string | null>(null)
+  const lastProfileRef = useRef<CoopEmulatorProfile | null>(null)
+
+  const settingsSyncRef = useRef<(profile: CoopEmulatorProfile, hash: string) => void>(() => {})
 
   const peer = usePeerSession({
     settings,
     sessionMode,
     system: emu.game?.system ?? null,
-    onRemoteInput: (seat, button, down, executeAt) => {
+    onRemoteInput: (seat, button, down, opts) => {
       if (sessionMode === 'coop') {
         const local = peerRef.current.getSeat()
         if (local !== null && seat === local) return
-        coopInputDelayRef.current?.(seat, button, down, executeAt)
+        if (opts?.frame !== undefined) {
+          lockstepApiRef.current?.applyRemoteInput(seat, button, down, opts.frame)
+        }
         return
       }
       if (down) emu.remotePressDown(button, seat)
       else emu.remotePressUp(button, seat)
     },
+    onInputHorizon: (f) => lockstepApiRef.current?.applyRemoteHorizon(f),
+    onLockstepPause: () => lockstepApiRef.current?.handleCoordinatedPause(),
+    onLockstepResume: (at) => lockstepApiRef.current?.handleCoordinatedResume(at),
+    onStateHash: (hash, frame) => lockstepApiRef.current?.handleRemoteStateHash(hash, frame),
+    onSettingsSync: (profile, hash) => settingsSyncRef.current(profile, hash),
     onBootstrap: handleBootstrap,
     onGo: handleGo,
     onGuestHello: () => {
@@ -204,11 +219,80 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   const isHost = peer.role === 'host'
   const isGuest = peer.role === 'guest'
 
+  const resolveLocalSeat = useCallback((): 1 | 2 => {
+    if (hostOnScreenP2 && sessionMode === 'local' && isHost) return 2
+    return (peer.getSeat() ?? 1) as 1 | 2
+  }, [hostOnScreenP2, sessionMode, isHost, peer.getSeat])
+
+  const localSeat = resolveLocalSeat()
+  const peerPlaying = peer.phase === 'playing'
+  const peerActive = peer.role !== null && peer.phase !== 'idle' && peer.phase !== 'error'
+
+  const lockstep = useCoopLockstep({
+    enabled: sessionMode === 'coop' && peerPlaying,
+    localSeat: localSeat === 1 || localSeat === 2 ? localSeat : null,
+    lookaheadFrames: getCoopLookaheadFrames(peer.latencyMs),
+    connected: peer.connectionState === 'connected',
+    isHost,
+    handlers: {
+      pressDown: emu.pressDown,
+      pressUp: emu.pressUp,
+    },
+    beginLockstep: emu.beginLockstep,
+    stopLockstep: emu.stopLockstep,
+    stepFrame: emu.stepFrame,
+    exportStateBytes: async () => {
+      const blob = await emu.exportStateBlob({ keepPaused: true })
+      if (!blob) return null
+      return new Uint8Array(await blob.arrayBuffer())
+    },
+    sendLockstepInput: peer.sendLockstepInput,
+    sendInputHorizon: peer.sendInputHorizon,
+    sendLockstepPause: peer.sendLockstepPause,
+    sendLockstepResume: peer.sendLockstepResume,
+    sendStateHash: peer.sendStateHash,
+    onHashMismatch: () => {
+      void coopRef.current?.syncGameState().catch(() => {})
+    },
+    onHardResyncNeeded: () => {
+      void coopRef.current?.syncGameState().catch(() => {})
+    },
+  })
+
+  lockstepApiRef.current = lockstep
+
+  useEffect(() => {
+    lockstepRef.current = {
+      stopStepper: lockstep.stopStepper,
+      startStepper: lockstep.startStepper,
+      handleCoordinatedPause: lockstep.handleCoordinatedPause,
+    }
+  }, [lockstep])
+
+  const { handleSettingsSync } = useCoopSettingsSync({
+    enabled: sessionMode === 'coop',
+    isHost,
+    playing: peerPlaying,
+    settings,
+    peer,
+    emu,
+    setSettings,
+    lastProfileHashRef,
+    lastProfileRef,
+  })
+
+  useEffect(() => {
+    settingsSyncRef.current = handleSettingsSync
+  }, [handleSettingsSync])
+
   const coop = useCoopSession({
     enabled: sessionMode === 'coop',
     peer,
     emu,
     isHost,
+    settings,
+    lockstepRef,
+    lastProfileHashRef,
   })
   coopRef.current = coop
 
@@ -245,15 +329,6 @@ export default function App({ initialCoopJoin = null }: AppProps) {
     }
   }, [isGuest])
 
-  const resolveLocalSeat = useCallback((): 1 | 2 => {
-    if (hostOnScreenP2 && sessionMode === 'local' && isHost) return 2
-    return (peer.getSeat() ?? 1) as 1 | 2
-  }, [hostOnScreenP2, sessionMode, isHost, peer.getSeat])
-
-  const localSeat = resolveLocalSeat()
-  const peerPlaying = peer.phase === 'playing'
-  const peerActive = peer.role !== null && peer.phase !== 'idle' && peer.phase !== 'error'
-
   useHostGameSync({
     enabled: peerActive && isHost,
     peer,
@@ -282,71 +357,56 @@ export default function App({ initialCoopJoin = null }: AppProps) {
     emu.exit()
   }, [peer, emu])
 
-  const { queueLocalInput, applyRemoteInput } = useCoopInputDelay({
-    enabled: sessionMode === 'coop' && peerPlaying,
-    delayMs: peer.latencyProfile.coopInputDelayMs,
-    localSeat: localSeat === 1 || localSeat === 2 ? localSeat : null,
-    handlers: {
-      pressDown: emu.pressDown,
-      pressUp: emu.pressUp,
-    },
-    sendInput: peer.sendInput,
-  })
-
-  useEffect(() => {
-    coopInputDelayRef.current = sessionMode === 'coop' ? applyRemoteInput : null
-  }, [sessionMode, applyRemoteInput])
-
   const onLocalPress = useCallback(
     (button: string) => {
       if (sessionMode === 'coop' && peerPlaying) {
-        queueLocalInput(button, true)
+        lockstep.queueLocalInput(button, true)
         return
       }
       const seat = resolveLocalSeat()
       emu.pressDown(button, seat)
       if (peerPlaying) peer.sendInput(button, true)
     },
-    [emu, resolveLocalSeat, peer, peerPlaying, sessionMode, queueLocalInput],
+    [emu, resolveLocalSeat, peer, peerPlaying, sessionMode, lockstep],
   )
 
   const onLocalRelease = useCallback(
     (button: string) => {
       if (sessionMode === 'coop' && peerPlaying) {
-        queueLocalInput(button, false)
+        lockstep.queueLocalInput(button, false)
         return
       }
       const seat = resolveLocalSeat()
       emu.pressUp(button, seat)
       if (peerPlaying) peer.sendInput(button, false)
     },
-    [emu, resolveLocalSeat, peer, peerPlaying, sessionMode, queueLocalInput],
+    [emu, resolveLocalSeat, peer, peerPlaying, sessionMode, lockstep],
   )
 
   const onPadPress = useCallback(
     (button: string, player: number) => {
       const seat = resolveLocalSeat()
       if (sessionMode === 'coop' && peerPlaying && player === seat) {
-        queueLocalInput(button, true)
+        lockstep.queueLocalInput(button, true)
         return
       }
       emu.pressDown(button, player)
       if (peerPlaying && player === seat) peer.sendInput(button, true)
     },
-    [emu, resolveLocalSeat, peer, peerPlaying, sessionMode, queueLocalInput],
+    [emu, resolveLocalSeat, peer, peerPlaying, sessionMode, lockstep],
   )
 
   const onPadRelease = useCallback(
     (button: string, player: number) => {
       const seat = resolveLocalSeat()
       if (sessionMode === 'coop' && peerPlaying && player === seat) {
-        queueLocalInput(button, false)
+        lockstep.queueLocalInput(button, false)
         return
       }
       emu.pressUp(button, player)
       if (peerPlaying && player === seat) peer.sendInput(button, false)
     },
-    [emu, resolveLocalSeat, peer, peerPlaying, sessionMode, queueLocalInput],
+    [emu, resolveLocalSeat, peer, peerPlaying, sessionMode, lockstep],
   )
 
   const inputEnabled =
@@ -581,7 +641,31 @@ export default function App({ initialCoopJoin = null }: AppProps) {
                   {coop.stateSyncBusy ? 'Syncing…' : 'Sync state'}
                 </button>
               )}
-              {emu.status === 'paused' ? (
+              {sessionMode === 'coop' && peerPlaying && lockstep.waitingForPeer && (
+                <span className="toolbar__hint" title="Waiting for peer">
+                  Syncing…
+                </span>
+              )}
+              {sessionMode === 'coop' && peerPlaying ? (
+                emu.isLockstepActive() ? (
+                  <button
+                    type="button"
+                    className="btn btn--ghost"
+                    onClick={lockstep.requestCoordinatedPause}
+                  >
+                    Pause
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn--ghost"
+                    onClick={lockstep.requestCoordinatedResume}
+                    disabled={peer.phase === 'ready-wait'}
+                  >
+                    Resume
+                  </button>
+                )
+              ) : emu.status === 'paused' ? (
                 <button
                   type="button"
                   className="btn btn--ghost"
@@ -604,7 +688,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
                 type="button"
                 className="btn btn--ghost"
                 onClick={emu.restart}
-                disabled={emu.status === 'loading' || peerPlaying}
+                disabled={emu.status === 'loading' || peerPlaying || sessionMode === 'coop'}
               >
                 Reset
               </button>
@@ -612,7 +696,10 @@ export default function App({ initialCoopJoin = null }: AppProps) {
                 type="button"
                 className="btn btn--ghost"
                 onClick={() => void emu.saveState()}
-                disabled={emu.status !== 'running' && emu.status !== 'paused'}
+                disabled={
+                  sessionMode === 'coop' ||
+                  (emu.status !== 'running' && emu.status !== 'paused')
+                }
               >
                 Save
               </button>
@@ -620,7 +707,10 @@ export default function App({ initialCoopJoin = null }: AppProps) {
                 type="button"
                 className="btn btn--ghost"
                 onClick={() => void emu.loadState()}
-                disabled={emu.status !== 'running' && emu.status !== 'paused'}
+                disabled={
+                  sessionMode === 'coop' ||
+                  (emu.status !== 'running' && emu.status !== 'paused')
+                }
               >
                 Load
               </button>
@@ -628,7 +718,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
                 type="button"
                 className="btn btn--ghost"
                 onClick={emu.toggleFastForward}
-                disabled={emu.status !== 'running' || peerPlaying}
+                disabled={emu.status !== 'running' || peerPlaying || sessionMode === 'coop'}
               >
                 FF
               </button>
@@ -756,6 +846,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
           setLayoutEditorOpen(true)
         }}
         remoteHost={sessionMode === 'remote' && isHost && peerActive}
+        coopGuest={sessionMode === 'coop' && isGuest && peerActive}
       />
 
       <ControllerPanel

@@ -57,6 +57,13 @@ export function getCoopInputDelayMs(latencyMs: number | null): number {
   return Math.min(250, Math.max(80, oneWay + frameBuffer))
 }
 
+export function getCoopLookaheadFrames(latencyMs: number | null): number {
+  return Math.min(
+    15,
+    Math.max(3, Math.ceil(getCoopInputDelayMs(latencyMs) / (1000 / 60))),
+  )
+}
+
 export function getLatencyProfile(
   ms: number | null,
   mode: SessionMode,

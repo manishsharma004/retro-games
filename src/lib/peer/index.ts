@@ -29,12 +29,14 @@ export {
 export { compressStateBlob, decompressStateBlob, maybeDecompressStateBlob } from './stateCompress'
 export {
   pickSyncSettings,
+  buildCoopProfile,
   COOP_GO_DELAY_MS,
   COOP_RESYNC_RESUME_DELAY_MS,
   type ControlMessage,
   type PeerRole,
   type PeerSeat,
   type PeerSyncSettings,
+  type CoopEmulatorProfile,
   type SessionMode,
   type RosterPeer,
 } from './protocol'
@@ -51,6 +53,7 @@ export {
   classifyLatency,
   formatLatency,
   getCoopInputDelayMs,
+  getCoopLookaheadFrames,
   getLatencyProfile,
   LATENCY_PING_INTERVAL_MS,
   LATENCY_STALE_MS,

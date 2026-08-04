@@ -19,6 +19,8 @@ interface AdvancedSettingsProps {
   remoteGuest?: boolean
   /** Remote play host: show stream sharing options. */
   remoteHost?: boolean
+  /** Co-op guest: gameplay settings follow the host. */
+  coopGuest?: boolean
   autoFullscreen?: boolean
   onAutoFullscreenChange?: (value: boolean) => void
 }
@@ -38,6 +40,7 @@ export function AdvancedSettings({
   onOpenLayoutEditor,
   remoteGuest = false,
   remoteHost = false,
+  coopGuest = false,
   autoFullscreen = false,
   onAutoFullscreenChange,
 }: AdvancedSettingsProps) {
@@ -132,6 +135,7 @@ export function AdvancedSettings({
               <input
                 type="checkbox"
                 checked={settings.videoVsync}
+                disabled={coopGuest}
                 onChange={(e) => patch('videoVsync', e.target.checked)}
               />
             </label>
@@ -142,6 +146,7 @@ export function AdvancedSettings({
                 min={0}
                 max={4}
                 value={settings.frameSkip}
+                disabled={coopGuest}
                 onChange={(e) => patch('frameSkip', Number(e.target.value))}
               />
               <em>{settings.frameSkip === 0 ? 'Off' : settings.frameSkip}</em>
@@ -174,11 +179,15 @@ export function AdvancedSettings({
 
           <section className="settings-section">
             <h3>Gameplay</h3>
+            {coopGuest && (
+              <p className="settings-hint">Co-op guest — gameplay timing and core options follow the host.</p>
+            )}
             <label className="field field--row">
               <span>Rewind</span>
               <input
                 type="checkbox"
                 checked={settings.rewindEnable}
+                disabled={coopGuest}
                 onChange={(e) => patch('rewindEnable', e.target.checked)}
               />
             </label>
@@ -308,6 +317,7 @@ export function AdvancedSettings({
               <input
                 type="checkbox"
                 checked={settings.swapAB}
+                disabled={coopGuest}
                 onChange={(e) => patch('swapAB', e.target.checked)}
               />
             </label>
@@ -316,6 +326,7 @@ export function AdvancedSettings({
               <input
                 type="checkbox"
                 checked={settings.allowOpposingDirections}
+                disabled={coopGuest}
                 onChange={(e) => patch('allowOpposingDirections', e.target.checked)}
               />
             </label>
@@ -347,6 +358,7 @@ export function AdvancedSettings({
                 <span>Region</span>
                 <select
                   value={settings.nesRegion}
+                  disabled={coopGuest}
                   onChange={(e) =>
                     patch('nesRegion', e.target.value as EmulatorSettings['nesRegion'])
                   }
@@ -360,6 +372,7 @@ export function AdvancedSettings({
                 <span>Turbo</span>
                 <select
                   value={settings.nesTurbo}
+                  disabled={coopGuest}
                   onChange={(e) =>
                     patch('nesTurbo', e.target.value as EmulatorSettings['nesTurbo'])
                   }
@@ -380,6 +393,7 @@ export function AdvancedSettings({
                 <span>Region</span>
                 <select
                   value={settings.snesRegion}
+                  disabled={coopGuest}
                   onChange={(e) =>
                     patch('snesRegion', e.target.value as EmulatorSettings['snesRegion'])
                   }
@@ -394,6 +408,7 @@ export function AdvancedSettings({
                   <span>Player count (multitap)</span>
                   <select
                     value={settings.snesPlayerCount}
+                    disabled={coopGuest}
                     onChange={(e) =>
                       patch('snesPlayerCount', Number(e.target.value) as EmulatorSettings['snesPlayerCount'])
                     }

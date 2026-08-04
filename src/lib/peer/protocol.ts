@@ -1,5 +1,10 @@
 import type { SystemId } from '../cores'
-import { coopTimingSettings, type EmulatorSettings } from '../settings'
+import {
+  buildCoopProfile,
+  coopTimingSettings,
+  type CoopEmulatorProfile,
+  type EmulatorSettings,
+} from '../settings'
 
 export type PeerSeat = 1 | 2 | 3 | 4 | 5
 
@@ -11,6 +16,7 @@ export type SessionMode = 'local' | 'remote' | 'coop'
 export const COOP_GO_DELAY_MS = 400
 export const COOP_RESYNC_RESUME_DELAY_MS = 400
 
+/** @deprecated Use CoopEmulatorProfile */
 export interface PeerSyncSettings {
   swapAB: boolean
   allowOpposingDirections: boolean
@@ -35,6 +41,8 @@ export function pickSyncSettings(settings: EmulatorSettings): PeerSyncSettings {
     videoVsync: coop.videoVsync,
   }
 }
+
+export { type CoopEmulatorProfile, buildCoopProfile }
 
 /** Active player seat, or null when watching as spectator. */
 export type PeerParticipationSeat = PeerSeat | null
@@ -73,11 +81,17 @@ export type ControlMessage =
       romSize: number
       libraryFile?: string
       settings: PeerSyncSettings
+      profile?: CoopEmulatorProfile
       stateSize: number
     }
   | { type: 'transfer-start'; id: number; kind: 'rom' | 'state'; size: number }
   | { type: 'transfer-end'; id: number; kind: 'rom' | 'state' }
-  | { type: 'input'; seat: PeerSeat; button: string; down: boolean; t: number }
+  | { type: 'input'; seat: PeerSeat; button: string; down: boolean; t?: number; frame?: number }
+  | { type: 'input-horizon'; f: number }
+  | { type: 'lockstep-pause' }
+  | { type: 'lockstep-resume'; at: number }
+  | { type: 'settings-sync'; profile: CoopEmulatorProfile; hash: string }
+  | { type: 'state-hash'; hash: string; frame: number }
   | { type: 'rumble'; seat: PeerSeat; pattern: number[] }
   | { type: 'resync-request' }
   | { type: 'resync-start' }

@@ -5,6 +5,7 @@ import {
   getLatencyProfile,
   LATENCY_PING_INTERVAL_MS,
   LATENCY_STALE_MS,
+  buildCoopProfile,
   pickSyncSettings,
   smoothLatency,
   COOP_GO_DELAY_MS,
@@ -20,7 +21,9 @@ import {
   type PeerSeat,
   type PeerSyncSettings,
   type SessionMode,
+  type CoopEmulatorProfile,
 } from '../lib/peer'
+import { profileHash, legacySettingsToProfile } from '../lib/settings'
 import {
   SignalingAdapterChain,
   formatSignalingPath,
@@ -73,13 +76,24 @@ export interface PeerBootstrapPayload {
   state: Uint8Array
   libraryFile?: string
   settings: PeerSyncSettings
+  profile: CoopEmulatorProfile
 }
 
 interface UsePeerSessionOptions {
   settings: EmulatorSettings
   sessionMode?: SessionMode
   system?: 'nes' | 'snes' | null
-  onRemoteInput?: (seat: PeerSeat, button: string, down: boolean, executeAt?: number) => void
+  onRemoteInput?: (
+    seat: PeerSeat,
+    button: string,
+    down: boolean,
+    opts?: { executeAt?: number; frame?: number },
+  ) => void
+  onInputHorizon?: (f: number) => void
+  onLockstepPause?: () => void
+  onLockstepResume?: (at: number) => void
+  onSettingsSync?: (profile: CoopEmulatorProfile, hash: string) => void
+  onStateHash?: (hash: string, frame: number) => void
   onBootstrap?: (payload: PeerBootstrapPayload) => void | Promise<void>
   onGo?: (resumeAt?: number) => void
   onHostExit?: () => void
@@ -166,6 +180,12 @@ export interface UsePeerSessionResult {
   sendGo: () => void
   sendHostExit: () => void
   sendInput: (button: string, down: boolean, executeAt?: number) => void
+  sendLockstepInput: (button: string, down: boolean, frame: number) => void
+  sendInputHorizon: (f: number) => void
+  sendLockstepPause: () => void
+  sendLockstepResume: (at: number) => void
+  sendSettingsSync: (profile: CoopEmulatorProfile) => void
+  sendStateHash: (hash: string, frame: number) => void
   sendPing: (t: number) => void
   sendResyncState: (state: Uint8Array, compressed?: boolean) => Promise<void>
   sendResyncDone: (resumeAt?: number) => void
@@ -192,7 +212,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   const multiHost = useMultiPeerHost({
     hostPeerId: peerIdRef.current,
     onRemoteInput: (seat, button, down, executeAt) =>
-      optionsRef.current.onRemoteInput?.(seat, button, down, executeAt),
+      optionsRef.current.onRemoteInput?.(seat, button, down, { executeAt }),
     onGuestConnected: () => {
       optionsRef.current.onGuestHello?.()
       if (modeRef.current === 'remote' && !multiGuestRef.current) {
@@ -215,6 +235,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     core: string
     libraryFile?: string
     settings: PeerSyncSettings
+    profile: CoopEmulatorProfile
     romSize: number
     stateSize: number
   } | null>(null)
@@ -737,12 +758,33 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
             core: msg.core,
             libraryFile: msg.libraryFile,
             settings: msg.settings,
+            profile:
+              msg.profile ??
+              legacySettingsToProfile(msg.settings),
             romSize: msg.romSize,
             stateSize: msg.stateSize,
           }
           updatePhase('transferring')
         } else if (msg.type === 'input') {
-          optionsRef.current.onRemoteInput?.(msg.seat, msg.button, msg.down, msg.t)
+          if (msg.frame !== undefined) {
+            optionsRef.current.onRemoteInput?.(msg.seat, msg.button, msg.down, {
+              frame: msg.frame,
+            })
+          } else {
+            optionsRef.current.onRemoteInput?.(msg.seat, msg.button, msg.down, {
+              executeAt: msg.t,
+            })
+          }
+        } else if (msg.type === 'input-horizon') {
+          optionsRef.current.onInputHorizon?.(msg.f)
+        } else if (msg.type === 'lockstep-pause') {
+          optionsRef.current.onLockstepPause?.()
+        } else if (msg.type === 'lockstep-resume') {
+          optionsRef.current.onLockstepResume?.(msg.at)
+        } else if (msg.type === 'settings-sync') {
+          optionsRef.current.onSettingsSync?.(msg.profile, msg.hash)
+        } else if (msg.type === 'state-hash') {
+          optionsRef.current.onStateHash?.(msg.hash, msg.frame)
         } else if (msg.type === 'rumble') {
           optionsRef.current.onRumble?.(msg.seat, msg.pattern)
         } else if (msg.type === 'ready') {
@@ -827,6 +869,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
             state,
             libraryFile: meta.libraryFile,
             settings: meta.settings,
+            profile: meta.profile,
           })
         }
       },
@@ -1211,6 +1254,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
       setRemoteReady(false)
       updatePhase('transferring')
       const settings = pickSyncSettings(optionsRef.current.settings)
+      const profile = buildCoopProfile(optionsRef.current.settings)
       conn.sendControl({
         type: 'bootstrap',
         name: payload.name,
@@ -1219,6 +1263,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
         romSize: payload.rom.byteLength,
         libraryFile: payload.libraryFile,
         settings,
+        profile,
         stateSize: payload.state.byteLength,
       })
       await conn.sendBlob('rom', payload.rom)
@@ -1260,6 +1305,62 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     if (phaseRef.current !== 'playing' && phaseRef.current !== 'linked') return
     try {
       conn.sendControl({ type: 'input', seat: s, button, down, t: executeAt ?? Date.now() })
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  const sendLockstepInput = useCallback((button: string, down: boolean, frame: number) => {
+    const conn = connRef.current
+    const s = seatRef.current
+    if (!conn?.connected || !s) return
+    if (phaseRef.current !== 'playing') return
+    try {
+      conn.sendControl({ type: 'input', seat: s, button, down, frame })
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  const sendInputHorizon = useCallback((f: number) => {
+    try {
+      connRef.current?.sendControl({ type: 'input-horizon', f })
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  const sendLockstepPause = useCallback(() => {
+    try {
+      connRef.current?.sendControl({ type: 'lockstep-pause' })
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  const sendLockstepResume = useCallback((at: number) => {
+    try {
+      connRef.current?.sendControl({ type: 'lockstep-resume', at })
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  const sendSettingsSync = useCallback((profile: CoopEmulatorProfile) => {
+    try {
+      connRef.current?.sendControl({
+        type: 'settings-sync',
+        profile,
+        hash: profileHash(profile),
+      })
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  const sendStateHash = useCallback((hash: string, frame: number) => {
+    try {
+      connRef.current?.sendControl({ type: 'state-hash', hash, frame })
     } catch {
       // ignore
     }
@@ -1530,6 +1631,12 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     sendGo,
     sendHostExit,
     sendInput,
+    sendLockstepInput,
+    sendInputHorizon,
+    sendLockstepPause,
+    sendLockstepResume,
+    sendSettingsSync,
+    sendStateHash,
     sendPing,
     sendResyncState,
     sendResyncDone,

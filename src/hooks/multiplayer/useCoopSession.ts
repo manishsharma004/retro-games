@@ -2,26 +2,44 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { UsePeerSessionResult } from '../usePeerSession'
 import type { UseEmulatorResult } from '../useEmulator'
 import { compressStateBlob, COOP_RESYNC_RESUME_DELAY_MS, decompressStateBlob } from '../../lib/peer'
+import { buildCoopProfile, profileHash, type EmulatorSettings } from '../../lib/settings'
 import { romUrl } from '../../lib/library'
 import type { ModeHookBase } from './types'
+
+export interface LockstepSessionBridge {
+  stopStepper: () => void
+  startStepper: (at?: number) => void
+  handleCoordinatedPause: () => void
+}
 
 export interface UseCoopSessionOptions extends ModeHookBase {
   peer: UsePeerSessionResult
   emu: UseEmulatorResult
   isHost: boolean
+  settings: EmulatorSettings
+  lockstepRef: React.MutableRefObject<LockstepSessionBridge | null>
+  lastProfileHashRef: React.MutableRefObject<string | null>
 }
 
 /**
  * Dual-emulator co-op: host shares ROM + initial save state once at setup.
- * After both peers load and Go, only controller inputs are synced. Use syncGameState
- * to manually align emulators when they drift (on-demand state transfer).
+ * During play, frame lockstep keeps both emulators in sync; save-state resync
+ * corrects rare hash mismatches or reconnects.
  */
-export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOptions) {
+export function useCoopSession({
+  enabled,
+  peer,
+  emu,
+  isHost,
+  settings,
+  lockstepRef,
+  lastProfileHashRef,
+}: UseCoopSessionOptions) {
   const [syncPending, setSyncPending] = useState(false)
   const [pushing, setPushing] = useState(false)
   const [importing, setImporting] = useState(false)
   const [, setSyncTick] = useState(0)
-  const wasRunningBeforeResyncRef = useRef(false)
+  const wasSteppingRef = useRef(false)
   const resyncActiveRef = useRef(false)
   const lastStateSyncAtRef = useRef(Date.now())
   const autoSyncBusyRef = useRef(false)
@@ -42,28 +60,30 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
   const pauseForResync = useCallback(() => {
     if (!enabled) return
     if (!resyncActiveRef.current) {
-      wasRunningBeforeResyncRef.current = emu.isRunning()
+      wasSteppingRef.current = emu.isLockstepActive()
       resyncActiveRef.current = true
     }
     emu.releaseAllInputs()
-    if (emu.isRunning()) {
+    lockstepRef.current?.stopStepper()
+    if (emu.isRunning() && !emu.isLockstepActive()) {
       emu.pause()
     }
-  }, [enabled, emu])
+  }, [enabled, emu, lockstepRef])
 
   const resumeAfterResync = useCallback(
     (resumeAt?: number) => {
       if (!enabled) return
 
       const shouldResume =
-        wasRunningBeforeResyncRef.current ||
-        (resyncActiveRef.current && peer.phase === 'playing')
+        wasSteppingRef.current || (resyncActiveRef.current && peer.phase === 'playing')
 
       const run = () => {
         if (shouldResume && peer.phase === 'playing') {
+          lockstepRef.current?.startStepper(resumeAt)
+        } else if (shouldResume) {
           emu.resumeAfterStateLoad()
         }
-        wasRunningBeforeResyncRef.current = false
+        wasSteppingRef.current = false
         resyncActiveRef.current = false
         setSyncPending(false)
         setImporting(false)
@@ -77,7 +97,7 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
       if (delay <= 0) run()
       else window.setTimeout(run, delay)
     },
-    [enabled, emu, peer.phase],
+    [enabled, emu, lockstepRef, peer.phase],
   )
 
   const finishResync = useCallback(
@@ -96,6 +116,7 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
   const shareGame = useCallback(async () => {
     if (!enabled || !isHost || !emu.game) throw new Error('Host must have a game loaded')
     await emu.applyCoopTiming()
+    lockstepRef.current?.stopStepper()
     emu.pause()
     let rom = await emu.getRomBytes()
     if (!rom && emu.game.source === 'demo') {
@@ -107,6 +128,8 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
     const stateBlob = await emu.exportStateBlob()
     if (!stateBlob) throw new Error('Could not capture save state')
     const state = new Uint8Array(await stateBlob.arrayBuffer())
+    const profile = buildCoopProfile(settings)
+    lastProfileHashRef.current = profileHash(profile)
     await peer.sendBootstrap({
       name: emu.game.name,
       system: emu.game.system,
@@ -116,7 +139,7 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
       libraryFile: emu.game.libraryFile,
     })
     lastStateSyncAtRef.current = Date.now()
-  }, [enabled, isHost, emu, peer])
+  }, [enabled, isHost, emu, peer, settings, lockstepRef, lastProfileHashRef])
 
   const pushGameState = useCallback(async () => {
     if (!enabled || !isHost || !emu.game) throw new Error('Host must have a game loaded')
@@ -125,6 +148,8 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
     const conn = peer.getConnection()
     try {
       pauseForResync()
+      const profile = buildCoopProfile(settings)
+      peer.sendSettingsSync(profile)
       try {
         conn?.sendControl({ type: 'resync-start' })
       } catch {
@@ -143,7 +168,7 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
     } finally {
       setPushing(false)
     }
-  }, [enabled, isHost, emu, peer, pushing, pauseForResync, abortResync])
+  }, [enabled, isHost, emu, peer, settings, pushing, pauseForResync, abortResync])
 
   const handleResyncRequest = useCallback(async () => {
     if (!enabled || !isHost) return
@@ -168,7 +193,6 @@ export function useCoopSession({ enabled, peer, emu, isHost }: UseCoopSessionOpt
   const handleResyncState = useCallback(
     async (data: Uint8Array, compressed = false) => {
       if (!enabled) return
-      // Capture run state before import even if resync-start was delayed/reordered.
       pauseForResync()
       setImporting(true)
       try {

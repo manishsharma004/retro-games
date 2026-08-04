@@ -10,6 +10,7 @@ import { RomLoader } from './components/RomLoader'
 import { VirtualController } from './components/VirtualController'
 import { VirtualLayoutEditor } from './components/VirtualLayoutEditor'
 import { useCoopInputDelay } from './hooks/useCoopInputDelay'
+import { useCoopHoldSync } from './hooks/multiplayer/useCoopHoldSync'
 import { useCoopSession } from './hooks/multiplayer/useCoopSession'
 import { useCoopAutoStart } from './hooks/multiplayer/useCoopAutoStart'
 import { useCoopSettingsSync } from './hooks/multiplayer/useCoopSettingsSync'
@@ -146,6 +147,10 @@ export default function App({ initialCoopJoin = null }: AppProps) {
     ((seat: PeerSeat, button: string, down: boolean, executeAt?: number) => void) | null
   >(null)
   const coopInputClearRef = useRef<(() => void) | null>(null)
+  const coopHoldRef = useRef<{
+    onRemoteHold: () => void
+    onRemoteHoldRelease: (at: number) => void
+  } | null>(null)
   const lastProfileHashRef = useRef<string | null>(null)
   const lastProfileRef = useRef<CoopEmulatorProfile | null>(null)
 
@@ -211,6 +216,14 @@ export default function App({ initialCoopJoin = null }: AppProps) {
       if (sessionMode !== 'coop') return
       coopRef.current?.handleResyncDone(resumeAt)
     },
+    onCoopHold: () => {
+      if (sessionMode !== 'coop') return
+      coopHoldRef.current?.onRemoteHold()
+    },
+    onCoopHoldRelease: (at) => {
+      if (sessionMode !== 'coop') return
+      coopHoldRef.current?.onRemoteHoldRelease(at)
+    },
     onHostExit: () => {
       emu.exit()
     },
@@ -274,6 +287,21 @@ export default function App({ initialCoopJoin = null }: AppProps) {
     coopInputDelayRef.current = sessionMode === 'coop' ? applyRemoteInput : null
     coopInputClearRef.current = sessionMode === 'coop' ? clearPending : null
   }, [sessionMode, applyRemoteInput, clearPending])
+
+  const { onRemoteHold, onRemoteHoldRelease } = useCoopHoldSync({
+    enabled: sessionMode === 'coop' && peerPlaying,
+    playing: peerPlaying,
+    emu,
+    sendHold: peer.sendCoopHold,
+    sendHoldRelease: peer.sendCoopHoldRelease,
+  })
+
+  useEffect(() => {
+    coopHoldRef.current =
+      sessionMode === 'coop'
+        ? { onRemoteHold, onRemoteHoldRelease }
+        : null
+  }, [sessionMode, onRemoteHold, onRemoteHoldRelease])
 
   useLocalHost({
     enabled: sessionMode === 'local' && isHost,

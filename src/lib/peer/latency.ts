@@ -23,6 +23,8 @@ export interface LatencyProfile {
   coopSyncIntervalMs: number | null
   /** Co-op: automatic background state sync interval. */
   coopAutoSyncIntervalMs: number | null
+  /** Co-op: delay before resuming after a state sync completes. */
+  coopResyncResumeDelayMs: number
   /** Co-op: symmetric input buffer before applying local or remote inputs (ms). */
   coopInputDelayMs: number
   /** Show input-delay warning in the lobby/toolbar. */
@@ -57,6 +59,14 @@ export function getCoopInputDelayMs(latencyMs: number | null): number {
   return Math.min(200, Math.max(50, oneWay + frameBuffer))
 }
 
+export function getCoopResyncResumeDelayMs(latencyMs: number | null): number {
+  const tier = classifyLatency(latencyMs)
+  if (tier === 'excellent') return 120
+  if (tier === 'good') return 200
+  if (tier === 'fair') return 300
+  return 400
+}
+
 export function getLatencyProfile(
   ms: number | null,
   mode: SessionMode,
@@ -70,8 +80,9 @@ export function getLatencyProfile(
     streamFps: 60,
     label: tier === 'unknown' ? 'Measuring…' : formatLatency(ms),
     advice: null,
-    coopSyncIntervalMs: null,
-    coopAutoSyncIntervalMs: mode === 'coop' ? 45_000 : null,
+    coopSyncIntervalMs: mode === 'coop' ? 15_000 : null,
+    coopAutoSyncIntervalMs: mode === 'coop' ? 5_000 : null,
+    coopResyncResumeDelayMs: getCoopResyncResumeDelayMs(ms),
     coopInputDelayMs: getCoopInputDelayMs(ms),
     warnInputDelay: false,
   }
@@ -90,8 +101,9 @@ export function getLatencyProfile(
             : mode === 'remote'
               ? 'Fair latency — stream quality reduced slightly.'
               : 'Fair latency — controller input may feel slightly delayed.',
-        coopSyncIntervalMs: 90_000,
-        coopAutoSyncIntervalMs: 60_000,
+        coopSyncIntervalMs: 30_000,
+        coopAutoSyncIntervalMs: 8_000,
+        coopResyncResumeDelayMs: getCoopResyncResumeDelayMs(ms),
         coopInputDelayMs: getCoopInputDelayMs(ms),
         warnInputDelay: mode !== 'remote',
       }
@@ -105,8 +117,9 @@ export function getLatencyProfile(
             : mode === 'remote'
               ? 'High latency — stream capped at 30 FPS.'
               : 'High latency — inputs will feel delayed on the host.',
-        coopSyncIntervalMs: 45_000,
-        coopAutoSyncIntervalMs: 45_000,
+        coopSyncIntervalMs: 25_000,
+        coopAutoSyncIntervalMs: 12_000,
+        coopResyncResumeDelayMs: getCoopResyncResumeDelayMs(ms),
         coopInputDelayMs: getCoopInputDelayMs(ms),
         warnInputDelay: true,
       }
@@ -120,8 +133,9 @@ export function getLatencyProfile(
             : mode === 'coop'
               ? 'Very high latency — sync often; inputs are noticeably delayed.'
               : 'Very high latency — expect noticeable input and video delay.',
-        coopSyncIntervalMs: 30_000,
-        coopAutoSyncIntervalMs: 35_000,
+        coopSyncIntervalMs: 20_000,
+        coopAutoSyncIntervalMs: 20_000,
+        coopResyncResumeDelayMs: getCoopResyncResumeDelayMs(ms),
         coopInputDelayMs: getCoopInputDelayMs(ms),
         warnInputDelay: true,
       }

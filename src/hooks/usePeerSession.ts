@@ -99,6 +99,8 @@ interface UsePeerSessionOptions {
   onResyncRequest?: () => void
   onResyncStart?: () => void
   onResyncDone?: (resumeAt?: number) => void
+  onCoopHold?: () => void
+  onCoopHoldRelease?: (at: number) => void
   onPeerError?: (message: string) => void
   onLinked?: () => void
   onRemoteStream?: (stream: MediaStream) => void
@@ -181,6 +183,8 @@ export interface UsePeerSessionResult {
   sendHostExit: () => void
   sendInput: (button: string, down: boolean, executeAt?: number) => void
   sendSettingsSync: (profile: CoopEmulatorProfile) => void
+  sendCoopHold: () => void
+  sendCoopHoldRelease: (at: number) => void
   sendPing: (t: number) => void
   sendResyncState: (state: Uint8Array, compressed?: boolean) => Promise<void>
   sendResyncDone: (resumeAt?: number) => void
@@ -788,6 +792,10 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
           optionsRef.current.onResyncStart?.()
         } else if (msg.type === 'resync-done') {
           optionsRef.current.onResyncDone?.('at' in msg ? msg.at : undefined)
+        } else if (msg.type === 'coop-hold') {
+          optionsRef.current.onCoopHold?.()
+        } else if (msg.type === 'coop-hold-release') {
+          optionsRef.current.onCoopHoldRelease?.(msg.at)
         } else if (msg.type === 'ping') {
           try {
             conn.sendControl({ type: 'pong', t: msg.t, peerRecv: Date.now() })
@@ -1297,6 +1305,22 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     }
   }, [])
 
+  const sendCoopHold = useCallback(() => {
+    try {
+      connRef.current?.sendControl({ type: 'coop-hold' })
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  const sendCoopHoldRelease = useCallback((at: number) => {
+    try {
+      connRef.current?.sendControl({ type: 'coop-hold-release', at })
+    } catch {
+      // ignore
+    }
+  }, [])
+
   const sendSettingsSync = useCallback((profile: CoopEmulatorProfile) => {
     try {
       connRef.current?.sendControl({
@@ -1578,6 +1602,8 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
     sendHostExit,
     sendInput,
     sendSettingsSync,
+    sendCoopHold,
+    sendCoopHoldRelease,
     sendPing,
     sendResyncState,
     sendResyncDone,

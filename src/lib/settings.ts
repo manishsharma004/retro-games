@@ -332,7 +332,7 @@ export function buildRetroarchConfig(
       video_refresh_rate: COOP_REFRESH_RATE_HZ,
       audio_latency: COOP_AUDIO_LATENCY_MS,
       rewind_enable: false,
-      pause_nonactive: true,
+      pause_nonactive: false,
     }
   }
 

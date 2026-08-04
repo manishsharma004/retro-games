@@ -92,6 +92,8 @@ export type ControlMessage =
   | { type: 'resync-request' }
   | { type: 'resync-start' }
   | { type: 'resync-done'; at: number }
+  | { type: 'coop-hold' }
+  | { type: 'coop-hold-release'; at: number }
   | { type: 'ping'; t: number }
   | { type: 'pong'; t: number; peerRecv?: number }
   | { type: 'ice-reoffer'; sdp: string; tier?: 'local' | 'relay' }

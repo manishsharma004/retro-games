@@ -33,7 +33,6 @@ export interface UseCoopLockstepOptions {
   localSeat: PeerSeat | null
   lookaheadFrames: number
   connected: boolean
-  isHost: boolean
   handlers: CoopInputHandlers
   beginLockstep: () => void
   stopLockstep: () => void
@@ -53,7 +52,6 @@ export function useCoopLockstep({
   localSeat,
   lookaheadFrames,
   connected,
-  isHost,
   handlers,
   beginLockstep,
   stopLockstep,

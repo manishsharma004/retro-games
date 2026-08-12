@@ -220,12 +220,31 @@ button {
   font-size: 0.85rem;
 }
 
+.rom-loader__formats--sub {
+  margin-top: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.rom-loader__core {
+  margin: 0 0 0.85rem;
+  text-align: left;
+}
+
 .rom-loader--compact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem;
   width: auto;
   padding: 0;
   border: 0;
   background: none;
   backdrop-filter: none;
+}
+
+.rom-loader--compact .rom-loader__core {
+  margin: 0;
+  min-width: 10rem;
 }
 
 .library {

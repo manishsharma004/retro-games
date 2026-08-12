@@ -536,7 +536,9 @@ export default function App({ initialCoopJoin = null }: AppProps) {
           </p>
           <RomLoader
             disabled={emu.status === 'loading'}
-            onFile={(files) => emu.launchFile(files)}
+            arcadeCore={settings.arcadeCore}
+            onArcadeCoreChange={(core) => setSettings((prev) => ({ ...prev, arcadeCore: core }))}
+            onFile={(files, options) => emu.launchFile(files, options)}
             onDemo={emu.launchDemo}
           />
           <div className="hero__peer">
@@ -632,7 +634,9 @@ export default function App({ initialCoopJoin = null }: AppProps) {
               <RomLoader
                 compact
                 disabled={emu.status === 'loading'}
-                onFile={(files) => emu.launchFile(files)}
+                arcadeCore={settings.arcadeCore}
+                onArcadeCoreChange={(core) => setSettings((prev) => ({ ...prev, arcadeCore: core }))}
+                onFile={(files, options) => emu.launchFile(files, options)}
                 onDemo={emu.launchDemo}
               />
               <button type="button" className="btn btn--ghost" onClick={() => setPeerOpen(true)}>

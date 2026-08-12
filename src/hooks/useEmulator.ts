@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Nostalgist } from 'nostalgist'
-import { SYSTEMS, type SystemId, detectSystemFromFiles, partitionRomFiles, toNostalgistRom } from '../lib/cores'
+import {
+  SYSTEMS,
+  type SystemId,
+  detectSystemFromFiles,
+  partitionRomFiles,
+  resolveArcadeCore,
+  toNostalgistRom,
+} from '../lib/cores'
 import {
   attachStageResizeSync,
   prepareResponsiveCanvas,
@@ -48,7 +55,7 @@ export interface UseEmulatorResult {
   /** Bumps after each successful ROM launch (running/paused). */
   launchGeneration: number
   canvasRef: React.RefObject<HTMLCanvasElement | null>
-  launchFile: (files: File | File[]) => void
+  launchFile: (files: File | File[], options?: { arcadeCore?: string }) => void
   launchDemo: () => void
   launchLibrary: (entry: LibraryRom) => void
   launchPeer: (opts: {
@@ -167,18 +174,19 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
 
       try {
         const current = settingsRef.current
-        const system = SYSTEMS[pending.game.system]
         const coop = isCoopLaunch(pending.game)
 
         prepareResponsiveCanvas(canvas)
 
+        const launchCore = pending.game.core
+
         const nostalgist = await Nostalgist.launch({
-          core: system.core,
+          core: launchCore,
           rom: toNostalgistRom(pending.rom, pending.game.system),
           bios:
-            pending.game.system === 'arcade' || !pending.bios?.length
-              ? undefined
-              : toNostalgistRom(pending.bios, pending.game.system),
+            pending.bios?.length
+              ? toNostalgistRom(pending.bios, pending.game.system)
+              : undefined,
           state: pending.state,
           element: canvas,
           size: 'auto',
@@ -193,7 +201,10 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
           shader: current.shader || undefined,
           cache: { core: true, shader: true },
           retroarchConfig: buildRetroarchConfig(current, { coop, system: pending.game.system }),
-          retroarchCoreConfig: buildCoreConfig(pending.game.system, current, { coop }),
+          retroarchCoreConfig: buildCoreConfig(pending.game.system, current, {
+            coop,
+            core: launchCore,
+          }),
         })
 
         if (cancelled) {
@@ -245,7 +256,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
   }, [])
 
   const launchFile = useCallback(
-    (input: File | File[]) => {
+    (input: File | File[], options?: { arcadeCore?: string }) => {
       const files = Array.isArray(input) ? input : [input]
       if (files.length === 0) return
 
@@ -258,7 +269,14 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
         return
       }
 
-      const { rom, bios } = partitionRomFiles(files, system)
+      const arcadeCore =
+        system === 'arcade'
+          ? resolveArcadeCore(options?.arcadeCore ?? settingsRef.current.arcadeCore)
+          : undefined
+      const core =
+        system === 'arcade' && arcadeCore ? arcadeCore : SYSTEMS[system].core
+
+      const { rom, bios } = partitionRomFiles(files, system, core)
       const gameFiles = rom.length > 0 ? rom : files
       const primary = gameFiles[0]
       const romPayload = gameFiles.length === 1 ? primary : gameFiles
@@ -267,13 +285,13 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
         game: {
           name: primary.name,
           system,
-          core: SYSTEMS[system].core,
+          core,
           source: 'file',
           file: primary,
           extraFiles: gameFiles.length > 1 ? gameFiles.slice(1) : undefined,
         },
         rom: romPayload,
-        bios: system === 'arcade' ? undefined : bios.length > 0 ? bios : undefined,
+        bios: bios.length > 0 ? bios : undefined,
       })
     },
     [queueLaunch],
@@ -599,7 +617,10 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     if (active.source === 'demo') launchDemo()
     else if (active.file) {
       const files = active.extraFiles ? [active.file, ...active.extraFiles] : active.file
-      launchFile(files)
+      launchFile(files, {
+        arcadeCore:
+          active.system === 'arcade' ? settingsRef.current.arcadeCore : undefined,
+      })
     }
   }, [launchDemo, launchFile])
 

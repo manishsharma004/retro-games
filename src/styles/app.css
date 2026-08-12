@@ -231,10 +231,9 @@ button {
 }
 
 .rom-loader--compact {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
   width: auto;
   padding: 0;
   border: 0;
@@ -242,9 +241,10 @@ button {
   backdrop-filter: none;
 }
 
-.rom-loader--compact .rom-loader__core {
-  margin: 0;
-  min-width: 10rem;
+.btn--compact-load {
+  white-space: nowrap;
+  padding: 0.32rem 0.55rem;
+  font-size: 0.75rem;
 }
 
 .library {
@@ -2201,17 +2201,33 @@ body.rg-faux-fullscreen {
 
 @media (max-width: 720px) {
   .toolbar {
-    gap: 0.35rem 0.45rem;
-    padding: 0.35rem 0.5rem;
+    gap: 0.25rem 0.35rem;
+    padding: 0.28rem 0.45rem;
+    flex-wrap: nowrap;
+    align-items: center;
   }
 
   .toolbar__left {
     flex: 0 1 auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+    max-width: 42%;
+  }
+
+  .toolbar__brand {
+    display: none;
   }
 
   .toolbar__rom {
-    max-width: min(55vw, 180px);
-    font-size: 0.72rem;
+    max-width: 100%;
+    font-size: 0.68rem;
+    line-height: 1.2;
+  }
+
+  .toolbar__peer {
+    display: none;
   }
 
   .toolbar__actions {
@@ -2221,6 +2237,7 @@ body.rg-faux-fullscreen {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
+    justify-content: flex-end;
   }
 
   .toolbar__actions::-webkit-scrollbar {
@@ -2239,7 +2256,7 @@ body.rg-faux-fullscreen {
 
   .play-stage {
     width: 100%;
-    max-height: min(52dvh, calc(100vw * 3 / 4));
+    max-height: min(58dvh, calc(100vw * 3 / 4));
   }
 
   .virtual-pad__main {

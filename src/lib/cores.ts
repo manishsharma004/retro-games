@@ -3,6 +3,16 @@
  * @see https://nostalgist.js.org/apis/launch#core
  */
 
+import { isNostalgistCore } from './nostalgistCores'
+
+export {
+  NOSTALGIST_CORES,
+  NOSTALGIST_CORES as ARCADE_CORES,
+  isNostalgistCore,
+  isNostalgistCore as isArcadeCore,
+  coreLabel,
+} from './nostalgistCores'
+
 export type SystemId =
   | 'nes'
   | 'snes'
@@ -328,63 +338,16 @@ const SYSTEM_IDS = new Set<SystemId>(Object.keys(SYSTEMS) as SystemId[])
 const BIOS_NAME_RE =
   /^(neogeo|neogeo_bios|pgm|bios|devices|skns|dec|isgsm|vsb|awbios)(\.zip|\.7z)?$/i
 
-/** Selectable libretro arcade cores on Nostalgist's CDN (ROM set must match the core). */
-export interface ArcadeCoreOption {
-  id: string
-  label: string
-  /** Short hint about which ROM set version/format works. */
-  romHint: string
-}
-
-export const ARCADE_CORES: ArcadeCoreOption[] = [
-  {
-    id: 'mame2003_plus',
-    label: 'MAME 2003-Plus',
-    romHint: 'MAME 0.78+ / MAME 2003-Plus reference set',
-  },
-  {
-    id: 'mame2003',
-    label: 'MAME 2003',
-    romHint: 'MAME 0.78 reference set',
-  },
-  {
-    id: 'mame2000',
-    label: 'MAME 2000',
-    romHint: 'MAME 0.37b5 reference set',
-  },
-  {
-    id: 'fbalpha2012',
-    label: 'FBNeo 2012',
-    romHint: 'FBNeo 2012 reference set',
-  },
-  {
-    id: 'fbalpha2012_cps1',
-    label: 'FBNeo CPS-1',
-    romHint: 'CPS-1 (Street Fighter II, etc.)',
-  },
-  {
-    id: 'fbalpha2012_cps2',
-    label: 'FBNeo CPS-2',
-    romHint: 'CPS-2 (Marvel vs. Capcom, etc.)',
-  },
-  {
-    id: 'fbalpha2012_neogeo',
-    label: 'FBNeo Neo Geo',
-    romHint: 'Neo Geo (+ neogeo.zip BIOS in same picker)',
-  },
-]
-
 export const DEFAULT_ARCADE_CORE = 'mame2003_plus'
 
-const ARCADE_CORE_IDS = new Set(ARCADE_CORES.map((c) => c.id))
-
-export function isArcadeCore(core: string): boolean {
-  return ARCADE_CORE_IDS.has(core)
+export function resolveArcadeCore(core?: string | null): string {
+  if (core && isNostalgistCore(core)) return core
+  return DEFAULT_ARCADE_CORE
 }
 
-export function resolveArcadeCore(core?: string | null): string {
-  if (core && isArcadeCore(core)) return core
-  return DEFAULT_ARCADE_CORE
+/** FBNeo-family cores load BIOS zips from the system folder. */
+export function coreUsesBiosFolder(core: string): boolean {
+  return core.startsWith('fbalpha')
 }
 
 /** MAME/FBNeo identify games by zip basename; RetroArch FS is case-sensitive. */
@@ -466,7 +429,7 @@ export function partitionRomFiles(
 ): RomFilePartition {
   if (system === 'arcade') {
     const resolvedCore = resolveArcadeCore(core)
-    const fbNeo = resolvedCore.startsWith('fbalpha')
+    const fbNeo = coreUsesBiosFolder(resolvedCore)
     if (!fbNeo) {
       return { rom: files, bios: [] }
     }

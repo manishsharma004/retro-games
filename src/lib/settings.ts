@@ -1,4 +1,5 @@
 import { DEFAULT_LAYOUT, sanitizeLayout, type VirtualControlsLayout } from './virtualLayout'
+import type { SystemId } from './cores'
 
 export type ShaderOption = '' | 'crt/crt-easymode'
 
@@ -276,7 +277,7 @@ function playerBindsForCount(count: number): Record<string, string> {
 
 export function buildRetroarchConfig(
   settings: EmulatorSettings,
-  options?: RetroarchConfigOptions & { system?: 'nes' | 'snes' },
+  options?: RetroarchConfigOptions & { system?: SystemId },
 ): Record<string, string | number | boolean> {
   const effective = options?.coop ? coopTimingSettings(settings) : settings
   // RetroArch audio_volume is in dB; map 0–100% → -80–0 dB
@@ -340,7 +341,7 @@ export function buildRetroarchConfig(
 }
 
 export function buildCoreConfig(
-  system: 'nes' | 'snes',
+  system: SystemId,
   settings: EmulatorSettings,
   options?: RetroarchConfigOptions,
 ): Record<string, string> {
@@ -354,8 +355,11 @@ export function buildCoreConfig(
       fceumm_up_down_allowed: upDownAllowed,
     }
   }
-  return {
-    snes9x_region: effective.snesRegion,
-    snes9x_up_down_allowed: upDownAllowed,
+  if (system === 'snes') {
+    return {
+      snes9x_region: effective.snesRegion,
+      snes9x_up_down_allowed: upDownAllowed,
+    }
   }
+  return {}
 }

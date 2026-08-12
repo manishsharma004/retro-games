@@ -1,5 +1,6 @@
 import { useCallback, useRef, type CSSProperties } from 'react'
 import type { SystemId } from '../lib/cores'
+import { controllerLayout } from '../lib/cores'
 import { createPointerPressBindings } from '../lib/pointerPress'
 import {
   buttonStyle,
@@ -100,7 +101,8 @@ export function VirtualController({
 
   if (!visible) return null
 
-  const isSnes = system === 'snes'
+  const padLayout = controllerLayout(system)
+  const isFullPad = padLayout === 'snes' || padLayout === 'arcade'
   const customLayout = layoutUsesCustomPositions(layout)
   const zonePositions = resolveLayoutZones(layout)
 
@@ -130,11 +132,11 @@ export function VirtualController({
   const actionsCustomButtons = zoneUsesCustomButtons(actionsZone)
   const shouldersCustomButtons = zoneUsesCustomButtons(shouldersZone)
 
-  const leftButtons = resolveZoneButtons(leftZone, 'left', system, dpadMode)
-  const stickButtons = resolveZoneButtons(stickZone, 'stick', system, dpadMode)
-  const metaButtons = resolveZoneButtons(metaZone, 'meta', system, dpadMode)
-  const actionButtons = resolveZoneButtons(actionsZone, 'actions', system, dpadMode)
-  const shoulderButtons = resolveZoneButtons(shouldersZone, 'shoulders', system, dpadMode)
+  const leftButtons = resolveZoneButtons(leftZone, 'left', padLayout, dpadMode)
+  const stickButtons = resolveZoneButtons(stickZone, 'stick', padLayout, dpadMode)
+  const metaButtons = resolveZoneButtons(metaZone, 'meta', padLayout, dpadMode)
+  const actionButtons = resolveZoneButtons(actionsZone, 'actions', padLayout, dpadMode)
+  const shoulderButtons = resolveZoneButtons(shouldersZone, 'shoulders', padLayout, dpadMode)
 
   const mergeBtn = (
     zoneId: string,
@@ -287,7 +289,7 @@ export function VirtualController({
         }}
         data-layout-zone="shoulders"
       >
-        {isSnes && (
+        {isFullPad && (
           <>
             <button
               type="button"
@@ -356,7 +358,7 @@ export function VirtualController({
         <div
           className={[
             'vp-actions',
-            isSnes ? 'vp-actions--snes' : 'vp-actions--nes',
+            isFullPad ? 'vp-actions--snes' : 'vp-actions--nes',
             customLayout ? 'vp-zone vp-zone--actions' : '',
             actionsCustomButtons ? 'vp-zone--custom-buttons' : '',
           ]
@@ -368,7 +370,7 @@ export function VirtualController({
           }}
           data-layout-zone="actions"
         >
-          {isSnes && (
+          {isFullPad && (
             <>
               <button
                 type="button"

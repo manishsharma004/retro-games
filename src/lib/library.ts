@@ -1,4 +1,5 @@
 import type { SystemId } from './cores'
+import { isValidSystemId } from './cores'
 
 export interface LibraryRom {
   name: string
@@ -41,7 +42,7 @@ export async function fetchLibrary(): Promise<LibraryRom[]> {
         !!rom &&
         typeof rom.name === 'string' &&
         typeof rom.file === 'string' &&
-        (rom.system === 'nes' || rom.system === 'snes'),
+        isValidSystemId(rom.system),
     )
   } catch {
     return []

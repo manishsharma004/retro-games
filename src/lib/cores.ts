@@ -11,6 +11,7 @@ export {
   isNostalgistCore,
   isNostalgistCore as isArcadeCore,
   coreLabel,
+  arcadeCoreOptionLabel,
 } from './nostalgistCores'
 
 export type SystemId =

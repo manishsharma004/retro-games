@@ -328,6 +328,14 @@ export function buildRetroarchConfig(
     })
   }
 
+  if (options?.system === 'arcade') {
+    Object.assign(base, {
+      // Show RetroArch on-screen messages when a core fails to load content.
+      video_font_enable: true,
+      notification_show_when_menu_is_alive: true,
+    })
+  }
+
   if (options?.coop) {
     return {
       ...base,
@@ -369,10 +377,16 @@ export function buildCoreConfig(
   if (system === 'arcade') {
     const core = resolveArcadeCore(options?.core ?? effective.arcadeCore)
     if (core === 'mame2003_plus') {
-      return { 'mame2003-plus_skip_disclaimer': 'enabled' }
+      return {
+        'mame2003-plus_skip_disclaimer': 'enabled',
+        'mame2003-plus_skip_warnings': 'enabled',
+      }
     }
     if (core === 'mame2003') {
-      return { 'mame2003_skip_disclaimer': 'enabled' }
+      return {
+        mame2003_skip_disclaimer: 'enabled',
+        mame2003_skip_warnings: 'enabled',
+      }
     }
     return {}
   }

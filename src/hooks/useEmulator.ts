@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Nostalgist } from 'nostalgist'
 import {
+  DEFAULT_ARCADE_CORE,
   SYSTEMS,
   type SystemId,
   detectSystemFromFiles,
@@ -13,6 +14,12 @@ import {
   prepareResponsiveCanvas,
   readStageSize,
 } from '../lib/canvasLock'
+import {
+  arcadeLoadErrorMessage,
+  arcadeScreenLooksBlank,
+  primeArcadeInput,
+  shouldRetryWithDefaultMame,
+} from '../lib/arcadeLaunch'
 import { romUrl, type LibraryRom } from '../lib/library'
 import {
   buildCoreConfig,
@@ -180,8 +187,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
 
         const launchCore = pending.game.core
 
-        const nostalgist = await Nostalgist.launch({
-          core: launchCore,
+        const launchOptions = {
           rom: toNostalgistRom(pending.rom, pending.game.system),
           bios:
             pending.bios?.length
@@ -189,7 +195,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
               : undefined,
           state: pending.state,
           element: canvas,
-          size: 'auto',
+          size: 'auto' as const,
           style: {
             width: '100%',
             height: '100%',
@@ -201,11 +207,45 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
           shader: current.shader || undefined,
           cache: { core: true, shader: true },
           retroarchConfig: buildRetroarchConfig(current, { coop, system: pending.game.system }),
+        }
+
+        let activeCore = launchCore
+        let nostalgist = await Nostalgist.launch({
+          ...launchOptions,
+          core: activeCore,
           retroarchCoreConfig: buildCoreConfig(pending.game.system, current, {
             coop,
-            core: launchCore,
+            core: activeCore,
           }),
         })
+
+        if (pending.game.system === 'arcade') {
+          await primeArcadeInput(nostalgist)
+          let blank = await arcadeScreenLooksBlank(nostalgist)
+
+          if (blank && shouldRetryWithDefaultMame(activeCore)) {
+            nostalgist.exit({ removeCanvas: false })
+            activeCore = DEFAULT_ARCADE_CORE
+            const retryGame = { ...pending.game, core: activeCore }
+            gameRef.current = retryGame
+            setGame(retryGame)
+            nostalgist = await Nostalgist.launch({
+              ...launchOptions,
+              core: activeCore,
+              retroarchCoreConfig: buildCoreConfig(pending.game.system, current, {
+                coop,
+                core: activeCore,
+              }),
+            })
+            await primeArcadeInput(nostalgist)
+            blank = await arcadeScreenLooksBlank(nostalgist)
+          }
+
+          if (blank) {
+            nostalgist.exit({ removeCanvas: false })
+            throw new Error(arcadeLoadErrorMessage(activeCore))
+          }
+        }
 
         if (cancelled) {
           nostalgist.exit({ removeCanvas: false })

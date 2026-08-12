@@ -1,9 +1,9 @@
 import { useCallback, useRef, useState, type DragEvent } from 'react'
-import { acceptAttribute } from '../lib/cores'
+import { acceptAttribute, formatExtensionsHint } from '../lib/cores'
 
 interface RomLoaderProps {
   disabled?: boolean
-  onFile: (file: File) => void
+  onFile: (files: File[]) => void
   onDemo: () => void
   compact?: boolean
 }
@@ -14,8 +14,8 @@ export function RomLoader({ disabled, onFile, onDemo, compact }: RomLoaderProps)
 
   const handleFiles = useCallback(
     (files: FileList | null) => {
-      const file = files?.[0]
-      if (file) onFile(file)
+      if (!files?.length) return
+      onFile([...files])
     },
     [onFile],
   )
@@ -34,6 +34,7 @@ export function RomLoader({ disabled, onFile, onDemo, compact }: RomLoaderProps)
           ref={inputRef}
           type="file"
           accept={acceptAttribute()}
+          multiple
           hidden
           onChange={(e) => handleFiles(e.target.files)}
         />
@@ -63,10 +64,11 @@ export function RomLoader({ disabled, onFile, onDemo, compact }: RomLoaderProps)
         ref={inputRef}
         type="file"
         accept={acceptAttribute()}
+        multiple
         hidden
         onChange={(e) => handleFiles(e.target.files)}
       />
-      <p className="rom-loader__hint">Drop a NES or SNES ROM here</p>
+      <p className="rom-loader__hint">Drop a ROM here — NES, SNES, Game Boy, Genesis, PSX, arcade (.zip), and more</p>
       <div className="rom-loader__actions">
         <button
           type="button"
@@ -80,7 +82,10 @@ export function RomLoader({ disabled, onFile, onDemo, compact }: RomLoaderProps)
           Try demo
         </button>
       </div>
-      <p className="rom-loader__formats">.nes · .sfc · .smc — files stay in your browser</p>
+      <p className="rom-loader__formats">{formatExtensionsHint()}</p>
+      <p className="rom-loader__formats rom-loader__formats--sub">
+        Arcade / Neo Geo: select the game .zip plus any BIOS (e.g. neogeo.zip) together
+      </p>
     </div>
   )
 }

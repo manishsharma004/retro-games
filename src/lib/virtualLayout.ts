@@ -1,3 +1,5 @@
+import type { ControllerLayout } from './cores'
+
 export type VirtualLayoutZoneId = 'left' | 'stick' | 'meta' | 'actions' | 'shoulders'
 
 export type VirtualLayoutButtonId =
@@ -206,9 +208,13 @@ function migrateStickFromLeftZone(zones: VirtualControlsLayout['zones']): Virtua
   return next
 }
 
+function layoutHasFullPad(layout: ControllerLayout): boolean {
+  return layout === 'snes' || layout === 'arcade'
+}
+
 export function buttonsForZone(
   zoneId: VirtualLayoutZoneId,
-  system: 'nes' | 'snes',
+  layout: ControllerLayout,
   dpadMode: 'dpad' | 'stick',
   zone?: VirtualLayoutZone,
 ): VirtualLayoutButtonId[] {
@@ -220,9 +226,9 @@ export function buttonsForZone(
     case 'meta':
       return META_BUTTONS
     case 'actions':
-      return system === 'snes' ? SNES_ACTION_BUTTONS : NES_ACTION_BUTTONS
+      return layoutHasFullPad(layout) ? SNES_ACTION_BUTTONS : NES_ACTION_BUTTONS
     case 'shoulders':
-      return system === 'snes' ? SHOULDER_BUTTONS : EMPTY_BUTTONS
+      return layoutHasFullPad(layout) ? SHOULDER_BUTTONS : EMPTY_BUTTONS
   }
 }
 
@@ -336,10 +342,10 @@ export function resolveLayoutZones(layout: VirtualControlsLayout): VirtualContro
 export function resolveZoneButtons(
   zone: VirtualLayoutZone | undefined,
   zoneId: VirtualLayoutZoneId,
-  system: 'nes' | 'snes',
+  layout: ControllerLayout,
   dpadMode: 'dpad' | 'stick',
 ): Partial<Record<VirtualLayoutButtonId, VirtualLayoutButton>> {
-  const activeIds = buttonsForZone(zoneId, system, dpadMode, zone)
+  const activeIds = buttonsForZone(zoneId, layout, dpadMode, zone)
   const resolved: Partial<Record<VirtualLayoutButtonId, VirtualLayoutButton>> = {}
 
   for (const id of activeIds) {
@@ -431,10 +437,10 @@ export function customLayoutFromZones(zones: VirtualControlsLayout['zones']): Vi
 
 export function defaultButtonsForZone(
   zoneId: VirtualLayoutZoneId,
-  system: 'nes' | 'snes',
+  layout: ControllerLayout,
   dpadMode: 'dpad' | 'stick',
 ): Partial<Record<VirtualLayoutButtonId, VirtualLayoutButton>> {
-  const activeIds = buttonsForZone(zoneId, system, dpadMode)
+  const activeIds = buttonsForZone(zoneId, layout, dpadMode)
   const resolved: Partial<Record<VirtualLayoutButtonId, VirtualLayoutButton>> = {}
 
   for (const id of activeIds) {
@@ -443,7 +449,7 @@ export function defaultButtonsForZone(
   }
 
   // NES actions are a single row (B left, A right), not the SNES 2×2 grid.
-  if (zoneId === 'actions' && system === 'nes') {
+  if (zoneId === 'actions' && layout === 'nes') {
     resolved.b = { x: 30, y: 50, scale: 1 }
     resolved.a = { x: 70, y: 50, scale: 1 }
   }
@@ -454,30 +460,30 @@ export function defaultButtonsForZone(
 export function mergeZoneButtons(
   zone: VirtualLayoutZone | undefined,
   zoneId: VirtualLayoutZoneId,
-  system: 'nes' | 'snes',
+  layout: ControllerLayout,
   dpadMode: 'dpad' | 'stick',
   updates: Partial<Record<VirtualLayoutButtonId, VirtualLayoutButton>>,
 ): Partial<Record<VirtualLayoutButtonId, VirtualLayoutButton>> {
-  const current = resolveZoneButtons(zone, zoneId, system, dpadMode)
+  const current = resolveZoneButtons(zone, zoneId, layout, dpadMode)
   return { ...current, ...updates }
 }
 
 export function ensureAllZoneButtons(
   zones: VirtualControlsLayout['zones'],
-  system: 'nes' | 'snes',
+  layout: ControllerLayout,
   dpadMode: 'dpad' | 'stick',
 ): VirtualControlsLayout['zones'] {
   let next = migrateStickFromLeftZone({ ...zones })
 
   for (const zoneId of CORE_ZONE_IDS) {
-    if (buttonsForZone(zoneId, system, dpadMode, next[zoneId]).length === 0) continue
+    if (buttonsForZone(zoneId, layout, dpadMode, next[zoneId]).length === 0) continue
     const zone = next[zoneId] ?? DEFAULT_CUSTOM_ZONES[zoneId]!
     if (!zoneUsesCustomButtons(zone)) {
       next = {
         ...next,
         [zoneId]: {
           ...zone,
-          buttons: defaultButtonsForZone(zoneId, system, dpadMode),
+          buttons: defaultButtonsForZone(zoneId, layout, dpadMode),
         },
       }
     }
@@ -490,7 +496,7 @@ export function ensureAllZoneButtons(
         ...next,
         stick: {
           ...zone,
-          buttons: defaultButtonsForZone('stick', system, dpadMode),
+          buttons: defaultButtonsForZone('stick', layout, dpadMode),
         },
       }
     } else if (!next.stick) {
@@ -503,8 +509,8 @@ export function ensureAllZoneButtons(
 
 export function resetZoneButtons(
   zoneId: VirtualLayoutZoneId,
-  system: 'nes' | 'snes',
+  layout: ControllerLayout,
   dpadMode: 'dpad' | 'stick',
 ): Partial<Record<VirtualLayoutButtonId, VirtualLayoutButton>> {
-  return defaultButtonsForZone(zoneId, system, dpadMode)
+  return defaultButtonsForZone(zoneId, layout, dpadMode)
 }

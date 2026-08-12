@@ -84,7 +84,7 @@ export interface PeerBootstrapPayload {
 interface UsePeerSessionOptions {
   settings: EmulatorSettings
   sessionMode?: SessionMode
-  system?: 'nes' | 'snes' | null
+  system?: SystemId | null
   onRemoteInput?: (
     seat: PeerSeat,
     button: string,
@@ -158,7 +158,7 @@ export interface UsePeerSessionResult {
   isSeatAvailable: (seat: PeerSeat) => boolean
   createHostOffer: (
     mode?: SessionMode,
-    opts?: { maxPlayers?: MaxPlayers; system?: 'nes' | 'snes' },
+    opts?: { maxPlayers?: MaxPlayers; system?: SystemId },
   ) => Promise<void>
   acceptGuestAnswer: (answer: string) => Promise<void>
   joinWithOffer: (offer: string, mode?: SessionMode, opts?: { asSpectator?: boolean }) => Promise<void>
@@ -915,7 +915,7 @@ export function usePeerSession(options: UsePeerSessionOptions): UsePeerSessionRe
   const createHostOffer = useCallback(
     async (
       mode: SessionMode = modeRef.current,
-      opts?: { maxPlayers?: MaxPlayers; system?: 'nes' | 'snes' },
+      opts?: { maxPlayers?: MaxPlayers; system?: SystemId },
     ) => {
       if (hostOfferInFlightRef.current) return
       hostOfferInFlightRef.current = true

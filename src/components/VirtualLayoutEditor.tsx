@@ -7,7 +7,8 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
-import type { SystemId } from '../lib/cores'
+import type { ControllerLayout, SystemId } from '../lib/cores'
+import { controllerLayout } from '../lib/cores'
 import {
   BUTTON_LABELS,
   buttonsForZone,
@@ -189,12 +190,12 @@ function ensureZone(
 }
 
 function buildElements(
-  system: SystemId,
+  padLayout: ControllerLayout,
   dpadMode: 'dpad' | 'stick',
   zones: VirtualControlsLayout['zones'],
 ): EditorElement[] {
   const items: EditorElement[] = []
-  const showShoulders = system === 'snes'
+  const showShoulders = padLayout === 'snes' || padLayout === 'arcade'
   const leftZone = zones.left
   const hasDpad = leftZoneHasDpad(leftZone, dpadMode)
   const hasStick = stickZoneActive(zones, dpadMode)
@@ -242,7 +243,7 @@ function buildElements(
   for (const zoneId of ['actions', 'meta', 'shoulders'] as VirtualLayoutZoneId[]) {
     if (zoneId === 'shoulders' && !showShoulders) continue
     const zone = zones[zoneId]
-    const buttons = buttonsForZone(zoneId, system, dpadMode, zone)
+    const buttons = buttonsForZone(zoneId, padLayout, dpadMode, zone)
     if (buttons.length === 0) continue
 
     items.push({
@@ -296,6 +297,7 @@ export function VirtualLayoutEditor({
   onOpenSettings,
   onOpenControllers,
 }: VirtualLayoutEditorProps) {
+  const padLayout = controllerLayout(system)
   const stageRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<DragMode | null>(null)
   const dragOriginRef = useRef<{ x: number; y: number } | null>(null)
@@ -372,15 +374,15 @@ export function VirtualLayoutEditor({
   void historyVersion
 
   const elements = useMemo(
-    () => buildElements(system, dpadMode, draftZones),
-    [system, dpadMode, draftZones],
+    () => buildElements(padLayout, dpadMode, draftZones),
+    [padLayout, dpadMode, draftZones],
   )
   const selected = useMemo(() => elements.find((el) => el.id === selectedId) ?? elements[0], [elements, selectedId])
   const previewLayout = customLayoutFromZones(draftZones)
 
   useEffect(() => {
     if (!open) return
-    setDraftZones(ensureAllZoneButtons(getEditableZones(layout), system, dpadMode))
+    setDraftZones(ensureAllZoneButtons(getEditableZones(layout), padLayout, dpadMode))
     setSelectedId(dpadMode === 'stick' ? 'zone:left' : 'zone:left')
     setHiddenIds(new Set())
     setGlobalScale(100)
@@ -393,7 +395,7 @@ export function VirtualLayoutEditor({
     futureRef.current = []
     historyDragSnapshotRef.current = null
     setHistoryVersion(0)
-  }, [open, layout, system, dpadMode, opacity])
+  }, [open, layout, padLayout, dpadMode, opacity])
 
   useEffect(() => {
     if (!open) return
@@ -504,16 +506,16 @@ export function VirtualLayoutEditor({
     ) => {
       setDraftZones((prev) => {
         const zone = ensureZone(prev, zoneId)
-        const buttons = mergeZoneButtons(zone, zoneId, system, dpadMode, {
+        const buttons = mergeZoneButtons(zone, zoneId, padLayout, dpadMode, {
           [buttonId]: {
-            ...resolveZoneButtons(zone, zoneId, system, dpadMode)[buttonId]!,
+            ...resolveZoneButtons(zone, zoneId, padLayout, dpadMode)[buttonId]!,
             ...patch,
           },
         })
         return { ...prev, [zoneId]: { ...zone, buttons } }
       })
     },
-    [dpadMode, system],
+    [dpadMode, padLayout],
   )
 
   const applyGlobalScaleToZones = useCallback(
@@ -542,7 +544,7 @@ export function VirtualLayoutEditor({
   const handleReset = () => {
     pushHistory()
     const base = getEditableZones(DEFAULT_LAYOUT)
-    setDraftZones(ensureAllZoneButtons(base, system, dpadMode))
+    setDraftZones(ensureAllZoneButtons(base, padLayout, dpadMode))
     setGlobalScale(100)
     setGlobalOpacity(Math.round(opacity * 100))
     setHiddenIds(new Set())
@@ -555,7 +557,7 @@ export function VirtualLayoutEditor({
       // keep current
     } else {
       pushHistory()
-      setDraftZones(ensureAllZoneButtons(presetLayout(preset).zones, system, dpadMode))
+      setDraftZones(ensureAllZoneButtons(presetLayout(preset).zones, padLayout, dpadMode))
     }
     setProfileOpen(false)
   }
@@ -651,7 +653,7 @@ export function VirtualLayoutEditor({
       }
     } else if (selected.buttonId) {
       const zone = ensureZone(draftZones, selected.zoneId)
-      const btn = resolveZoneButtons(zone, selected.zoneId, system, dpadMode)[selected.buttonId]!
+      const btn = resolveZoneButtons(zone, selected.zoneId, padLayout, dpadMode)[selected.buttonId]!
       dragRef.current = {
         type: 'resize-button',
         zoneId: selected.zoneId,
@@ -770,7 +772,7 @@ export function VirtualLayoutEditor({
   const selectedZone = selected ? ensureZone(draftZones, selected.zoneId) : null
   const selectedButton =
     selected?.buttonId && selectedZone
-      ? resolveZoneButtons(selectedZone, selected.zoneId, system, dpadMode)[selected.buttonId]
+      ? resolveZoneButtons(selectedZone, selected.zoneId, padLayout, dpadMode)[selected.buttonId]
       : undefined
 
   const selectedScaleX =
@@ -1207,7 +1209,7 @@ export function VirtualLayoutEditor({
                 onClick={() => {
                   pushHistory()
                   updateZone(selected.zoneId, {
-                    buttons: resetZoneButtons(selected.zoneId, system, dpadMode),
+                    buttons: resetZoneButtons(selected.zoneId, padLayout, dpadMode),
                   })
                 }}
               >

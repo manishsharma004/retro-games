@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Nostalgist } from 'nostalgist'
-import { SYSTEMS, type SystemId, detectSystem } from '../lib/cores'
+import { SYSTEMS, type SystemId, detectSystemFromFiles, partitionRomFiles } from '../lib/cores'
 import {
   attachStageResizeSync,
   prepareResponsiveCanvas,
@@ -22,6 +22,8 @@ export interface ActiveGame {
   core: string
   source: 'file' | 'demo' | 'library' | 'peer'
   file?: File
+  /** Extra ROM parts (parent sets, discs) or BIOS zips selected with the game. */
+  extraFiles?: File[]
   libraryFile?: string
   /** Locked 60 Hz audio-sync timing for dual-emulator co-op. */
   coopMode?: boolean
@@ -29,7 +31,8 @@ export interface ActiveGame {
 
 interface PendingLaunch {
   game: ActiveGame
-  rom: File | string
+  rom: File | string | File[]
+  bios?: File[]
   state?: Blob
   startPaused?: boolean
 }
@@ -45,7 +48,7 @@ export interface UseEmulatorResult {
   /** Bumps after each successful ROM launch (running/paused). */
   launchGeneration: number
   canvasRef: React.RefObject<HTMLCanvasElement | null>
-  launchFile: (file: File) => void
+  launchFile: (files: File | File[]) => void
   launchDemo: () => void
   launchLibrary: (entry: LibraryRom) => void
   launchPeer: (opts: {
@@ -172,6 +175,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
         const nostalgist = await Nostalgist.launch({
           core: system.core,
           rom: pending.rom,
+          bios: pending.bios?.length ? pending.bios : undefined,
           state: pending.state,
           element: canvas,
           size: 'auto',
@@ -238,22 +242,35 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
   }, [])
 
   const launchFile = useCallback(
-    (file: File) => {
-      const system = detectSystem(file.name)
+    (input: File | File[]) => {
+      const files = Array.isArray(input) ? input : [input]
+      if (files.length === 0) return
+
+      const { rom, bios } = partitionRomFiles(files)
+      const gameFiles = rom.length > 0 ? rom : files
+      const system = detectSystemFromFiles(gameFiles)
       if (!system) {
-        setError('Unsupported ROM. Use NES (.nes) or SNES (.sfc, .smc) files.')
+        setError(
+          'Unsupported ROM format. Try NES (.nes), SNES (.sfc), Game Boy (.gb), Genesis (.md), PlayStation (.cue), or arcade/MAME (.zip).',
+        )
         setStatus('error')
         return
       }
+
+      const primary = gameFiles[0]
+      const romPayload = gameFiles.length === 1 ? primary : gameFiles
+
       queueLaunch({
         game: {
-          name: file.name,
+          name: primary.name,
           system,
           core: SYSTEMS[system].core,
           source: 'file',
-          file,
+          file: primary,
+          extraFiles: gameFiles.length > 1 ? gameFiles.slice(1) : undefined,
         },
-        rom: file,
+        rom: romPayload,
+        bios: bios.length > 0 ? bios : undefined,
       })
     },
     [queueLaunch],
@@ -577,7 +594,10 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     const active = gameRef.current
     if (!active) return
     if (active.source === 'demo') launchDemo()
-    else if (active.file) launchFile(active.file)
+    else if (active.file) {
+      const files = active.extraFiles ? [active.file, ...active.extraFiles] : active.file
+      launchFile(files)
+    }
   }, [launchDemo, launchFile])
 
   const waitForLaunch = useCallback(

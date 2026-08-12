@@ -7,6 +7,7 @@ import { LatencyBadge } from './components/LatencyBadge'
 import { PlayHud } from './components/PlayHud'
 import { PeerLobby } from './components/PeerLobby'
 import { RomLoader } from './components/RomLoader'
+import { defaultExtensionForSystem, type SystemId } from './lib/cores'
 import { VirtualController } from './components/VirtualController'
 import { VirtualLayoutEditor } from './components/VirtualLayoutEditor'
 import { useCoopInputDelay } from './hooks/useCoopInputDelay'
@@ -85,7 +86,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   const handleBootstrap = useCallback(
     async (payload: {
       name: string
-      system: 'nes' | 'snes'
+      system: SystemId
       rom: Uint8Array
       state: Uint8Array
       settings: Partial<EmulatorSettings>
@@ -108,7 +109,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
       lastProfileRef.current = profile
       lastProfileHashRef.current = profileHash(profile)
       setSettings((prev) => profileToEmulatorSettings(prev, profile))
-      const ext = payload.system === 'nes' ? 'nes' : 'sfc'
+      const ext = defaultExtensionForSystem(payload.system)
       emu.launchPeer({
         name: payload.name,
         system: payload.system,
@@ -535,7 +536,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
           </p>
           <RomLoader
             disabled={emu.status === 'loading'}
-            onFile={emu.launchFile}
+            onFile={(files) => emu.launchFile(files)}
             onDemo={emu.launchDemo}
           />
           <div className="hero__peer">
@@ -631,7 +632,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
               <RomLoader
                 compact
                 disabled={emu.status === 'loading'}
-                onFile={emu.launchFile}
+                onFile={(files) => emu.launchFile(files)}
                 onDemo={emu.launchDemo}
               />
               <button type="button" className="btn btn--ghost" onClick={() => setPeerOpen(true)}>

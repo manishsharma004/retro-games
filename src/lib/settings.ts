@@ -361,5 +361,10 @@ export function buildCoreConfig(
       snes9x_up_down_allowed: upDownAllowed,
     }
   }
+  if (system === 'arcade') {
+    return {
+      'mame2003-plus_skip_disclaimer': 'enabled',
+    }
+  }
   return {}
 }

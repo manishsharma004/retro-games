@@ -84,7 +84,7 @@ export function RomLoader({ disabled, onFile, onDemo, compact }: RomLoaderProps)
       </div>
       <p className="rom-loader__formats">{formatExtensionsHint()}</p>
       <p className="rom-loader__formats rom-loader__formats--sub">
-        Arcade / Neo Geo: select the game .zip plus any BIOS (e.g. neogeo.zip) together
+        Arcade / Neo Geo: select the game .zip plus any required BIOS/parent zips together
       </p>
     </div>
   )

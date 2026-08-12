@@ -167,7 +167,7 @@ export const SYSTEMS: Record<SystemId, SystemInfo> = {
     id: 'arcade',
     label: 'Arcade / MAME',
     core: 'mame2003_plus',
-    extensions: ['.zip', '.7z'],
+    extensions: ['.zip'],
     aspectRatio: '4 / 3',
     controllerLayout: 'arcade',
   },
@@ -347,9 +347,41 @@ export function detectSystem(fileName: string): SystemId | null {
 
 /** Pick the primary ROM system when multiple files are selected. */
 export function detectSystemFromFiles(files: File[]): SystemId | null {
-  const gameFiles = partitionRomFiles(files).rom
-  if (gameFiles.length === 0) return null
-  return detectSystem(gameFiles[0].name)
+  const primary = files.find((file) => detectSystem(file.name)) ?? files[0]
+  if (!primary) return null
+  return detectSystem(primary.name)
+}
+
+/** Nostalgist drops raw File names; MAME/PSX multi-file sets need the real filename. */
+export type NostalgistRomInput =
+  | string
+  | File
+  | { fileName: string; fileContent: File | Blob }
+  | Array<string | File | { fileName: string; fileContent: File | Blob }>
+
+function preserveRomName(file: File, system: SystemId): File | { fileName: string; fileContent: File } {
+  const ext = getExtension(file.name)
+  const needsName =
+    system === 'arcade' ||
+    ext === '.zip' ||
+    ext === '.cue' ||
+    ext === '.m3u' ||
+    ext === '.chd' ||
+    ext === '.iso'
+  if (!needsName || !file.name) return file
+  return { fileName: file.name, fileContent: file }
+}
+
+/** Normalize ROM payloads for Nostalgist.launch while preserving arcade filenames. */
+export function toNostalgistRom(
+  input: File | string | File[],
+  system: SystemId,
+): NostalgistRomInput {
+  if (typeof input === 'string') return input
+
+  const files = Array.isArray(input) ? input : [input]
+  const mapped = files.map((file) => preserveRomName(file, system))
+  return mapped.length === 1 ? mapped[0] : mapped
 }
 
 export interface RomFilePartition {
@@ -357,13 +389,16 @@ export interface RomFilePartition {
   bios: File[]
 }
 
-/** Split selected files into game ROMs and system BIOS/device ROMs. */
-export function partitionRomFiles(files: File[]): RomFilePartition {
+/** Split non-arcade selections into game ROMs and system BIOS zips. */
+export function partitionRomFiles(files: File[], system?: SystemId): RomFilePartition {
+  if (system === 'arcade') {
+    return { rom: files, bios: [] }
+  }
+
   const rom: File[] = []
   const bios: File[] = []
   for (const file of files) {
-    const base = file.name.replace(/\.[^.]+$/, '')
-    if (BIOS_NAME_RE.test(file.name) || /bios|device|system/i.test(base)) {
+    if (BIOS_NAME_RE.test(file.name)) {
       bios.push(file)
     } else {
       rom.push(file)

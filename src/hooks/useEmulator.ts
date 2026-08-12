@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Nostalgist } from 'nostalgist'
-import { SYSTEMS, type SystemId, detectSystemFromFiles, partitionRomFiles } from '../lib/cores'
+import { SYSTEMS, type SystemId, detectSystemFromFiles, partitionRomFiles, toNostalgistRom } from '../lib/cores'
 import {
   attachStageResizeSync,
   prepareResponsiveCanvas,
@@ -174,8 +174,11 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
 
         const nostalgist = await Nostalgist.launch({
           core: system.core,
-          rom: pending.rom,
-          bios: pending.bios?.length ? pending.bios : undefined,
+          rom: toNostalgistRom(pending.rom, pending.game.system),
+          bios:
+            pending.game.system === 'arcade' || !pending.bios?.length
+              ? undefined
+              : toNostalgistRom(pending.bios, pending.game.system),
           state: pending.state,
           element: canvas,
           size: 'auto',
@@ -246,9 +249,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
       const files = Array.isArray(input) ? input : [input]
       if (files.length === 0) return
 
-      const { rom, bios } = partitionRomFiles(files)
-      const gameFiles = rom.length > 0 ? rom : files
-      const system = detectSystemFromFiles(gameFiles)
+      const system = detectSystemFromFiles(files)
       if (!system) {
         setError(
           'Unsupported ROM format. Try NES (.nes), SNES (.sfc), Game Boy (.gb), Genesis (.md), PlayStation (.cue), or arcade/MAME (.zip).',
@@ -257,6 +258,8 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
         return
       }
 
+      const { rom, bios } = partitionRomFiles(files, system)
+      const gameFiles = rom.length > 0 ? rom : files
       const primary = gameFiles[0]
       const romPayload = gameFiles.length === 1 ? primary : gameFiles
 
@@ -270,7 +273,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
           extraFiles: gameFiles.length > 1 ? gameFiles.slice(1) : undefined,
         },
         rom: romPayload,
-        bios: bios.length > 0 ? bios : undefined,
+        bios: system === 'arcade' ? undefined : bios.length > 0 ? bios : undefined,
       })
     },
     [queueLaunch],

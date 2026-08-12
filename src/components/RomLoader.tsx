@@ -2,6 +2,7 @@ import { useCallback, useRef, useState, type DragEvent } from 'react'
 import {
   NOSTALGIST_CORES,
   acceptAttribute,
+  arcadeCoreOptionLabel,
   coreLabel,
   filesIncludeZip,
   formatExtensionsHint,
@@ -95,7 +96,7 @@ export function RomLoader({
         >
           {NOSTALGIST_CORES.map((core) => (
             <option key={core.id} value={core.id}>
-              {core.label}
+              {arcadeCoreOptionLabel(core)}
             </option>
           ))}
         </select>

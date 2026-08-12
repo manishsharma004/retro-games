@@ -97,6 +97,22 @@ export function isNostalgistCore(core: string): boolean {
   return CORE_IDS.has(core)
 }
 
+/** Short hint for cores commonly used with .zip arcade ROMs. */
+const ARCADE_CORE_HINTS: Record<string, string> = {
+  mame2003_plus: ' — recommended for MAME .zip',
+  mame2003: ' — MAME 0.78',
+  mame2000: ' — MAME 0.37 (older sets)',
+  fbalpha2012: ' — not for generic MAME .zip',
+  fbalpha2012_neogeo: ' — Neo Geo (+ neogeo.zip)',
+  fbalpha2012_cps1: ' — CPS-1',
+  fbalpha2012_cps2: ' — CPS-2',
+}
+
 export function coreLabel(coreId: string): string {
   return NOSTALGIST_CORES.find((c) => c.id === coreId)?.label ?? coreId
+}
+
+/** Dropdown label for .zip core picker — includes ROM-set guidance. */
+export function arcadeCoreOptionLabel(core: NostalgistCoreOption): string {
+  return `${core.label}${ARCADE_CORE_HINTS[core.id] ?? ''}`
 }

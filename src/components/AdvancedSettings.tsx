@@ -1,7 +1,7 @@
 import type { EmulatorSettings, ShaderOption } from '../lib/settings'
 import { DEFAULT_LAYOUT, customLayoutFromZones, getEditableZones, presetLayout, type VirtualLayoutPreset } from '../lib/virtualLayout'
 import type { SystemId } from '../lib/cores'
-import { NOSTALGIST_CORES } from '../lib/cores'
+import { NOSTALGIST_CORES, arcadeCoreOptionLabel } from '../lib/cores'
 
 interface AdvancedSettingsProps {
   open: boolean
@@ -364,7 +364,7 @@ export function AdvancedSettings({
                 >
                   {NOSTALGIST_CORES.map((core) => (
                     <option key={core.id} value={core.id}>
-                      {core.label}
+                      {arcadeCoreOptionLabel(core)}
                     </option>
                   ))}
                 </select>

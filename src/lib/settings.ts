@@ -1,5 +1,6 @@
 import { DEFAULT_LAYOUT, sanitizeLayout, type VirtualControlsLayout } from './virtualLayout'
 import type { SystemId } from './cores'
+import { resolveArcadeCore } from './cores'
 
 export type ShaderOption = '' | 'crt/crt-easymode'
 
@@ -27,6 +28,8 @@ export interface EmulatorSettings {
   snesPlayerCount: 2 | 3 | 4 | 5
   /** Remote stream host: include game audio in the WebRTC stream. */
   remoteShareAudio: boolean
+  /** Libretro core for .zip arcade ROMs (requires relaunch). */
+  arcadeCore: string
 }
 
 export const DEFAULT_SETTINGS: EmulatorSettings = {
@@ -51,6 +54,7 @@ export const DEFAULT_SETTINGS: EmulatorSettings = {
   snesRegion: 'auto',
   snesPlayerCount: 2,
   remoteShareAudio: true,
+  arcadeCore: 'mame2003_plus',
 }
 
 const STORAGE_KEY = 'retro-games-settings-v1'
@@ -63,6 +67,7 @@ export function loadSettings(): EmulatorSettings {
     return {
       ...DEFAULT_SETTINGS,
       ...parsed,
+      arcadeCore: resolveArcadeCore(parsed.arcadeCore),
       virtualControlsLayout: sanitizeLayout(parsed.virtualControlsLayout),
     }
   } catch {
@@ -343,7 +348,7 @@ export function buildRetroarchConfig(
 export function buildCoreConfig(
   system: SystemId,
   settings: EmulatorSettings,
-  options?: RetroarchConfigOptions,
+  options?: RetroarchConfigOptions & { core?: string },
 ): Record<string, string> {
   const effective = options?.coop ? coopTimingSettings(settings) : settings
   const upDownAllowed = effective.allowOpposingDirections ? 'enabled' : 'disabled'
@@ -362,9 +367,14 @@ export function buildCoreConfig(
     }
   }
   if (system === 'arcade') {
-    return {
-      'mame2003-plus_skip_disclaimer': 'enabled',
+    const core = resolveArcadeCore(options?.core ?? effective.arcadeCore)
+    if (core === 'mame2003_plus') {
+      return { 'mame2003-plus_skip_disclaimer': 'enabled' }
     }
+    if (core === 'mame2003') {
+      return { 'mame2003_skip_disclaimer': 'enabled' }
+    }
+    return {}
   }
   return {}
 }

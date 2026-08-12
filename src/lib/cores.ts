@@ -328,6 +328,74 @@ const SYSTEM_IDS = new Set<SystemId>(Object.keys(SYSTEMS) as SystemId[])
 const BIOS_NAME_RE =
   /^(neogeo|neogeo_bios|pgm|bios|devices|skns|dec|isgsm|vsb|awbios)(\.zip|\.7z)?$/i
 
+/** Selectable libretro arcade cores on Nostalgist's CDN (ROM set must match the core). */
+export interface ArcadeCoreOption {
+  id: string
+  label: string
+  /** Short hint about which ROM set version/format works. */
+  romHint: string
+}
+
+export const ARCADE_CORES: ArcadeCoreOption[] = [
+  {
+    id: 'mame2003_plus',
+    label: 'MAME 2003-Plus',
+    romHint: 'MAME 0.78+ / MAME 2003-Plus reference set',
+  },
+  {
+    id: 'mame2003',
+    label: 'MAME 2003',
+    romHint: 'MAME 0.78 reference set',
+  },
+  {
+    id: 'mame2000',
+    label: 'MAME 2000',
+    romHint: 'MAME 0.37b5 reference set',
+  },
+  {
+    id: 'fbalpha2012',
+    label: 'FBNeo 2012',
+    romHint: 'FBNeo 2012 reference set',
+  },
+  {
+    id: 'fbalpha2012_cps1',
+    label: 'FBNeo CPS-1',
+    romHint: 'CPS-1 (Street Fighter II, etc.)',
+  },
+  {
+    id: 'fbalpha2012_cps2',
+    label: 'FBNeo CPS-2',
+    romHint: 'CPS-2 (Marvel vs. Capcom, etc.)',
+  },
+  {
+    id: 'fbalpha2012_neogeo',
+    label: 'FBNeo Neo Geo',
+    romHint: 'Neo Geo (+ neogeo.zip BIOS in same picker)',
+  },
+]
+
+export const DEFAULT_ARCADE_CORE = 'mame2003_plus'
+
+const ARCADE_CORE_IDS = new Set(ARCADE_CORES.map((c) => c.id))
+
+export function isArcadeCore(core: string): boolean {
+  return ARCADE_CORE_IDS.has(core)
+}
+
+export function resolveArcadeCore(core?: string | null): string {
+  if (core && isArcadeCore(core)) return core
+  return DEFAULT_ARCADE_CORE
+}
+
+/** MAME/FBNeo identify games by zip basename; RetroArch FS is case-sensitive. */
+export function normalizeArcadeFileName(fileName: string): string {
+  return fileName.toLowerCase()
+}
+
+export function filesIncludeZip(files: File[]): boolean {
+  return files.some((file) => getExtension(file.name) === '.zip')
+}
+
 export function isValidSystemId(value: string): value is SystemId {
   return SYSTEM_IDS.has(value as SystemId)
 }
@@ -369,7 +437,8 @@ function preserveRomName(file: File, system: SystemId): File | { fileName: strin
     ext === '.chd' ||
     ext === '.iso'
   if (!needsName || !file.name) return file
-  return { fileName: file.name, fileContent: file }
+  const fileName = system === 'arcade' ? normalizeArcadeFileName(file.name) : file.name
+  return { fileName, fileContent: file }
 }
 
 /** Normalize ROM payloads for Nostalgist.launch while preserving arcade filenames. */
@@ -389,10 +458,28 @@ export interface RomFilePartition {
   bios: File[]
 }
 
-/** Split non-arcade selections into game ROMs and system BIOS zips. */
-export function partitionRomFiles(files: File[], system?: SystemId): RomFilePartition {
+/** Split ROMs for launch. MAME keeps all zips in content/; FBNeo sends BIOS zips to system/. */
+export function partitionRomFiles(
+  files: File[],
+  system?: SystemId,
+  core?: string,
+): RomFilePartition {
   if (system === 'arcade') {
-    return { rom: files, bios: [] }
+    const resolvedCore = resolveArcadeCore(core)
+    const fbNeo = resolvedCore.startsWith('fbalpha')
+    if (!fbNeo) {
+      return { rom: files, bios: [] }
+    }
+    const rom: File[] = []
+    const bios: File[] = []
+    for (const file of files) {
+      if (BIOS_NAME_RE.test(file.name)) {
+        bios.push(file)
+      } else {
+        rom.push(file)
+      }
+    }
+    return { rom: rom.length > 0 ? rom : files, bios }
   }
 
   const rom: File[] = []

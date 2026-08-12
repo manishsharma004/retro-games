@@ -1,6 +1,7 @@
 import type { EmulatorSettings, ShaderOption } from '../lib/settings'
 import { DEFAULT_LAYOUT, customLayoutFromZones, getEditableZones, presetLayout, type VirtualLayoutPreset } from '../lib/virtualLayout'
 import type { SystemId } from '../lib/cores'
+import { ARCADE_CORES } from '../lib/cores'
 
 interface AdvancedSettingsProps {
   open: boolean
@@ -350,6 +351,32 @@ export function AdvancedSettings({
               </p>
             </div>
           </section>
+
+          {(system === 'arcade' || !system) && (
+            <section className="settings-section">
+              <h3>Arcade core</h3>
+              <label className="field">
+                <span>Libretro core for .zip ROMs</span>
+                <select
+                  value={settings.arcadeCore}
+                  disabled={coopGuest}
+                  onChange={(e) => patch('arcadeCore', e.target.value)}
+                >
+                  {ARCADE_CORES.map((core) => (
+                    <option key={core.id} value={core.id}>
+                      {core.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="settings-hint">
+                {ARCADE_CORES.find((c) => c.id === settings.arcadeCore)?.romHint ??
+                  'Pick the core that matches your ROM set version.'}{' '}
+                Black screen usually means the wrong core or ROM set — try FBNeo for Neo Geo / CPS
+                games, or MAME 2003-Plus for MAME 0.78 sets. Apply &amp; relaunch after changing.
+              </p>
+            </section>
+          )}
 
           {(system === 'nes' || !system) && (
             <section className="settings-section">

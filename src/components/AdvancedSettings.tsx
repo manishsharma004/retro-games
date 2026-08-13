@@ -1,7 +1,7 @@
 import type { EmulatorSettings, ShaderOption } from '../lib/settings'
 import { DEFAULT_LAYOUT, customLayoutFromZones, getEditableZones, presetLayout, type VirtualLayoutPreset } from '../lib/virtualLayout'
 import type { SystemId } from '../lib/cores'
-import { NOSTALGIST_CORES, arcadeCoreOptionLabel } from '../lib/cores'
+import { ArcadeCoreSelect } from './ArcadeCoreSelect'
 
 interface AdvancedSettingsProps {
   open: boolean
@@ -357,22 +357,15 @@ export function AdvancedSettings({
               <h3>Emulator core (.zip)</h3>
               <label className="field">
                 <span>Libretro core</span>
-                <select
+                <ArcadeCoreSelect
                   value={settings.arcadeCore}
                   disabled={coopGuest}
-                  onChange={(e) => patch('arcadeCore', e.target.value)}
-                >
-                  {NOSTALGIST_CORES.map((core) => (
-                    <option key={core.id} value={core.id}>
-                      {arcadeCoreOptionLabel(core)}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(core) => patch('arcadeCore', core)}
+                />
               </label>
               <p className="settings-hint">
-                All cores from Nostalgist&apos;s CDN. For .zip arcade ROMs, pick the core that matches
-                your set (MAME 0.78 → MAME 2003-Plus, Neo Geo → FB Alpha Neo Geo, KOV2/PGM → FB Alpha 2012 + pgm.zip). Apply &amp;
-                relaunch after changing.
+                All cores from Nostalgist&apos;s CDN. Use <strong>Auto</strong> to pick from the zip name
+                (KOV2/PGM → FB Alpha 2012; most MAME .zip → MAME 2003-Plus). Apply &amp; relaunch after changing manually.
               </p>
             </section>
           )}

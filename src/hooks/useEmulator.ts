@@ -4,11 +4,9 @@ import {
   DEFAULT_ARCADE_CORE,
   SYSTEMS,
   type SystemId,
-  detectSystem,
   detectSystemFromFiles,
-  inferArcadeCoreForRom,
   partitionRomFiles,
-  resolveArcadeCore,
+  resolveArcadeCoreForFiles,
   toNostalgistRom,
 } from '../lib/cores'
 import {
@@ -322,19 +320,17 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
         return
       }
 
-      const primaryPick = files.find((file) => detectSystem(file.name)) ?? files[0]
-      const inferredCore =
-        system === 'arcade' && primaryPick
-          ? inferArcadeCoreForRom(primaryPick.name)
-          : null
-      const arcadeCore =
+      const resolved =
         system === 'arcade'
-          ? resolveArcadeCore(
-              inferredCore ?? options?.arcadeCore ?? settingsRef.current.arcadeCore,
+          ? resolveArcadeCoreForFiles(
+              files,
+              options?.arcadeCore ?? settingsRef.current.arcadeCore,
             )
-          : undefined
+          : null
       const core =
-        system === 'arcade' && arcadeCore ? arcadeCore : SYSTEMS[system].core
+        system === 'arcade' && resolved
+          ? resolved.core
+          : SYSTEMS[system].core
 
       const { rom, bios } = partitionRomFiles(files, system, core)
       const gameFiles = rom.length > 0 ? rom : files

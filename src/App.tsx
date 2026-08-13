@@ -7,7 +7,7 @@ import { LatencyBadge } from './components/LatencyBadge'
 import { PlayHud } from './components/PlayHud'
 import { PeerLobby } from './components/PeerLobby'
 import { RomLoader } from './components/RomLoader'
-import { defaultExtensionForSystem, type SystemId } from './lib/cores'
+import { defaultExtensionForSystem, type SystemId, coreLabel } from './lib/cores'
 import { VirtualController } from './components/VirtualController'
 import { VirtualLayoutEditor } from './components/VirtualLayoutEditor'
 import { useCoopInputDelay } from './hooks/useCoopInputDelay'
@@ -609,6 +609,9 @@ export default function App({ initialCoopJoin = null }: AppProps) {
               {emu.game && (
                 <span className="toolbar__rom" title={emu.game.name}>
                   {emu.game.system.toUpperCase()} · {emu.game.name}
+                  {emu.game.system === 'arcade' && (
+                    <> · {coreLabel(emu.game.core)}</>
+                  )}
                 </span>
               )}
               {peer.role && (

@@ -1,6 +1,6 @@
 import { DEFAULT_LAYOUT, sanitizeLayout, type VirtualControlsLayout } from './virtualLayout'
 import type { SystemId } from './cores'
-import { resolveArcadeCore } from './cores'
+import { ARCADE_CORE_AUTO, isArcadeCoreAuto, resolveArcadeCore } from './cores'
 
 export type ShaderOption = '' | 'crt/crt-easymode'
 
@@ -54,7 +54,7 @@ export const DEFAULT_SETTINGS: EmulatorSettings = {
   snesRegion: 'auto',
   snesPlayerCount: 2,
   remoteShareAudio: true,
-  arcadeCore: 'mame2003_plus',
+  arcadeCore: ARCADE_CORE_AUTO,
 }
 
 const STORAGE_KEY = 'retro-games-settings-v1'
@@ -67,7 +67,9 @@ export function loadSettings(): EmulatorSettings {
     return {
       ...DEFAULT_SETTINGS,
       ...parsed,
-      arcadeCore: resolveArcadeCore(parsed.arcadeCore),
+      arcadeCore: isArcadeCoreAuto(parsed.arcadeCore ?? '')
+        ? ARCADE_CORE_AUTO
+        : resolveArcadeCore(parsed.arcadeCore),
       virtualControlsLayout: sanitizeLayout(parsed.virtualControlsLayout),
     }
   } catch {

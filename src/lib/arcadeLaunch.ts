@@ -76,6 +76,12 @@ export async function arcadeScreenLooksBlank(nostalgist: Nostalgist): Promise<bo
 export function arcadeLoadErrorMessage(core: string, romName?: string): string {
   const base = romName ? arcadeRomBasename(romName) : ''
   if (base.startsWith('kov2')) {
+    if (core.startsWith('fbalpha')) {
+      return (
+        `Could not load ${romName} with FB Alpha 2012. Use an FBA-format (not MAME 0.22x) ROM set. ` +
+        `For split sets, select pgm.zip together with kov2.zip (PGM BIOS: pgm_t01s.rom, pgm_m01s.rom, pgm_p01s.u20, pgm_p02s.u20).`
+      )
+    }
     return (
       `Knights of Valour 2 (${romName}) needs core "FB Alpha 2012" — it is not in MAME 2003-Plus ` +
       `(that core only has the first KOV / Sangoku Senki). Use an FBA-format kov2.zip and, for split sets, ` +

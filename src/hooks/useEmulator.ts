@@ -4,7 +4,9 @@ import {
   DEFAULT_ARCADE_CORE,
   SYSTEMS,
   type SystemId,
+  detectSystem,
   detectSystemFromFiles,
+  inferArcadeCoreForRom,
   partitionRomFiles,
   resolveArcadeCore,
   toNostalgistRom,
@@ -15,6 +17,7 @@ import {
   readStageSize,
 } from '../lib/canvasLock'
 import {
+  arcadeFallbackCore,
   arcadeLoadErrorMessage,
   arcadeScreenLooksBlank,
   primeArcadeInput,
@@ -220,12 +223,13 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
         })
 
         if (pending.game.system === 'arcade') {
+          const romLabel = pending.game.file?.name ?? pending.game.name
           await primeArcadeInput(nostalgist)
           let blank = await arcadeScreenLooksBlank(nostalgist)
 
-          if (blank && shouldRetryWithDefaultMame(activeCore)) {
+          const tryRelaunch = async (core: string) => {
             nostalgist.exit({ removeCanvas: false })
-            activeCore = DEFAULT_ARCADE_CORE
+            activeCore = core
             const retryGame = { ...pending.game, core: activeCore }
             gameRef.current = retryGame
             setGame(retryGame)
@@ -242,8 +246,17 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
           }
 
           if (blank) {
+            const fbAlphaFallback = arcadeFallbackCore(activeCore, romLabel)
+            if (fbAlphaFallback) {
+              await tryRelaunch(fbAlphaFallback)
+            } else if (shouldRetryWithDefaultMame(activeCore)) {
+              await tryRelaunch(DEFAULT_ARCADE_CORE)
+            }
+          }
+
+          if (blank) {
             nostalgist.exit({ removeCanvas: false })
-            throw new Error(arcadeLoadErrorMessage(activeCore))
+            throw new Error(arcadeLoadErrorMessage(activeCore, romLabel))
           }
         }
 
@@ -309,9 +322,16 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
         return
       }
 
+      const primaryPick = files.find((file) => detectSystem(file.name)) ?? files[0]
+      const inferredCore =
+        system === 'arcade' && primaryPick
+          ? inferArcadeCoreForRom(primaryPick.name)
+          : null
       const arcadeCore =
         system === 'arcade'
-          ? resolveArcadeCore(options?.arcadeCore ?? settingsRef.current.arcadeCore)
+          ? resolveArcadeCore(
+              inferredCore ?? options?.arcadeCore ?? settingsRef.current.arcadeCore,
+            )
           : undefined
       const core =
         system === 'arcade' && arcadeCore ? arcadeCore : SYSTEMS[system].core

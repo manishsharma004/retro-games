@@ -1,5 +1,10 @@
 import type { Nostalgist } from 'nostalgist'
-import { DEFAULT_ARCADE_CORE, coreLabel } from './cores'
+import {
+  DEFAULT_ARCADE_CORE,
+  arcadeRomBasename,
+  coreLabel,
+  inferArcadeCoreForRom,
+} from './cores'
 
 const SETTLE_MS = 3500
 /** Minimum non-black sample ratio to treat the frame as rendered content. */
@@ -68,11 +73,26 @@ export async function arcadeScreenLooksBlank(nostalgist: Nostalgist): Promise<bo
   }
 }
 
-export function arcadeLoadErrorMessage(core: string): string {
+export function arcadeLoadErrorMessage(core: string, romName?: string): string {
+  const base = romName ? arcadeRomBasename(romName) : ''
+  if (base.startsWith('kov2')) {
+    return (
+      `Knights of Valour 2 (${romName}) needs core "FB Alpha 2012" — it is not in MAME 2003-Plus ` +
+      `(that core only has the first KOV / Sangoku Senki). Use an FBA-format kov2.zip and, for split sets, ` +
+      `select pgm.zip together with the game (PGM BIOS).`
+    )
+  }
+  const suggested = romName ? inferArcadeCoreForRom(romName) : null
+  if (suggested && suggested !== core) {
+    return (
+      `"${romName}" likely needs core "${coreLabel(suggested)}" instead of "${coreLabel(core)}". ` +
+      `Change core in Advanced settings, Apply & relaunch, and include any required BIOS zip (e.g. pgm.zip, neogeo.zip).`
+    )
+  }
   return (
     `This arcade core ("${coreLabel(core)}") did not render the game (black screen). ` +
     `Pick a core that matches your ROM set: MAME .zip → MAME 2003-Plus; Neo Geo → FB Alpha 2012 Neo Geo (+ neogeo.zip); ` +
-    `CPS → FB Alpha CPS-1/2. Change core in Advanced settings and reload.`
+    `PGM / KOV2 → FB Alpha 2012 (+ pgm.zip). Change core in Advanced settings and reload.`
   )
 }
 
@@ -80,6 +100,18 @@ export function arcadeLoadErrorMessage(core: string): string {
 export function shouldRetryWithDefaultMame(core: string): boolean {
   if (core === DEFAULT_ARCADE_CORE) return false
   if (core.startsWith('mame')) return true
-  if (core === 'fbalpha2012') return true
   return false
+}
+
+/** When MAME 2003-Plus cannot run a ROM, try FB Alpha 2012 for known PGM-style sets. */
+export function arcadeFallbackCore(currentCore: string, romName?: string): string | null {
+  const suggested = romName ? inferArcadeCoreForRom(romName) : null
+  if (!suggested || suggested === currentCore) return null
+  if (
+    suggested === 'fbalpha2012' &&
+    (currentCore.startsWith('mame') || currentCore === DEFAULT_ARCADE_CORE)
+  ) {
+    return 'fbalpha2012'
+  }
+  return null
 }

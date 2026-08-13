@@ -103,7 +103,7 @@ export function RomLoader({
       </label>
       <p className="rom-loader__formats rom-loader__formats--sub">
         Pick the core that matches your ROM set. Zip name must match the set (e.g.{' '}
-        <code>pacman.zip</code>). Black screen → try MAME 2003-Plus, FBNeo Neo Geo, or FBNeo CPS-1/2.
+        <code>pacman.zip</code>). KOV2 / PGM games → FB Alpha 2012 + <code>pgm.zip</code>. Black screen → check core match.
       </p>
       <div className="rom-loader__actions">
         <button

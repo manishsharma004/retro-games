@@ -346,6 +346,39 @@ export function resolveArcadeCore(core?: string | null): string {
   return DEFAULT_ARCADE_CORE
 }
 
+/** ROM basename without extension (lowercase). */
+export function arcadeRomBasename(fileName: string): string {
+  const lower = normalizeArcadeFileName(fileName)
+  return lower.endsWith('.zip') ? lower.slice(0, -4) : lower
+}
+
+/**
+ * Pick a better core for known arcade zips. KOV2/sequels and many PGM titles are
+ * in FB Alpha 2012 but not MAME 2003-Plus (which only has KOV1-era drivers).
+ */
+export function inferArcadeCoreForRom(fileName: string): string | null {
+  const base = arcadeRomBasename(fileName)
+  if (base.startsWith('kov2')) return 'fbalpha2012'
+  const fbAlpha2012Only = [
+    'ddp2',
+    'ddp3',
+    'photoy2k',
+    'orlegend',
+    'olds',
+    'martmast',
+    'puzzli2',
+    'killbld',
+    'dmnfrnt',
+    'svg',
+    'kovshp',
+    'kovytzy',
+  ]
+  for (const id of fbAlpha2012Only) {
+    if (base === id || base.startsWith(id)) return 'fbalpha2012'
+  }
+  return null
+}
+
 /** FBNeo-family cores load BIOS zips from the system folder. */
 export function coreUsesBiosFolder(core: string): boolean {
   return core.startsWith('fbalpha')

@@ -2160,6 +2160,10 @@ body.rg-faux-fullscreen {
 .settings-hint {
   margin: 0;
   color: var(--muted);
+}
+
+.settings-hint--tight {
+  margin-top: 0.35rem;
   font-size: 0.85rem;
 }
 

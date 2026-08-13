@@ -3,7 +3,7 @@
  * @see https://nostalgist.js.org/apis/launch#core
  */
 
-import { isNostalgistCore } from './nostalgistCores'
+import { coreLabel, isNostalgistCore } from './nostalgistCores'
 
 export {
   NOSTALGIST_CORES,
@@ -341,9 +341,49 @@ const BIOS_NAME_RE =
 
 export const DEFAULT_ARCADE_CORE = 'mame2003_plus'
 
+/** Settings value: pick core from ROM name on each .zip launch. */
+export const ARCADE_CORE_AUTO = 'auto'
+
+export function isArcadeCoreAuto(coreSetting: string): boolean {
+  return coreSetting === ARCADE_CORE_AUTO
+}
+
 export function resolveArcadeCore(core?: string | null): string {
+  if (core && isArcadeCoreAuto(core)) return DEFAULT_ARCADE_CORE
   if (core && isNostalgistCore(core)) return core
   return DEFAULT_ARCADE_CORE
+}
+
+export interface ResolvedArcadeCore {
+  core: string
+  /** True when coreSetting was Auto (or inferred during auto retry). */
+  auto: boolean
+  sourceRom?: string
+}
+
+/** Resolve the libretro core for .zip arcade files from settings + ROM names. */
+export function resolveArcadeCoreForFiles(
+  files: File[],
+  coreSetting: string,
+): ResolvedArcadeCore {
+  const zipGame =
+    files.find((file) => {
+      if (getExtension(file.name) !== '.zip') return false
+      return !BIOS_NAME_RE.test(file.name)
+    }) ?? files.find((file) => getExtension(file.name) === '.zip')
+
+  const romName = zipGame?.name
+
+  if (!isArcadeCoreAuto(coreSetting) && isNostalgistCore(coreSetting)) {
+    return { core: coreSetting, auto: false, sourceRom: romName }
+  }
+
+  if (romName) {
+    const inferred = inferArcadeCoreForRom(romName)
+    if (inferred) return { core: inferred, auto: true, sourceRom: romName }
+  }
+
+  return { core: DEFAULT_ARCADE_CORE, auto: true, sourceRom: romName }
 }
 
 /** ROM basename without extension (lowercase). */
@@ -377,6 +417,12 @@ export function inferArcadeCoreForRom(fileName: string): string | null {
     if (base === id || base.startsWith(id)) return 'fbalpha2012'
   }
   return null
+}
+
+/** Label for the settings / dropdown value (includes Auto). */
+export function arcadeCoreSettingLabel(coreSetting: string): string {
+  if (isArcadeCoreAuto(coreSetting)) return 'Auto (detect from ROM name)'
+  return coreLabel(coreSetting)
 }
 
 /** FBNeo-family cores load BIOS zips from the system folder. */

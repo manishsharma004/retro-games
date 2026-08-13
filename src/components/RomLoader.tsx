@@ -1,12 +1,13 @@
 import { useCallback, useRef, useState, type DragEvent } from 'react'
 import {
-  NOSTALGIST_CORES,
   acceptAttribute,
-  arcadeCoreOptionLabel,
   coreLabel,
   filesIncludeZip,
   formatExtensionsHint,
+  isArcadeCoreAuto,
+  resolveArcadeCoreForFiles,
 } from '../lib/cores'
+import { ArcadeCoreSelect } from './ArcadeCoreSelect'
 
 interface RomLoaderProps {
   disabled?: boolean
@@ -27,12 +28,26 @@ export function RomLoader({
 }: RomLoaderProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
+  const [autoPick, setAutoPick] = useState<string | null>(null)
 
   const launchFiles = useCallback(
     (files: FileList | null) => {
       if (!files?.length) return
       const list = [...files]
-      onFile(list, filesIncludeZip(list) ? { arcadeCore } : undefined)
+      if (filesIncludeZip(list)) {
+        const { core, auto, sourceRom } = resolveArcadeCoreForFiles(list, arcadeCore)
+        if (auto && sourceRom) {
+          setAutoPick(`${sourceRom} → ${coreLabel(core)}`)
+        } else if (auto) {
+          setAutoPick(`Auto → ${coreLabel(core)}`)
+        } else {
+          setAutoPick(null)
+        }
+        onFile(list, { arcadeCore })
+      } else {
+        setAutoPick(null)
+        onFile(list)
+      }
     },
     [arcadeCore, onFile],
   )
@@ -60,7 +75,11 @@ export function RomLoader({
           className="btn btn--primary btn--compact-load"
           disabled={disabled}
           onClick={() => inputRef.current?.click()}
-          title={`Load ROM (core: ${coreLabel(arcadeCore)}) — change in Advanced settings`}
+          title={
+            isArcadeCoreAuto(arcadeCore)
+              ? 'Load ROM (core: Auto) — change in Advanced settings'
+              : `Load ROM (core: ${coreLabel(arcadeCore)}) — change in Advanced settings`
+          }
         >
           Load ROM
         </button>
@@ -89,18 +108,20 @@ export function RomLoader({
       <p className="rom-loader__hint">Drop a ROM here — NES, SNES, Game Boy, Genesis, PSX, arcade (.zip), and more</p>
       <label className="field rom-loader__core">
         <span>Emulator core for .zip ROMs</span>
-        <select
+        <ArcadeCoreSelect
           value={arcadeCore}
           disabled={disabled}
-          onChange={(e) => onArcadeCoreChange(e.target.value)}
-        >
-          {NOSTALGIST_CORES.map((core) => (
-            <option key={core.id} value={core.id}>
-              {arcadeCoreOptionLabel(core)}
-            </option>
-          ))}
-        </select>
+          onChange={(core) => {
+            setAutoPick(null)
+            onArcadeCoreChange(core)
+          }}
+        />
       </label>
+      {autoPick && isArcadeCoreAuto(arcadeCore) && (
+        <p className="rom-loader__formats rom-loader__formats--sub">
+          Auto-selected core: <strong>{autoPick}</strong>
+        </p>
+      )}
       <p className="rom-loader__formats rom-loader__formats--sub">
         Pick the core that matches your ROM set. Zip name must match the set (e.g.{' '}
         <code>pacman.zip</code>). KOV2 / PGM games → FB Alpha 2012 + <code>pgm.zip</code>. Black screen → check core match.

@@ -371,7 +371,7 @@ export function AdvancedSettings({
               </label>
               <p className="settings-hint">
                 All cores from Nostalgist&apos;s CDN. For .zip arcade ROMs, pick the core that matches
-                your set (MAME 0.78 → MAME 2003-Plus, Neo Geo → FB Alpha Neo Geo, etc.). Apply &amp;
+                your set (MAME 0.78 → MAME 2003-Plus, Neo Geo → FB Alpha Neo Geo, KOV2/PGM → FB Alpha 2012 + pgm.zip). Apply &amp;
                 relaunch after changing.
               </p>
             </section>

@@ -102,7 +102,7 @@ const ARCADE_CORE_HINTS: Record<string, string> = {
   mame2003_plus: ' — recommended for MAME .zip',
   mame2003: ' — MAME 0.78',
   mame2000: ' — MAME 0.37 (older sets)',
-  fbalpha2012: ' — not for generic MAME .zip',
+  fbalpha2012: ' — PGM / KOV2 / IGS (not generic MAME .zip)',
   fbalpha2012_neogeo: ' — Neo Geo (+ neogeo.zip)',
   fbalpha2012_cps1: ' — CPS-1',
   fbalpha2012_cps2: ' — CPS-2',

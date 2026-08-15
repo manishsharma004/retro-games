@@ -39,6 +39,8 @@ export interface ActiveGame {
   file?: File
   /** Extra ROM parts (parent sets, discs) or BIOS zips selected with the game. */
   extraFiles?: File[]
+  /** Full file-picker selection (arcade: includes BIOS zips for relaunch / core retry). */
+  sourceFiles?: File[]
   libraryFile?: string
   /** Locked 60 Hz audio-sync timing for dual-emulator co-op. */
   coopMode?: boolean
@@ -48,8 +50,29 @@ interface PendingLaunch {
   game: ActiveGame
   rom: File | string | File[]
   bios?: File[]
+  /** Original .zip selection — re-partitioned when arcade core changes (MAME vs FBNeo). */
+  sourceFiles?: File[]
   state?: Blob
   startPaused?: boolean
+}
+
+interface ArcadeLaunchPayload {
+  rom: File | File[]
+  bios?: File[]
+  primary: File
+  extraFiles?: File[]
+}
+
+function buildArcadeLaunchPayload(files: File[], core: string): ArcadeLaunchPayload {
+  const { rom, bios } = partitionRomFiles(files, 'arcade', core)
+  const gameFiles = rom.length > 0 ? rom : files
+  const primary = gameFiles[0]
+  return {
+    rom: gameFiles.length === 1 ? primary : gameFiles,
+    bios: bios.length > 0 ? bios : undefined,
+    primary,
+    extraFiles: gameFiles.length > 1 ? gameFiles.slice(1) : undefined,
+  }
 }
 
 function isCoopLaunch(game: ActiveGame): boolean {
@@ -228,11 +251,24 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
           const tryRelaunch = async (core: string) => {
             nostalgist.exit({ removeCanvas: false })
             activeCore = core
+
+            let romPayload = pending.rom
+            let biosPayload = pending.bios
+            if (pending.sourceFiles?.length) {
+              const repartitioned = buildArcadeLaunchPayload(pending.sourceFiles, core)
+              romPayload = repartitioned.rom
+              biosPayload = repartitioned.bios
+            }
+
             const retryGame = { ...pending.game, core: activeCore }
             gameRef.current = retryGame
             setGame(retryGame)
             nostalgist = await Nostalgist.launch({
               ...launchOptions,
+              rom: toNostalgistRom(romPayload, pending.game.system),
+              bios: biosPayload?.length
+                ? toNostalgistRom(biosPayload, pending.game.system)
+                : undefined,
               core: activeCore,
               retroarchCoreConfig: buildCoreConfig(pending.game.system, current, {
                 coop,
@@ -332,10 +368,12 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
           ? resolved.core
           : SYSTEMS[system].core
 
+      const arcadePayload =
+        system === 'arcade' ? buildArcadeLaunchPayload(files, core) : null
       const { rom, bios } = partitionRomFiles(files, system, core)
       const gameFiles = rom.length > 0 ? rom : files
-      const primary = gameFiles[0]
-      const romPayload = gameFiles.length === 1 ? primary : gameFiles
+      const primary = arcadePayload?.primary ?? gameFiles[0]
+      const romPayload = arcadePayload?.rom ?? (gameFiles.length === 1 ? primary : gameFiles)
 
       queueLaunch({
         game: {
@@ -344,10 +382,12 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
           core,
           source: 'file',
           file: primary,
-          extraFiles: gameFiles.length > 1 ? gameFiles.slice(1) : undefined,
+          extraFiles: arcadePayload?.extraFiles ?? (gameFiles.length > 1 ? gameFiles.slice(1) : undefined),
+          sourceFiles: system === 'arcade' ? files : undefined,
         },
         rom: romPayload,
-        bios: bios.length > 0 ? bios : undefined,
+        bios: arcadePayload?.bios ?? (bios.length > 0 ? bios : undefined),
+        sourceFiles: system === 'arcade' ? files : undefined,
       })
     },
     [queueLaunch],
@@ -672,7 +712,9 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
     if (!active) return
     if (active.source === 'demo') launchDemo()
     else if (active.file) {
-      const files = active.extraFiles ? [active.file, ...active.extraFiles] : active.file
+      const files =
+        active.sourceFiles ??
+        (active.extraFiles ? [active.file, ...active.extraFiles] : active.file)
       launchFile(files, {
         arcadeCore:
           active.system === 'arcade' ? settingsRef.current.arcadeCore : undefined,

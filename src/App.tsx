@@ -36,6 +36,8 @@ import {
 } from './lib/gamepad'
 import { fetchLibrary, type LibraryRom } from './lib/library'
 import { useRomShelf } from './hooks/useRomShelf'
+import { useMediaFolder } from './hooks/useMediaFolder'
+import { useMenuPad } from './hooks/useMenuPad'
 import {
   legacySettingsToProfile,
   loadSettings,
@@ -74,6 +76,9 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   const [touchDevice] = useState(() => prefersTouch())
   const [library, setLibrary] = useState<LibraryRom[]>([])
   const shelf = useRomShelf()
+  const mediaFolder = useMediaFolder()
+  const [navFocused, setNavFocused] = useState(false)
+  const [navIndex, setNavIndex] = useState(0)
   const [shelfFocus, setShelfFocus] = useState<string | null>(null)
   const autoLoadedRef = useRef(false)
   const skipAutoLoadRef = useRef(Boolean(initialCoopJoin))
@@ -504,6 +509,52 @@ export default function App({ initialCoopJoin = null }: AppProps) {
 
   const isPlaying = emu.status === 'running' || emu.status === 'paused' || emu.status === 'loading'
   const showLanding = !isPlaying
+  const landingModal = controllersOpen || peerOpen || settingsOpen || layoutEditorOpen
+  const libraryOwnsPad = showLanding && section === 'play' && !navFocused && !landingModal
+
+  useMenuPad(showLanding && !libraryOwnsPad && !landingModal, (command) => {
+    const navIds = ['play', 'roms', 'controllers', 'multiplayer', 'settings'] as const
+    if (command === 'left') {
+      setNavFocused(true)
+      setNavIndex((index) => (index + navIds.length - 1) % navIds.length)
+      return
+    }
+    if (command === 'right') {
+      setNavFocused(true)
+      setNavIndex((index) => (index + 1) % navIds.length)
+      return
+    }
+    if (command === 'down' || command === 'back') {
+      if (section === 'play') setNavFocused(false)
+      return
+    }
+    if (command === 'confirm') {
+      const id = navIds[navIndex]
+      if (id === 'controllers') {
+        setPeerOpen(false)
+        setSettingsOpen(false)
+        setControllersOpen(true)
+        return
+      }
+      if (id === 'multiplayer') {
+        setControllersOpen(false)
+        setSettingsOpen(false)
+        setPeerOpen(true)
+        return
+      }
+      if (id === 'settings') {
+        setControllersOpen(false)
+        setPeerOpen(false)
+        setSettingsOpen(true)
+        return
+      }
+      setControllersOpen(false)
+      setPeerOpen(false)
+      setSettingsOpen(false)
+      setSection(id)
+      setNavFocused(false)
+    }
+  })
 
   usePreventGameTouchGestures(playerRef, isPlaying)
 
@@ -569,7 +620,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
                   ['multiplayer', 'Multiplayer'],
                   ['settings', 'Settings'],
                 ] as const
-              ).map(([id, label]) => {
+              ).map(([id, label], index) => {
                 const open =
                   (id === 'controllers' && controllersOpen) ||
                   (id === 'multiplayer' && peerOpen) ||
@@ -579,7 +630,13 @@ export default function App({ initialCoopJoin = null }: AppProps) {
                 <button
                   key={id}
                   type="button"
-                  className={open ? 'app-nav__link app-nav__link--active' : 'app-nav__link'}
+                  className={[
+                    'app-nav__link',
+                    open && 'app-nav__link--active',
+                    showLanding && !libraryOwnsPad && !landingModal && navIndex === index && 'app-nav__link--pad',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
                   aria-current={open ? 'page' : undefined}
                   onClick={() => {
                     if (id === 'controllers') {
@@ -617,6 +674,18 @@ export default function App({ initialCoopJoin = null }: AppProps) {
               <BigPicture
                 bundled={library}
                 imported={shelf.entries}
+                folder={{
+                  name: mediaFolder.folderName,
+                  entries: mediaFolder.entries,
+                  scanning: mediaFolder.scanning,
+                  error: mediaFolder.error,
+                  needsPermission: mediaFolder.needsPermission,
+                  canPick: mediaFolder.canPick,
+                  pick: () => void mediaFolder.pick(),
+                  resume: () => void mediaFolder.resume(),
+                  forget: () => void mediaFolder.forget(),
+                  adoptFiles: mediaFolder.adoptFiles,
+                }}
                 disabled={emu.status === 'loading'}
                 error={emu.error}
                 shelfError={shelf.error}
@@ -634,7 +703,12 @@ export default function App({ initialCoopJoin = null }: AppProps) {
                 onRemove={shelf.remove}
                 onUseCover={shelf.useCover}
                 onRegenerateCover={shelf.regenerate}
-                suspendNavigation={controllersOpen || peerOpen || settingsOpen || layoutEditorOpen}
+                suspendNavigation={landingModal}
+                padEnabled={libraryOwnsPad}
+                onLeaveUp={() => {
+                  setNavFocused(true)
+                  setNavIndex(0)
+                }}
               />
             )}
             {section === 'roms' && (

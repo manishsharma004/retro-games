@@ -66,9 +66,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   const [controllersOpen, setControllersOpen] = useState(false)
   const [layoutEditorOpen, setLayoutEditorOpen] = useState(false)
   const [chromeMenuOpen, setChromeMenuOpen] = useState(false)
-  const [section, setSection] = useState<'play' | 'roms' | 'controllers' | 'multiplayer' | 'settings'>(
-    'play',
-  )
+  const [section, setSection] = useState<'play' | 'roms'>('play')
   const chromeMenuRef = useRef<HTMLDivElement>(null)
   const [sessionMode, setSessionMode] = useState<SessionMode>(initialCoopJoin ? 'coop' : 'local')
   const [hostOnScreenP2, setHostOnScreenP2] = useState(false)
@@ -568,17 +566,47 @@ export default function App({ initialCoopJoin = null }: AppProps) {
                   ['multiplayer', 'Multiplayer'],
                   ['settings', 'Settings'],
                 ] as const
-              ).map(([id, label]) => (
+              ).map(([id, label]) => {
+                const open =
+                  (id === 'controllers' && controllersOpen) ||
+                  (id === 'multiplayer' && peerOpen) ||
+                  (id === 'settings' && settingsOpen) ||
+                  ((id === 'play' || id === 'roms') && section === id && !controllersOpen && !peerOpen && !settingsOpen)
+                return (
                 <button
                   key={id}
                   type="button"
-                  className={section === id ? 'app-nav__link app-nav__link--active' : 'app-nav__link'}
-                  aria-current={section === id ? 'page' : undefined}
-                  onClick={() => setSection(id)}
+                  className={open ? 'app-nav__link app-nav__link--active' : 'app-nav__link'}
+                  aria-current={open ? 'page' : undefined}
+                  onClick={() => {
+                    if (id === 'controllers') {
+                      setPeerOpen(false)
+                      setSettingsOpen(false)
+                      setControllersOpen(true)
+                      return
+                    }
+                    if (id === 'multiplayer') {
+                      setControllersOpen(false)
+                      setSettingsOpen(false)
+                      setPeerOpen(true)
+                      return
+                    }
+                    if (id === 'settings') {
+                      setControllersOpen(false)
+                      setPeerOpen(false)
+                      setSettingsOpen(true)
+                      return
+                    }
+                    setControllersOpen(false)
+                    setPeerOpen(false)
+                    setSettingsOpen(false)
+                    setSection(id)
+                  }}
                 >
                   {label}
                 </button>
-              ))}
+                )
+              })}
             </div>
           </nav>
           <main className="app-main">
@@ -603,6 +631,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
                 onRemove={shelf.remove}
                 onUseCover={shelf.useCover}
                 onRegenerateCover={shelf.regenerate}
+                suspendNavigation={controllersOpen || peerOpen || settingsOpen || layoutEditorOpen}
               />
             )}
             {section === 'roms' && (
@@ -954,12 +983,8 @@ export default function App({ initialCoopJoin = null }: AppProps) {
       </div>
 
       <AdvancedSettings
-        open={settingsOpen || (showLanding && section === 'settings')}
-        embedded={showLanding && section === 'settings' && !settingsOpen}
-        onClose={() => {
-          setSettingsOpen(false)
-          if (section === 'settings') setSection('play')
-        }}
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
         settings={settings}
         onChange={setSettings}
         system={emu.game?.system ?? null}
@@ -984,12 +1009,8 @@ export default function App({ initialCoopJoin = null }: AppProps) {
       />
 
       <ControllerPanel
-        open={controllersOpen || (showLanding && section === 'controllers')}
-        embedded={showLanding && section === 'controllers' && !controllersOpen}
-        onClose={() => {
-          setControllersOpen(false)
-          if (section === 'controllers') setSection('play')
-        }}
+        open={controllersOpen}
+        onClose={() => setControllersOpen(false)}
         pads={pads}
         bindings={controllerBindings}
         onChange={setControllerBindings}
@@ -1016,12 +1037,8 @@ export default function App({ initialCoopJoin = null }: AppProps) {
       />
 
       <PeerLobby
-        open={peerOpen || (showLanding && section === 'multiplayer')}
-        embedded={showLanding && section === 'multiplayer' && !peerOpen}
-        onClose={() => {
-          setPeerOpen(false)
-          if (section === 'multiplayer') setSection('play')
-        }}
+        open={peerOpen}
+        onClose={() => setPeerOpen(false)}
         phase={peer.phase}
         role={peer.role}
         seat={peer.seat}

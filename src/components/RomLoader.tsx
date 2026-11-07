@@ -13,6 +13,7 @@ import {
   type SystemGroup,
   type SystemId,
 } from '../lib/cores'
+import { prepareRomFiles } from '../lib/zipRoms'
 import { ArcadeCoreSelect } from './ArcadeCoreSelect'
 
 interface RomLoadOptions {
@@ -48,6 +49,7 @@ export function RomLoader({
 }: RomLoaderProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
+  const [inspecting, setInspecting] = useState(false)
   const [files, setFiles] = useState<File[] | null>(null)
   const [systemChoice, setSystemChoice] = useState<SystemId | null>(null)
   const [coreChoice, setCoreChoice] = useState(arcadeCore)
@@ -60,10 +62,15 @@ export function RomLoader({
 
   const stageFiles = useCallback((list: FileList | null) => {
     if (!list?.length) return
-    const next = [...list]
-    setFiles(next)
+    const picked = [...list]
+    setInspecting(true)
+    setFiles(null)
     setSystemChoice(null)
     setCoreChoice(arcadeCore)
+    void prepareRomFiles(picked)
+      .then((next) => setFiles(next))
+      .catch(() => setFiles(picked))
+      .finally(() => setInspecting(false))
   }, [arcadeCore])
 
   const onDrop = (e: DragEvent) => {
@@ -159,6 +166,7 @@ export function RomLoader({
           Try demo
         </button>
       </div>
+      {inspecting && <p className="rom-loader__formats">Reading the file…</p>}
       <p className="rom-loader__formats">
         Every Nostalgist core can be selected. Common cartridges are detected from the file name.
         Arcade zips marked MAME 0.37b11 need MAME 2000. Disc images that share .cue or .iso

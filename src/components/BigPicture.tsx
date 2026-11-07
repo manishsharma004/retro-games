@@ -27,6 +27,8 @@ interface BigPictureProps {
   onRemove: (id: string) => Promise<void>
   onUseCover: (id: string, image: File) => Promise<void>
   onRegenerateCover: (id: string) => Promise<void>
+  /** Pause row navigation while a dialog is open on top of the library. */
+  suspendNavigation?: boolean
 }
 
 type PictureItem =
@@ -49,6 +51,7 @@ export function BigPicture({
   onRemove,
   onUseCover,
   onRegenerateCover,
+  suspendNavigation = false,
 }: BigPictureProps) {
   const [adding, setAdding] = useState(false)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
@@ -141,7 +144,7 @@ export function BigPicture({
   }
 
   useEffect(() => {
-    if (adding) return
+    if (adding || suspendNavigation) return
     const onKey = (event: KeyboardEvent) => {
       const target = event.target
       if (target instanceof HTMLElement && target.closest('input, select, textarea')) return
@@ -161,10 +164,10 @@ export function BigPicture({
     return () => window.removeEventListener('keydown', onKey)
     // playSelected closes over the latest selection
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adding, selected, items, disabled, busy])
+  }, [adding, selected, items, disabled, busy, suspendNavigation])
 
   useEffect(() => {
-    if (adding) return
+    if (adding || suspendNavigation) return
     let frame = 0
     let lastPad = 0
     const tick = () => {
@@ -186,7 +189,7 @@ export function BigPicture({
     frame = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(frame)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adding, selected, items, disabled, busy])
+  }, [adding, selected, items, disabled, busy, suspendNavigation])
 
   const playSelected = async () => {
     if (!selected || disabled || busy) return

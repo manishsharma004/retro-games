@@ -1,3 +1,6 @@
+# Local ROM dumps used for debugging. Never commit.
+/*.zip
+
 # Logs
 logs
 *.log

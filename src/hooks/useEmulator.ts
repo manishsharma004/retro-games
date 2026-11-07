@@ -23,6 +23,7 @@ import {
   shouldRetryWithDefaultMame,
 } from '../lib/arcadeLaunch'
 import { romUrl, type LibraryRom } from '../lib/library'
+import { prepareRomFiles } from '../lib/zipRoms'
 import {
   buildCoreConfig,
   buildRetroarchConfig,
@@ -348,11 +349,18 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
 
   const launchFile = useCallback(
     (input: File | File[], options?: { arcadeCore?: string; system?: SystemId; core?: string }) => {
-      const files = Array.isArray(input) ? input : [input]
-      if (files.length === 0) return
+      const raw = Array.isArray(input) ? input : [input]
+      if (raw.length === 0) return
 
-      const system = options?.system ?? detectSystemFromFiles(files)
-      if (!system) {
+      void (async () => {
+        const files = await prepareRomFiles(raw)
+        if (files.length === 0) return
+
+        const detected = detectSystemFromFiles(files)
+        const expanded = files.length !== raw.length || files.some((file, index) => file !== raw[index])
+        let system = options?.system ?? detected
+        if (expanded && system === 'arcade' && detected && detected !== 'arcade') system = detected
+        if (!system) {
         setError(
           'This file is not a recognized ROM. Open ROMs, choose the file, and pick its system. Nintendo 64, DS, GameCube, Wii, PlayStation 2, PSP, Dreamcast, Saturn, and Xbox are not in this browser build.',
         )
@@ -393,6 +401,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
         bios: arcadePayload?.bios ?? (bios.length > 0 ? bios : undefined),
         sourceFiles: system === 'arcade' ? files : undefined,
       })
+      })()
     },
     [queueLaunch],
   )

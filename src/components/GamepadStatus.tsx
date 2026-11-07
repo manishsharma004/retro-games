@@ -1,5 +1,5 @@
 import type { ConnectedGamepad } from '../hooks/useGamepads'
-import { shortGamepadName } from '../lib/gamepad'
+import { friendlyPadName } from '../lib/gamepad'
 
 interface GamepadStatusProps {
   pads: ConnectedGamepad[]
@@ -11,7 +11,7 @@ export function GamepadStatus({ pads, onOpen }: GamepadStatusProps) {
     pads.length === 0
       ? 'No controller'
       : pads.length === 1
-        ? shortGamepadName(pads[0].id)
+        ? friendlyPadName(pads[0].id)
         : `${pads.length} controllers`
 
   const title =

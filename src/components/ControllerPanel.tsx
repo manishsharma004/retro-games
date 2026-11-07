@@ -1,11 +1,17 @@
+import { useEffect, useRef, useState } from 'react'
 import type { ConnectedGamepad } from '../hooks/useGamepads'
+import type { RetroPadButton } from '../lib/keyboard'
 import type { PeerSeat } from '../lib/peer/protocol'
 import type { MaxPlayers } from '../lib/peer/roster'
 import { playerSeats } from '../lib/peer/roster'
 import {
-  shortGamepadName,
+  friendlyPadName,
+  padProfile,
+  padProfileLabel,
+  readRetroButtons,
   type ControllerBindings,
   type PadSlot,
+  type PlayerSeat,
 } from '../lib/gamepad'
 
 interface ControllerPanelProps {
@@ -24,6 +30,10 @@ interface ControllerPanelProps {
   remoteSpectator?: boolean
   multiGuest?: boolean
   maxPlayers?: MaxPlayers
+  /** Live input remap. Bottom face (Xbox A / Cross) becomes jump when on. */
+  swapAB?: boolean
+  onSwapAB?: (value: boolean) => void
+  swapLocked?: boolean
 }
 
 function slotOptions(
@@ -36,7 +46,7 @@ function slotOptions(
   for (const pad of pads) {
     opts.push({
       value: String(pad.index),
-      label: `#${pad.index} · ${shortGamepadName(pad.id)}`,
+      label: `${friendlyPadName(pad.id)} · #${pad.index}`,
     })
   }
   return opts
@@ -46,6 +56,48 @@ function parseSlot(value: string): PadSlot {
   if (value === 'auto' || value === 'none') return value
   const n = Number(value)
   return Number.isInteger(n) && n >= 0 ? n : 'none'
+}
+
+const FACE_TEST: Array<{ id: RetroPadButton; label: string }> = [
+  { id: 'up', label: 'Up' },
+  { id: 'down', label: 'Down' },
+  { id: 'left', label: 'Left' },
+  { id: 'right', label: 'Right' },
+  { id: 'y', label: 'Y' },
+  { id: 'x', label: 'X' },
+  { id: 'b', label: 'B' },
+  { id: 'a', label: 'A' },
+  { id: 'l', label: 'L' },
+  { id: 'r', label: 'R' },
+  { id: 'select', label: 'Select' },
+  { id: 'start', label: 'Start' },
+]
+
+function sameLive(
+  prev: Record<number, RetroPadButton[]>,
+  next: Record<number, RetroPadButton[]>,
+): boolean {
+  const prevKeys = Object.keys(prev)
+  const nextKeys = Object.keys(next)
+  if (prevKeys.length !== nextKeys.length) return false
+  for (const key of nextKeys) {
+    const left = prev[Number(key)]
+    const right = next[Number(key)]
+    if (!left || left.length !== right.length) return false
+    for (let i = 0; i < right.length; i += 1) {
+      if (left[i] !== right[i]) return false
+    }
+  }
+  return true
+}
+
+function toGameButton(button: RetroPadButton, swap: boolean): RetroPadButton {
+  if (!swap) return button
+  if (button === 'a') return 'b'
+  if (button === 'b') return 'a'
+  if (button === 'x') return 'y'
+  if (button === 'y') return 'x'
+  return button
 }
 
 export function ControllerPanel({
@@ -63,7 +115,55 @@ export function ControllerPanel({
   remoteSpectator = false,
   multiGuest = false,
   maxPlayers = 2,
+  swapAB = false,
+  onSwapAB,
+  swapLocked = false,
 }: ControllerPanelProps) {
+  const [live, setLive] = useState<Record<number, RetroPadButton[]>>({})
+  const [assigning, setAssigning] = useState<PlayerSeat | null>(null)
+  const armedRef = useRef(false)
+  const prevActiveRef = useRef<Set<number>>(new Set())
+
+  useEffect(() => {
+    if (!open) {
+      setAssigning(null)
+      return
+    }
+    let raf = 0
+    const tick = () => {
+      const padsNow = navigator.getGamepads?.() ?? []
+      const next: Record<number, RetroPadButton[]> = {}
+      const active = new Set<number>()
+      for (const pad of padsNow) {
+        if (!pad) continue
+        const buttons = [...readRetroButtons(pad)]
+        next[pad.index] = buttons
+        if (buttons.length > 0) active.add(pad.index)
+      }
+      setLive((prev) => (sameLive(prev, next) ? prev : next))
+
+      if (assigning !== null) {
+        if (!armedRef.current) {
+          if (active.size === 0) armedRef.current = true
+        } else {
+          for (const index of active) {
+            if (!prevActiveRef.current.has(index)) {
+              const padKey = `pad${assigning}` as keyof ControllerBindings
+              onChange({ ...bindings, [padKey]: index })
+              setAssigning(null)
+              armedRef.current = false
+              break
+            }
+          }
+        }
+      }
+      prevActiveRef.current = active
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [open, assigning, bindings, onChange])
+
   if (!open) return null
 
   const pickRoleFn = onPickRole ?? onPickSeat
@@ -83,26 +183,58 @@ export function ControllerPanel({
         </header>
 
         <p className="peer-lobby__lead">
-          Pick which physical gamepad drives each seat. Controllers are polled in the browser and
-          routed through the same input path as the keyboard and on-screen pad (required for 2-player
-          peer sync).
+          Xbox and PlayStation pads use the same face positions: bottom is B, right is A, left is Y,
+          top is X. Press a button to see it light up.
         </p>
+
+        {onSwapAB && (
+          <label className="field field--row controller-panel__swap">
+            <span>Bottom button jumps (Xbox A / Cross)</span>
+            <input
+              type="checkbox"
+              checked={swapAB}
+              disabled={swapLocked}
+              onChange={(e) => onSwapAB(e.target.checked)}
+            />
+          </label>
+        )}
+        {swapAB && (
+          <p className="peer-lobby__hint">
+            Swap is on, so the bottom face button is A (jump) and the right face button is B.
+          </p>
+        )}
 
         {pads.length === 0 ? (
           <p className="peer-lobby__hint">
-            No controller detected yet. Press a button on the pad (browsers only expose pads after a
-            gesture), then check again.
+            No controller yet. Press any face button — browsers hide pads until the first press.
           </p>
         ) : (
           <ul className="controller-panel__list">
-            {pads.map((pad) => (
-              <li key={pad.index}>
-                <strong>#{pad.index}</strong> {shortGamepadName(pad.id)}
-                <span className="controller-panel__meta">
-                  {pad.mapping || 'no mapping'} · {pad.buttons} buttons
-                </span>
-              </li>
-            ))}
+            {pads.map((pad) => {
+              const profile = padProfile(pad.id, pad.mapping)
+              const held = new Set((live[pad.index] ?? []).map((button) => toGameButton(button, swapAB)))
+              return (
+                <li key={`${pad.index}-${pad.id}`}>
+                  <strong>
+                    {friendlyPadName(pad.id)} · #{pad.index}
+                  </strong>
+                  <span className="controller-panel__meta">
+                    {padProfileLabel(profile)}
+                    {pad.mapping === 'standard' ? '' : ' · browser did not remap this pad'}
+                  </span>
+                  <span className="controller-panel__tester" aria-label="Buttons held on this controller">
+                    {FACE_TEST.map((button) => (
+                      <span
+                        key={button.id}
+                        className={`controller-panel__key ${held.has(button.id) ? 'controller-panel__key--down' : ''}`}
+                      >
+                        {button.label}
+                      </span>
+                    ))}
+                  </span>
+                </li>
+              )
+            })}
           </ul>
         )}
 
@@ -155,23 +287,31 @@ export function ControllerPanel({
         {(showLocalPads ? localSeats : peerSeat ? [peerSeat] : []).map((seat) => {
           const padKey = `pad${seat}` as keyof ControllerBindings
           return (
-          <label key={seat} className="controller-panel__field">
-            <span>
-              {peerSeat ? `Gamepad for Player ${peerSeat}` : `Player ${seat} pad`}
-            </span>
-            <select
-              value={String(bindings[padKey])}
-              onChange={(e) =>
-                onChange({ ...bindings, [padKey]: parseSlot(e.target.value) })
-              }
-            >
-              {padOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </label>
+            <div key={seat} className="controller-panel__field">
+              <span>{peerSeat ? `Gamepad for Player ${peerSeat}` : `Player ${seat} pad`}</span>
+              <div className="controller-panel__assign">
+                <select
+                  value={String(bindings[padKey])}
+                  onChange={(e) => onChange({ ...bindings, [padKey]: parseSlot(e.target.value) })}
+                >
+                  {padOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => {
+                    armedRef.current = false
+                    setAssigning(seat)
+                  }}
+                >
+                  {assigning === seat ? 'Press a button…' : 'Press to assign'}
+                </button>
+              </div>
+            </div>
           )
         })}
 

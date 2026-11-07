@@ -314,7 +314,7 @@ export function AdvancedSettings({
               Reset layout to default
             </button>
             <label className="field field--row">
-              <span>Swap A/B (and X/Y)</span>
+              <span>Bottom button jumps (Xbox A / Cross)</span>
               <input
                 type="checkbox"
                 checked={settings.swapAB}
@@ -322,6 +322,11 @@ export function AdvancedSettings({
                 onChange={(e) => patch('swapAB', e.target.checked)}
               />
             </label>
+            <p className="settings-hint">
+              Off matches the console: A is the right face button (Xbox B, Circle) and B is the
+              bottom button (Xbox A, Cross). On swaps them, which is what most Xbox and PlayStation
+              pads expect for jump. Takes effect immediately.
+            </p>
             <label className="field field--row">
               <span>Allow opposing directions</span>
               <input

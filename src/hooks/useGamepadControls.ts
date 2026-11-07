@@ -1,12 +1,9 @@
 import { useEffect, useRef } from 'react'
 import {
-  STANDARD_BUTTON_MAP,
-  STICK_DEADZONE,
   activePlayerSeats,
-  padSlotForSeat,
-  resolvePadIndex,
+  readRetroButtons,
+  resolveSeatPads,
   type ControllerBindings,
-  type PadSlot,
   type PlayerSeat,
 } from '../lib/gamepad'
 import type { RetroPadButton } from '../lib/keyboard'
@@ -20,27 +17,6 @@ interface UseGamepadControlsOptions {
   maxLocalSeats?: number
   onPress: (button: string, player: number) => void
   onRelease: (button: string, player: number) => void
-}
-
-function stickHat(x: number, y: number): Set<RetroPadButton> {
-  const out = new Set<RetroPadButton>()
-  if (y <= -STICK_DEADZONE) out.add('up')
-  if (y >= STICK_DEADZONE) out.add('down')
-  if (x <= -STICK_DEADZONE) out.add('left')
-  if (x >= STICK_DEADZONE) out.add('right')
-  return out
-}
-
-function readActiveButtons(pad: Gamepad): Set<RetroPadButton> {
-  const active = new Set<RetroPadButton>()
-  for (const [btnIndex, button] of Object.entries(STANDARD_BUTTON_MAP)) {
-    if (!button) continue
-    if (pad.buttons[Number(btnIndex)]?.pressed) active.add(button)
-  }
-  if (pad.axes.length >= 2) {
-    for (const dir of stickHat(pad.axes[0] ?? 0, pad.axes[1] ?? 0)) active.add(dir)
-  }
-  return active
 }
 
 /**
@@ -94,35 +70,35 @@ export function useGamepadControls({
       for (const player of [...heldByPlayer.keys()]) clearSeat(player)
     }
 
-    const pollSeat = (player: PlayerSeat, slot: PadSlot, pads: (Gamepad | null)[]) => {
-      const indices = pads.filter((p): p is Gamepad => Boolean(p)).map((p) => p.index)
-      const index = resolvePadIndex(slot, player, indices)
+    const pollSeat = (player: PlayerSeat, index: number | null, pads: (Gamepad | null)[]) => {
       if (index === null) {
         clearSeat(player)
         return
       }
-      const pad = pads.find((p) => p?.index === index)
+      const pad = pads.find((entry) => entry?.index === index)
       if (!pad) {
         clearSeat(player)
         return
       }
-      applySeat(player, readActiveButtons(pad))
+      applySeat(player, readRetroButtons(pad))
     }
 
     let raf = 0
     const tick = () => {
       const pads = (navigator.getGamepads?.() ?? []) as (Gamepad | null)[]
+      const indices = pads.filter((entry): entry is Gamepad => Boolean(entry)).map((entry) => entry.index)
       const seat = peerSeatRef.current
       const localSeats = activePlayerSeats(maxLocalSeatsRef.current)
+      const seats =
+        seat !== null && seat >= 1 && seat <= 5 ? [seat] : localSeats
+      const resolved = resolveSeatPads(bindingsRef.current, seats, indices)
 
-      if (seat !== null && seat >= 1 && seat <= 5) {
-        pollSeat(seat, padSlotForSeat(bindingsRef.current, seat), pads)
+      for (const player of seats) {
+        pollSeat(player, resolved.get(player) ?? null, pads)
+      }
+      if (seat !== null) {
         for (const other of localSeats) {
           if (other !== seat) clearSeat(other)
-        }
-      } else {
-        for (const player of localSeats) {
-          pollSeat(player, padSlotForSeat(bindingsRef.current, player), pads)
         }
       }
 

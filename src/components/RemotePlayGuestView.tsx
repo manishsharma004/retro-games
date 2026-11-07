@@ -60,6 +60,7 @@ export function RemotePlayGuestView({
   const {
     isFullscreen,
     cssFallback,
+    sideways,
     enter: enterFullscreen,
     toggle: toggleFullscreen,
     exit: exitFullscreen,
@@ -170,10 +171,12 @@ export function RemotePlayGuestView({
         'player',
         isFullscreen && 'player--fullscreen',
         cssFallback && 'player--fullscreen-faux',
+        sideways && 'player--sideways',
       ]
         .filter(Boolean)
         .join(' ')}
     >
+      <div className="player__turn">
       <div className="atmosphere" aria-hidden="true" />
 
       {minimalFs ? (
@@ -499,6 +502,7 @@ export function RemotePlayGuestView({
           }}
         />
       )}
+      </div>
     </div>
   )
 }

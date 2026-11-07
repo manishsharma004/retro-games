@@ -43,17 +43,49 @@ export function isPortraitBox(box: Pick<ViewportBox, 'width' | 'height'>): boole
   return box.height > box.width + 20
 }
 
-/** Geometry for a play surface rotated 90° so a portrait phone plays landscape. */
-export function sidewaysFrame(box: ViewportBox): {
-  width: string
-  height: string
-  top: string
-  left: string
-} {
+/**
+ * Drop a sideways offset that Chrome on iOS reports while the page is not
+ * pinch-zoomed. A real toolbar inset is a small top offset, not a wide left gap.
+ */
+export function saneViewport(box: ViewportBox, scale = 1): ViewportBox {
+  if (scale !== 1) return box
+  const left = Math.abs(box.left) > 1 ? 0 : box.left
+  const top = box.top < 0 || box.top > box.height * 0.45 ? 0 : box.top
+  if (left === box.left && top === box.top) return box
+  return { ...box, left, top }
+}
+
+export interface SidewaysPlacement {
+  clipTop: number
+  clipLeft: number
+  clipWidth: number
+  clipHeight: number
+  top: number
+  left: number
+  width: number
+  height: number
+  transform: string
+}
+
+/**
+ * Portrait play surface turned sideways.
+ * The clip matches the visible viewport. The landscape sheet is centered in
+ * that clip and rotated about its own center, so the result does not depend
+ * on transform-origin or a percentage translate (Chrome on iOS drops both,
+ * which parks the game about 40% in from the left and crops it huge).
+ */
+export function sidewaysPlacement(box: ViewportBox): SidewaysPlacement {
+  const width = box.height
+  const height = box.width
   return {
-    width: `${Math.round(box.height)}px`,
-    height: `${Math.round(box.width)}px`,
-    top: `${Math.round(box.top)}px`,
-    left: `${Math.round(box.left)}px`,
+    clipTop: box.top,
+    clipLeft: box.left,
+    clipWidth: box.width,
+    clipHeight: box.height,
+    width,
+    height,
+    left: (box.width - width) / 2,
+    top: (box.height - height) / 2,
+    transform: 'rotate(90deg)',
   }
 }

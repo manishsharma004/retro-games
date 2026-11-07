@@ -469,9 +469,19 @@ body:has(.app--playing) {
   overflow: hidden;
 }
 
-.player > .toolbar,
-.player > .remote-guest__seats,
-.player > .join-page__seats {
+.player__turn {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  gap: 0.75rem;
+}
+
+.player__turn > .toolbar,
+.player__turn > .remote-guest__seats,
+.player__turn > .join-page__seats {
   flex-shrink: 0;
 }
 
@@ -684,6 +694,12 @@ body.rg-faux-fullscreen {
   touch-action: none;
 }
 
+.player:fullscreen .player__turn,
+.player:-webkit-full-screen .player__turn,
+.player--fullscreen .player__turn {
+  gap: 0;
+}
+
 .player:fullscreen .play-shell,
 .player:-webkit-full-screen .play-shell,
 .player--fullscreen .play-shell {
@@ -718,14 +734,21 @@ body.rg-faux-fullscreen {
 }
 
 /* Portrait phones that cannot lock rotation: the play surface is turned
-   sideways so the game uses the long edge. Touch hits follow the transform. */
+   sideways so the game uses the long edge. The player itself stays the
+   visible viewport; only the inner sheet is rotated. */
 .player--sideways {
   z-index: 9999;
   margin: 0;
-  padding: max(0.4rem, env(safe-area-inset-left)) max(0.5rem, env(safe-area-inset-bottom))
-    max(0.4rem, env(safe-area-inset-right)) max(0.5rem, env(safe-area-inset-top));
+  padding: 0;
+  gap: 0;
   background: #000;
   overflow: hidden;
+  box-sizing: border-box;
+}
+
+.player--sideways .player__turn {
+  padding: max(0.4rem, env(safe-area-inset-left)) max(0.5rem, env(safe-area-inset-bottom))
+    max(0.4rem, env(safe-area-inset-right)) max(0.5rem, env(safe-area-inset-top));
   box-sizing: border-box;
 }
 

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState, type RefObject } from 'react'
 import {
   fullscreenPlan,
   isPortraitBox,
-  sidewaysFrame,
+  saneViewport,
+  sidewaysPlacement,
   type ViewportBox,
 } from '../lib/mobilePlay'
 
@@ -55,11 +56,30 @@ function exitNativeFullscreen(): Promise<void> {
 
 function readViewport(): ViewportBox {
   const vv = window.visualViewport
-  return {
-    width: vv?.width ?? window.innerWidth,
-    height: vv?.height ?? window.innerHeight,
-    top: vv?.offsetTop ?? 0,
-    left: vv?.offsetLeft ?? 0,
+  return saneViewport(
+    {
+      width: vv?.width ?? window.innerWidth,
+      height: vv?.height ?? window.innerHeight,
+      top: vv?.offsetTop ?? 0,
+      left: vv?.offsetLeft ?? 0,
+    },
+    vv?.scale ?? 1,
+  )
+}
+
+function px(value: number): string {
+  return `${Math.round(value * 100) / 100}px`
+}
+
+function turnEl(el: HTMLElement): HTMLElement | null {
+  return el.querySelector(':scope > .player__turn')
+}
+
+function clearTurn(el: HTMLElement) {
+  const turn = turnEl(el)
+  if (!turn) return
+  for (const prop of ['position', 'top', 'left', 'width', 'height', 'transform', 'transform-origin', '-webkit-transform', '-webkit-transform-origin']) {
+    turn.style.removeProperty(prop)
   }
 }
 
@@ -82,6 +102,10 @@ function clearPinnedStyles(el: HTMLElement) {
   el.style.removeProperty('height')
   el.style.removeProperty('transform')
   el.style.removeProperty('transform-origin')
+  el.style.removeProperty('-webkit-transform')
+  el.style.removeProperty('-webkit-transform-origin')
+  el.style.removeProperty('overflow')
+  clearTurn(el)
 }
 
 function pinFaux(el: HTMLElement, box: ViewportBox) {
@@ -96,16 +120,32 @@ function pinFaux(el: HTMLElement, box: ViewportBox) {
 }
 
 function pinSideways(el: HTMLElement, box: ViewportBox) {
-  const frame = sidewaysFrame(box)
+  const place = sidewaysPlacement(box)
   el.style.position = 'fixed'
   el.style.right = 'auto'
   el.style.bottom = 'auto'
-  el.style.width = frame.width
-  el.style.height = frame.height
-  el.style.top = frame.top
-  el.style.left = frame.left
-  el.style.transformOrigin = 'top left'
-  el.style.transform = 'rotate(90deg) translateY(-100%)'
+  el.style.transform = 'none'
+  el.style.top = px(place.clipTop)
+  el.style.left = px(place.clipLeft)
+  el.style.width = px(place.clipWidth)
+  el.style.height = px(place.clipHeight)
+  el.style.overflow = 'hidden'
+  const turn = turnEl(el)
+  const sheet = turn ?? el
+  if (turn) {
+    sheet.style.position = 'absolute'
+    sheet.style.top = px(place.top)
+    sheet.style.left = px(place.left)
+  } else {
+    sheet.style.top = px(place.clipTop + place.top)
+    sheet.style.left = px(place.clipLeft + place.left)
+  }
+  sheet.style.width = px(place.width)
+  sheet.style.height = px(place.height)
+  sheet.style.transformOrigin = 'center'
+  sheet.style.transform = place.transform
+  sheet.style.setProperty('-webkit-transform-origin', 'center')
+  sheet.style.setProperty('-webkit-transform', place.transform)
 }
 
 async function lockLandscape(): Promise<boolean> {

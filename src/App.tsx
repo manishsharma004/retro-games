@@ -678,6 +678,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
           .join(' ')}
         aria-hidden={!isPlaying}
       >
+        <div className="player__turn">
         {isPlaying && minimalFs ? (
           <>
             <PlayHud
@@ -1002,6 +1003,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
         )}
 
         {isPlaying && emu.error && <p className="player__error">{emu.error}</p>}
+        </div>
       </div>
 
       <AdvancedSettings

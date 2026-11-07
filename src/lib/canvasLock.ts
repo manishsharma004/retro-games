@@ -54,14 +54,24 @@ export function attachStageResizeSync(
     raf = requestAnimationFrame(sync)
   }
 
+  const force = () => {
+    lastW = 0
+    lastH = 0
+    schedule()
+  }
+
   const ro = new ResizeObserver(schedule)
   ro.observe(stage)
   window.addEventListener('resize', schedule)
+  window.addEventListener('orientationchange', force)
+  window.addEventListener('rg-orientation-settled', force)
   schedule()
 
   return () => {
     ro.disconnect()
     window.removeEventListener('resize', schedule)
+    window.removeEventListener('orientationchange', force)
+    window.removeEventListener('rg-orientation-settled', force)
     cancelAnimationFrame(raf)
   }
 }

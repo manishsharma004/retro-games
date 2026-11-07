@@ -15,6 +15,7 @@ import {
   prepareResponsiveCanvas,
   readStageSize,
 } from '../lib/canvasLock'
+import { ORIENTATION_SETTLED } from '../lib/mobilePlay'
 import {
   arcadeFallbackCore,
   arcadeLoadErrorMessage,
@@ -168,6 +169,35 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
   }, [])
 
   useEffect(() => () => cleanup(), [cleanup])
+
+  useEffect(() => {
+    let timer = 0
+    const fit = () => {
+      window.clearTimeout(timer)
+      const run = () => {
+        const canvas = canvasRef.current
+        const stage = canvas?.parentElement ?? null
+        const nostalgist = nostalgistRef.current
+        if (!canvas || !stage || !nostalgist) return
+        prepareResponsiveCanvas(canvas)
+        const size = readStageSize(stage)
+        if (!size) return
+        try {
+          nostalgist.resize(size)
+        } catch {
+          // core can be between launch and the first frame
+        }
+        prepareResponsiveCanvas(canvas)
+      }
+      run()
+      timer = window.setTimeout(run, 360)
+    }
+    window.addEventListener(ORIENTATION_SETTLED, fit)
+    return () => {
+      window.removeEventListener(ORIENTATION_SETTLED, fit)
+      window.clearTimeout(timer)
+    }
+  }, [])
 
   useEffect(() => {
     if (!pending) return

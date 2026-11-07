@@ -43,6 +43,36 @@ export function isPortraitBox(box: Pick<ViewportBox, 'width' | 'height'>): boole
   return box.height > box.width + 20
 }
 
+/** Fired after a rotation has been written into the layout. */
+export const ORIENTATION_SETTLED = 'rg-orientation-settled'
+
+/**
+ * `window.orientation` on iOS: 0 and 180 are portrait, 90 and -90 are landscape.
+ * Returns null when the browser does not report it. The screen orientation
+ * type follows the monitor, so it must not resize a desktop window.
+ */
+export function physicalPortrait(angle: number | null): boolean | null {
+  if (angle === null || !Number.isFinite(angle)) return null
+  const normalized = ((angle % 360) + 360) % 360
+  return normalized === 0 || normalized === 180
+}
+
+/**
+ * Chrome on iOS keeps the previous orientation's viewport for a frame after
+ * rotation, which leaves the player scaled with a wide left gap. Swap that
+ * stale box so it matches the physical orientation. A matching box is kept.
+ */
+export function alignViewportToOrientation(box: ViewportBox, portrait: boolean | null): ViewportBox {
+  const cleaned = saneViewport(box, 1)
+  if (portrait === null || isPortraitBox(cleaned) === portrait) return cleaned
+  return {
+    width: cleaned.height,
+    height: cleaned.width,
+    top: 0,
+    left: 0,
+  }
+}
+
 /**
  * Drop a sideways offset that Chrome on iOS reports while the page is not
  * pinch-zoomed. A real toolbar inset is a small top offset, not a wide left gap.

@@ -1,4 +1,11 @@
-import { fullscreenPlan, isPortraitBox, saneViewport, sidewaysPlacement } from './mobilePlay'
+import {
+  alignViewportToOrientation,
+  fullscreenPlan,
+  isPortraitBox,
+  physicalPortrait,
+  saneViewport,
+  sidewaysPlacement,
+} from './mobilePlay'
 
 function assert(cond: boolean, message: string) {
   if (!cond) throw new Error(message)
@@ -81,6 +88,18 @@ function assertCovers(width: number, height: number, label: string) {
 assertCovers(390, 844, 'portrait phone')
 assertCovers(390, 700, 'portrait phone under Chrome toolbars')
 assertCovers(844, 390, 'landscape phone')
+
+const stalePortrait = { width: 390, height: 844, top: 0, left: 156 }
+const aligned = alignViewportToOrientation(stalePortrait, false)
+assert(aligned.width === 844 && aligned.height === 390, 'landscape rotation swaps a stale portrait box')
+assert(aligned.left === 0 && aligned.top === 0, 'stale rotation drops the left gap')
+const kept = alignViewportToOrientation({ width: 844, height: 390, top: 0, left: 0 }, false)
+assert(kept.width === 844 && kept.height === 390, 'a fresh landscape box is kept')
+const back = alignViewportToOrientation({ width: 844, height: 390, top: 12, left: 80 }, true)
+assert(back.width === 390 && back.height === 844 && back.left === 0, 'portrait rotation swaps a stale landscape box')
+assert(physicalPortrait(90) === false, 'orientation angle 90 is landscape')
+assert(physicalPortrait(0) === true, 'orientation angle 0 is portrait')
+assert(physicalPortrait(null) === null, 'a missing angle does not resize the window')
 
 const shifted = saneViewport({ width: 390, height: 700, top: 59, left: 156 }, 1)
 assert(shifted.left === 0 && shifted.top === 59, 'scale-1 drops a wide left offset and keeps a toolbar inset')

@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState, type RefObject } from 'react'
 import {
+  ORIENTATION_SETTLED,
+  alignViewportToOrientation,
   fullscreenPlan,
+  isIosUa,
   isPortraitBox,
+  physicalPortrait,
   saneViewport,
   sidewaysPlacement,
   type ViewportBox,
@@ -54,7 +58,9 @@ function exitNativeFullscreen(): Promise<void> {
   return Promise.resolve()
 }
 
-function readViewport(): ViewportBox {
+type OrientWindow = Window & { orientation?: number }
+
+function readRawViewport(): ViewportBox {
   const vv = window.visualViewport
   return saneViewport(
     {
@@ -63,8 +69,37 @@ function readViewport(): ViewportBox {
       top: vv?.offsetTop ?? 0,
       left: vv?.offsetLeft ?? 0,
     },
-    vv?.scale ?? 1,
+    1,
   )
+}
+
+function readViewport(correcting: boolean): ViewportBox {
+  const raw = readRawViewport()
+  if (!correcting) return raw
+  const angle = (window as OrientWindow).orientation
+  const hint = physicalPortrait(typeof angle === 'number' ? angle : null)
+  return alignViewportToOrientation(raw, hint)
+}
+
+/** Chrome on iOS keeps the previous scale and scroll offset across a rotation. */
+function resetIosViewportScale() {
+  if (!isIosUa(navigator.userAgent, navigator.maxTouchPoints)) return
+  const meta = document.querySelector('meta[name="viewport"]')
+  if (!(meta instanceof HTMLMetaElement)) return
+  const content = meta.content || 'width=device-width, initial-scale=1, viewport-fit=cover'
+  meta.content = 'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover'
+  void document.documentElement.offsetWidth
+  window.scrollTo(0, 0)
+  requestAnimationFrame(() => {
+    meta.content = content
+    window.scrollTo(0, 0)
+  })
+}
+
+function clearPageShift() {
+  window.scrollTo(0, 0)
+  document.documentElement.scrollLeft = 0
+  document.body.scrollLeft = 0
 }
 
 function px(value: number): string {
@@ -183,7 +218,7 @@ export function useFullscreen(targetRef: RefObject<HTMLElement | null>) {
   const [cssFallback, setCssFallback] = useState(false)
   const [sideways, setSideways] = useState(false)
   const [portrait, setPortrait] = useState(() =>
-    typeof window !== 'undefined' ? isPortraitBox(readViewport()) : false,
+    typeof window !== 'undefined' ? isPortraitBox(readViewport(false)) : false,
   )
 
   useEffect(() => {
@@ -227,26 +262,47 @@ export function useFullscreen(targetRef: RefObject<HTMLElement | null>) {
       body.style.top = '0px'
     }
 
-    const sync = () => {
-      const box = readViewport()
+    let orientingUntil = 0
+    let settleTimer = 0
+
+    const sync = (correcting = performance.now() < orientingUntil) => {
+      if (correcting) clearPageShift()
+      const box = readViewport(correcting)
       publishViewport(box)
       const nextPortrait = isPortraitBox(box)
       setPortrait((prev) => (prev === nextPortrait ? prev : nextPortrait))
       const el = targetRef.current
       if (!el) return
-      if (sideways) pinSideways(el, box)
-      else if (cssFallback) pinFaux(el, box)
-      else if (!getFullscreenElement()) clearPinnedStyles(el)
-      if (sideways && !isPortraitBox(box)) setSideways(false)
+      const turnSideways = sideways && nextPortrait
+      if (turnSideways) pinSideways(el, box)
+      else if (cssFallback || sideways) {
+        clearTurn(el)
+        pinFaux(el, box)
+      } else if (!getFullscreenElement()) clearPinnedStyles(el)
+      if (sideways && !nextPortrait) setSideways(false)
+      if (correcting && nextPortrait && cssFallback && touchInput() && !sideways) setSideways(true)
+      if (correcting) window.dispatchEvent(new Event(ORIENTATION_SETTLED))
     }
-    sync()
-    requestAnimationFrame(() => requestAnimationFrame(sync))
+    sync(false)
+    requestAnimationFrame(() => requestAnimationFrame(() => sync(false)))
+
+    const onOrientation = () => {
+      orientingUntil = performance.now() + 800
+      clearPageShift()
+      resetIosViewportScale()
+      sync(true)
+      requestAnimationFrame(() => requestAnimationFrame(() => sync(true)))
+      window.clearTimeout(settleTimer)
+      settleTimer = window.setTimeout(() => sync(true), 320)
+    }
+
+    const onViewport = () => sync()
 
     const vv = window.visualViewport
-    vv?.addEventListener('resize', sync)
-    vv?.addEventListener('scroll', sync)
-    window.addEventListener('resize', sync)
-    window.addEventListener('orientationchange', sync)
+    vv?.addEventListener('resize', onViewport)
+    vv?.addEventListener('scroll', onViewport)
+    window.addEventListener('resize', onViewport)
+    window.addEventListener('orientationchange', onOrientation)
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && (cssFallback || sideways)) {
@@ -258,10 +314,11 @@ export function useFullscreen(targetRef: RefObject<HTMLElement | null>) {
     document.addEventListener('keydown', onKeyDown)
 
     return () => {
-      vv?.removeEventListener('resize', sync)
-      vv?.removeEventListener('scroll', sync)
-      window.removeEventListener('resize', sync)
-      window.removeEventListener('orientationchange', sync)
+      window.clearTimeout(settleTimer)
+      vv?.removeEventListener('resize', onViewport)
+      vv?.removeEventListener('scroll', onViewport)
+      window.removeEventListener('resize', onViewport)
+      window.removeEventListener('orientationchange', onOrientation)
       document.removeEventListener('keydown', onKeyDown)
       if (pinned && prev) {
         html.classList.remove('rg-faux-fullscreen')
@@ -282,7 +339,7 @@ export function useFullscreen(targetRef: RefObject<HTMLElement | null>) {
     const el = targetRef.current
     if (!el || getFullscreenElement() || cssFallback) return
 
-    const portrait = isPortraitBox(readViewport())
+    const portrait = isPortraitBox(readViewport(false))
     const plan = fullscreenPlan({
       ua: navigator.userAgent,
       touchPoints: navigator.maxTouchPoints,

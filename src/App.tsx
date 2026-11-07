@@ -63,6 +63,8 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   const [peerOpen, setPeerOpen] = useState(Boolean(initialCoopJoin))
   const [controllersOpen, setControllersOpen] = useState(false)
   const [layoutEditorOpen, setLayoutEditorOpen] = useState(false)
+  const [chromeMenuOpen, setChromeMenuOpen] = useState(false)
+  const chromeMenuRef = useRef<HTMLDivElement>(null)
   const [sessionMode, setSessionMode] = useState<SessionMode>(initialCoopJoin ? 'coop' : 'local')
   const [hostOnScreenP2, setHostOnScreenP2] = useState(false)
   const [hostMaxPlayers, setHostMaxPlayers] = useState<MaxPlayers>(2)
@@ -422,7 +424,8 @@ export default function App({ initialCoopJoin = null }: AppProps) {
     !settingsOpen &&
     !peerOpen &&
     !controllersOpen &&
-    !layoutEditorOpen
+    !layoutEditorOpen &&
+    !chromeMenuOpen
 
   useKeyboardControls({
     enabled: inputEnabled,
@@ -509,6 +512,29 @@ export default function App({ initialCoopJoin = null }: AppProps) {
     }
   }, [isPlaying, isFullscreen, exitFullscreen])
 
+  useEffect(() => {
+    if (!isPlaying) setChromeMenuOpen(false)
+  }, [isPlaying])
+
+  useEffect(() => {
+    if (!chromeMenuOpen) return
+    const onPointer = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (chromeMenuRef.current?.contains(target)) return
+      setChromeMenuOpen(false)
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setChromeMenuOpen(false)
+    }
+    window.addEventListener('pointerdown', onPointer)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('pointerdown', onPointer)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [chromeMenuOpen])
+
   const canHostShareGame = Boolean(
     isHost &&
       peer.connectionState === 'connected' &&
@@ -522,53 +548,86 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   const showHostP2Pad =
     sessionMode === 'local' && isHost && hostOnScreenP2 && peer.connectionState === 'connected'
 
+  const sessionLabel =
+    sessionMode === 'local' ? 'Couch' : sessionMode === 'remote' ? 'Stream' : 'Co-op'
+
   return (
     <div className={`app ${isPlaying ? 'app--playing' : 'app--landing'}`}>
       <div className="atmosphere" aria-hidden="true" />
 
       {showLanding && (
         <header className="hero">
-          <p className="hero__brand">Retro Games</p>
-          <h1 className="hero__tagline">Play NES &amp; SNES ROMs in your browser</h1>
-          <p className="hero__sub">
-            Local files only. Link devices for multiplayer — phones as controllers, remote stream,
-            or dual-emulator co-op (ROM setup, then input sync).
-          </p>
-          <RomLoader
-            disabled={emu.status === 'loading'}
-            arcadeCore={settings.arcadeCore}
-            onArcadeCoreChange={(core) => setSettings((prev) => ({ ...prev, arcadeCore: core }))}
-            onFile={(files, options) => emu.launchFile(files, options)}
-            onDemo={emu.launchDemo}
-          />
-          <div className="hero__peer">
-            <button type="button" className="btn btn--primary" onClick={() => setPeerOpen(true)}>
-              Play with Friends
-            </button>
-            <button type="button" className="btn btn--ghost" onClick={() => setControllersOpen(true)}>
-              Controllers
-            </button>
-          </div>
-          {library.length > 0 && (
-            <div className="library">
-              <p className="library__title">Built-in games</p>
-              <div className="library__grid">
-                {library.map((rom) => (
-                  <button
-                    key={rom.file}
-                    type="button"
-                    className="btn btn--ghost library__item"
-                    disabled={emu.status === 'loading'}
-                    onClick={() => emu.launchLibrary(rom)}
-                  >
-                    <span className="library__name">{rom.name}</span>
-                    <span className="library__system">{rom.system.toUpperCase()}</span>
-                  </button>
-                ))}
-              </div>
+          <div className="hero__top">
+            <p className="hero__brand">Retro Games</p>
+            <div className="hero__peer">
+              <button type="button" className="btn btn--ghost" onClick={() => setControllersOpen(true)}>
+                Controllers
+              </button>
+              <button type="button" className="btn btn--primary" onClick={() => setPeerOpen(true)}>
+                Play with Friends
+              </button>
             </div>
-          )}
-          {emu.error && <p className="hero__error">{emu.error}</p>}
+          </div>
+          <div className="hero__layout">
+            <div className="hero__copy">
+              <h1 className="hero__tagline">NES and SNES, in the browser.</h1>
+              <p className="hero__sub">
+                Start a built-in game or drop a ROM you own. A phone can join as another controller.
+              </p>
+              <ul className="key-legend" aria-label="Keyboard controls">
+                <li>
+                  <kbd>Arrows</kbd>
+                  <span>Move</span>
+                </li>
+                <li>
+                  <kbd>Space</kbd>
+                  <span>A</span>
+                </li>
+                <li>
+                  <kbd>Z</kbd>
+                  <span>B</span>
+                </li>
+                <li>
+                  <kbd>Enter</kbd>
+                  <span>Start</span>
+                </li>
+                <li>
+                  <kbd>Shift</kbd>
+                  <span>Select</span>
+                </li>
+              </ul>
+            </div>
+            <div className="hero__play">
+              {library.length > 0 && (
+                <section className="library" aria-label="Built-in games">
+                  <h2 className="library__title">Play now</h2>
+                  <div className="library__grid">
+                    {library.map((rom) => (
+                      <button
+                        key={rom.file}
+                        type="button"
+                        className="library-card"
+                        disabled={emu.status === 'loading'}
+                        onClick={() => emu.launchLibrary(rom)}
+                      >
+                        <span className="library-card__system">{rom.system.toUpperCase()}</span>
+                        <span className="library-card__name">{rom.name}</span>
+                        <span className="library-card__play">Play</span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
+              <RomLoader
+                disabled={emu.status === 'loading'}
+                arcadeCore={settings.arcadeCore}
+                onArcadeCoreChange={(core) => setSettings((prev) => ({ ...prev, arcadeCore: core }))}
+                onFile={(files, options) => emu.launchFile(files, options)}
+                onDemo={emu.launchDemo}
+              />
+              {emu.error && <p className="hero__error">{emu.error}</p>}
+            </div>
+          </div>
         </header>
       )}
 
@@ -617,7 +676,8 @@ export default function App({ initialCoopJoin = null }: AppProps) {
               {peer.role && (
                 <>
                   <span className="toolbar__peer" title="Multiplayer session">
-                    {sessionMode} · P{peer.seat} · {peer.phase}
+                    {sessionLabel} · P{peer.seat}
+                    {peer.phase !== 'playing' ? ` · ${peer.phase}` : ''}
                   </span>
                   <LatencyBadge
                     profile={peer.latencyProfile}
@@ -634,32 +694,10 @@ export default function App({ initialCoopJoin = null }: AppProps) {
               )}
             </div>
             <div className="toolbar__actions">
-              <RomLoader
-                compact
-                disabled={emu.status === 'loading'}
-                arcadeCore={settings.arcadeCore}
-                onArcadeCoreChange={(core) => setSettings((prev) => ({ ...prev, arcadeCore: core }))}
-                onFile={(files, options) => emu.launchFile(files, options)}
-                onDemo={emu.launchDemo}
-              />
-              <button type="button" className="btn btn--ghost" onClick={() => setPeerOpen(true)}>
-                2P
-              </button>
-              {sessionMode === 'coop' && peerPlaying && (
-                <button
-                  type="button"
-                  className="btn btn--ghost"
-                  disabled={coop.stateSyncBusy || emu.status === 'loading'}
-                  onClick={() => void coop.syncGameState().catch(() => {})}
-                  title={isHost ? 'Send save state to peer' : 'Fetch save state from host'}
-                >
-                  {coop.stateSyncBusy ? 'Syncing…' : 'Sync state'}
-                </button>
-              )}
               {emu.status === 'paused' ? (
                 <button
                   type="button"
-                  className="btn btn--ghost"
+                  className="btn btn--primary btn--toolbar"
                   onClick={emu.resume}
                   disabled={peer.phase === 'ready-wait'}
                 >
@@ -668,7 +706,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
               ) : (
                 <button
                   type="button"
-                  className="btn btn--ghost"
+                  className="btn btn--ghost btn--toolbar"
                   onClick={emu.pause}
                   disabled={emu.status !== 'running'}
                 >
@@ -677,61 +715,160 @@ export default function App({ initialCoopJoin = null }: AppProps) {
               )}
               <button
                 type="button"
-                className="btn btn--ghost"
-                onClick={emu.restart}
-                disabled={emu.status === 'loading' || peerPlaying || sessionMode === 'coop'}
+                className="btn btn--ghost btn--toolbar"
+                onClick={() => void toggleFullscreen()}
               >
-                Reset
+                {isFullscreen ? 'Exit full' : 'Fullscreen'}
               </button>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                onClick={() => void emu.saveState()}
-                disabled={
-                  sessionMode === 'coop' ||
-                  (emu.status !== 'running' && emu.status !== 'paused')
-                }
-              >
-                Save
-              </button>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                onClick={() => void emu.loadState()}
-                disabled={
-                  sessionMode === 'coop' ||
-                  (emu.status !== 'running' && emu.status !== 'paused')
-                }
-              >
-                Load
-              </button>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                onClick={emu.toggleFastForward}
-                disabled={emu.status !== 'running' || peerPlaying || sessionMode === 'coop'}
-              >
-                FF
-              </button>
-              <button type="button" className="btn btn--ghost" onClick={() => void toggleFullscreen()}>
-                {isFullscreen ? 'Exit FS' : 'Fullscreen'}
-              </button>
-              <button type="button" className="btn btn--ghost" onClick={() => setSettingsOpen(true)}>
-                Settings
-              </button>
-              {showVirtual && (
-                <button
-                  type="button"
-                  className="btn btn--ghost"
-                  onClick={() => setLayoutEditorOpen(true)}
-                  disabled={emu.status === 'loading'}
-                >
-                  Pad layout
-                </button>
-              )}
-              <button type="button" className="btn btn--ghost" onClick={handleExitGame}>
+              <button type="button" className="btn btn--ghost btn--toolbar" onClick={handleExitGame}>
                 Exit
               </button>
+            </div>
+            <div className="toolbar__more" ref={chromeMenuRef}>
+              <button
+                type="button"
+                className="btn btn--ghost btn--toolbar"
+                aria-expanded={chromeMenuOpen}
+                aria-haspopup="menu"
+                aria-controls="play-more-menu"
+                onClick={() => setChromeMenuOpen((open) => !open)}
+              >
+                More
+              </button>
+              {chromeMenuOpen && (
+                <div className="toolbar-menu" id="play-more-menu" role="menu">
+                  <RomLoader
+                    compact
+                    disabled={emu.status === 'loading'}
+                    arcadeCore={settings.arcadeCore}
+                    onArcadeCoreChange={(core) => setSettings((prev) => ({ ...prev, arcadeCore: core }))}
+                    onFile={(files, options) => {
+                      setChromeMenuOpen(false)
+                      emu.launchFile(files, options)
+                    }}
+                    onDemo={() => {
+                      setChromeMenuOpen(false)
+                      emu.launchDemo()
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn--menu"
+                    role="menuitem"
+                    onClick={() => {
+                      setChromeMenuOpen(false)
+                      setPeerOpen(true)
+                    }}
+                  >
+                    Play with friends
+                  </button>
+                  {sessionMode === 'coop' && peerPlaying && (
+                    <button
+                      type="button"
+                      className="btn btn--menu"
+                      role="menuitem"
+                      disabled={coop.stateSyncBusy || emu.status === 'loading'}
+                      onClick={() => {
+                        setChromeMenuOpen(false)
+                        void coop.syncGameState().catch(() => {})
+                      }}
+                      title={isHost ? 'Send save state to peer' : 'Fetch save state from host'}
+                    >
+                      {coop.stateSyncBusy ? 'Syncing…' : 'Sync state'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn--menu"
+                    role="menuitem"
+                    onClick={() => {
+                      setChromeMenuOpen(false)
+                      emu.restart()
+                    }}
+                    disabled={emu.status === 'loading' || peerPlaying || sessionMode === 'coop'}
+                  >
+                    Reset
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--menu"
+                    role="menuitem"
+                    onClick={() => {
+                      setChromeMenuOpen(false)
+                      void emu.saveState()
+                    }}
+                    disabled={
+                      sessionMode === 'coop' ||
+                      (emu.status !== 'running' && emu.status !== 'paused')
+                    }
+                  >
+                    Save state
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--menu"
+                    role="menuitem"
+                    onClick={() => {
+                      setChromeMenuOpen(false)
+                      void emu.loadState()
+                    }}
+                    disabled={
+                      sessionMode === 'coop' ||
+                      (emu.status !== 'running' && emu.status !== 'paused')
+                    }
+                  >
+                    Load state
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--menu"
+                    role="menuitem"
+                    onClick={() => {
+                      setChromeMenuOpen(false)
+                      emu.toggleFastForward()
+                    }}
+                    disabled={emu.status !== 'running' || peerPlaying || sessionMode === 'coop'}
+                  >
+                    Fast forward
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--menu"
+                    role="menuitem"
+                    onClick={() => {
+                      setChromeMenuOpen(false)
+                      setSettingsOpen(true)
+                    }}
+                  >
+                    Settings
+                  </button>
+                  {showVirtual && (
+                    <button
+                      type="button"
+                      className="btn btn--menu"
+                      role="menuitem"
+                      onClick={() => {
+                        setChromeMenuOpen(false)
+                        setLayoutEditorOpen(true)
+                      }}
+                      disabled={emu.status === 'loading'}
+                    >
+                      Pad layout
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn--menu"
+                    role="menuitem"
+                    onClick={() => {
+                      setChromeMenuOpen(false)
+                      setControllersOpen(true)
+                    }}
+                  >
+                    Controllers
+                  </button>
+                </div>
+              )}
             </div>
             <GamepadStatus pads={pads} onOpen={() => setControllersOpen(true)} />
           </div>
@@ -863,6 +1000,9 @@ export default function App({ initialCoopJoin = null }: AppProps) {
         isSeatAvailable={
           peer.connectionState === 'connected' ? peer.isSeatAvailable : undefined
         }
+        swapAB={settings.swapAB}
+        onSwapAB={(value) => setSettings((prev) => ({ ...prev, swapAB: value }))}
+        swapLocked={sessionMode === 'coop' && isGuest && peerActive}
       />
 
       <PeerLobby
@@ -939,13 +1079,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
           <button type="button" className="btn btn--text" onClick={() => setSettingsOpen(true)}>
             Advanced settings
           </button>
-          <button type="button" className="btn btn--text" onClick={() => setControllersOpen(true)}>
-            Controllers
-          </button>
-          <button type="button" className="btn btn--text" onClick={() => setPeerOpen(true)}>
-            Play with Friends
-          </button>
-          <span>Powered by Nostalgist · ROMs are not distributed</span>
+          <span>Powered by Nostalgist · ROMs stay on this device</span>
         </footer>
       )}
     </div>

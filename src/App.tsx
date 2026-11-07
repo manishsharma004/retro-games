@@ -659,8 +659,8 @@ export default function App({ initialCoopJoin = null }: AppProps) {
               <section className="manage" aria-label="ROM library">
                 <h1 className="manage__title">ROMs</h1>
                 <p className="manage__lead">
-                  Files stay in this browser. After you choose them, confirm the system. Arcade zips
-                  also let you pick the emulator before the game starts.
+                  Files stay in this browser. The file name suggests a system, and every Nostalgist
+                  core is in that list. Arcade zips let you pick the emulator before the game starts.
                 </p>
                 <RomLoader
                   disabled={emu.status === 'loading'}

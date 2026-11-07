@@ -6,6 +6,7 @@ import { GamepadStatus } from './components/GamepadStatus'
 import { LatencyBadge } from './components/LatencyBadge'
 import { PlayHud } from './components/PlayHud'
 import { PeerLobby } from './components/PeerLobby'
+import { BigPicture } from './components/BigPicture'
 import { RomLoader } from './components/RomLoader'
 import { defaultExtensionForSystem, type SystemId, coreLabel } from './lib/cores'
 import { VirtualController } from './components/VirtualController'
@@ -34,6 +35,7 @@ import {
   type ControllerBindings,
 } from './lib/gamepad'
 import { fetchLibrary, type LibraryRom } from './lib/library'
+import { useRomShelf } from './hooks/useRomShelf'
 import {
   legacySettingsToProfile,
   loadSettings,
@@ -73,6 +75,8 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   const [hostMaxPlayers, setHostMaxPlayers] = useState<MaxPlayers>(2)
   const [touchDevice] = useState(() => prefersTouch())
   const [library, setLibrary] = useState<LibraryRom[]>([])
+  const shelf = useRomShelf()
+  const [shelfFocus, setShelfFocus] = useState<string | null>(null)
   const autoLoadedRef = useRef(false)
   const skipAutoLoadRef = useRef(Boolean(initialCoopJoin))
   const coopJoinStartedRef = useRef(false)
@@ -86,8 +90,6 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   const pads = useGamepads()
 
   const emu = useEmulator(settings)
-  const { launchLibrary } = emu
-
   const handleBootstrap = useCallback(
     async (payload: {
       name: string
@@ -467,16 +469,11 @@ export default function App({ initialCoopJoin = null }: AppProps) {
     void fetchLibrary().then((roms) => {
       if (cancelled) return
       setLibrary(roms)
-      const preset = roms.find((rom) => rom.default)
-      if (preset && !autoLoadedRef.current && !skipAutoLoadRef.current) {
-        autoLoadedRef.current = true
-        launchLibrary(preset)
-      }
     })
     return () => {
       cancelled = true
     }
-  }, [launchLibrary])
+  }, [])
 
   useEffect(() => {
     try {
@@ -586,74 +583,27 @@ export default function App({ initialCoopJoin = null }: AppProps) {
           </nav>
           <main className="app-main">
             {section === 'play' && (
-              <header className="hero">
-                <div className="hero__layout">
-                  <div className="hero__copy">
-                    <h1 className="hero__tagline">Play a game.</h1>
-                    <p className="hero__sub">
-                      Start an included game, or open ROMs to load a file you own. Controllers and
-                      multiplayer each have their own page.
-                    </p>
-                    <ul className="key-legend" aria-label="Keyboard controls">
-                      <li>
-                        <kbd>Arrows</kbd>
-                        <span>Move</span>
-                      </li>
-                      <li>
-                        <kbd>Space</kbd>
-                        <span>A</span>
-                      </li>
-                      <li>
-                        <kbd>Z</kbd>
-                        <span>B</span>
-                      </li>
-                      <li>
-                        <kbd>Enter</kbd>
-                        <span>Start</span>
-                      </li>
-                      <li>
-                        <kbd>Shift</kbd>
-                        <span>Select</span>
-                      </li>
-                    </ul>
-                    <div className="hero__peer">
-                      <button type="button" className="btn btn--primary" onClick={() => setSection('roms')}>
-                        Load a ROM
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn--ghost"
-                        onClick={() => setSection('multiplayer')}
-                      >
-                        Multiplayer
-                      </button>
-                    </div>
-                  </div>
-                  <div className="hero__play">
-                    {library.length > 0 && (
-                      <section className="library" aria-label="Included games">
-                        <h2 className="library__title">Included</h2>
-                        <div className="library__grid">
-                          {library.map((rom) => (
-                            <button
-                              key={rom.file}
-                              type="button"
-                              className="library-card"
-                              disabled={emu.status === 'loading'}
-                              onClick={() => emu.launchLibrary(rom)}
-                            >
-                              <span className="library-card__system">{rom.system.toUpperCase()}</span>
-                              <span className="library-card__name">{rom.name}</span>
-                              <span className="library-card__play">Play</span>
-                            </button>
-                          ))}
-                        </div>
-                      </section>
-                    )}
-                    {emu.error && <p className="hero__error">{emu.error}</p>}
-                  </div>
-                </div>
-              </header>
+              <BigPicture
+                bundled={library}
+                imported={shelf.entries}
+                disabled={emu.status === 'loading'}
+                error={emu.error}
+                shelfError={shelf.error}
+                focusId={shelfFocus}
+                arcadeCore={settings.arcadeCore}
+                onArcadeCoreChange={(core) => setSettings((prev) => ({ ...prev, arcadeCore: core }))}
+                onPlayFiles={(files, options) => emu.launchFile(files, options)}
+                onPlayBundled={(rom) => emu.launchLibrary(rom)}
+                onDemo={emu.launchDemo}
+                onAdd={async (files, options) => {
+                  const id = await shelf.add(files, options)
+                  setShelfFocus(id)
+                  return id
+                }}
+                onRemove={shelf.remove}
+                onUseCover={shelf.useCover}
+                onRegenerateCover={shelf.regenerate}
+              />
             )}
             {section === 'roms' && (
               <section className="manage" aria-label="ROM library">
@@ -667,6 +617,13 @@ export default function App({ initialCoopJoin = null }: AppProps) {
                   arcadeCore={settings.arcadeCore}
                   onArcadeCoreChange={(core) => setSettings((prev) => ({ ...prev, arcadeCore: core }))}
                   onFile={(files, options) => emu.launchFile(files, options)}
+                  onAddToLibrary={(files, options) => {
+                    if (!options?.system || !options.core) return
+                    void shelf.add(files, { system: options.system, core: options.core }).then((id) => {
+                      setShelfFocus(id)
+                      setSection('play')
+                    })
+                  }}
                   onDemo={emu.launchDemo}
                 />
                 {emu.error && <p className="hero__error">{emu.error}</p>}

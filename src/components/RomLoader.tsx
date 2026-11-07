@@ -26,6 +26,7 @@ interface RomLoaderProps {
   arcadeCore: string
   onArcadeCoreChange: (core: string) => void
   onFile: (files: File[], options?: RomLoadOptions) => void
+  onAddToLibrary?: (files: File[], options?: RomLoadOptions) => void
   onDemo: () => void
   compact?: boolean
 }
@@ -41,6 +42,7 @@ export function RomLoader({
   arcadeCore,
   onArcadeCoreChange,
   onFile,
+  onAddToLibrary,
   onDemo,
   compact,
 }: RomLoaderProps) {
@@ -77,7 +79,7 @@ export function RomLoader({
     onFile(files, {
       system: preview.system,
       arcadeCore: preview.system === 'arcade' ? coreChoice : undefined,
-      core: preview.system === 'arcade' ? undefined : preview.core,
+      core: preview.core,
     })
     setFiles(null)
   }
@@ -227,13 +229,32 @@ export function RomLoader({
           )}
           {preview.coreReason && <p className="rom-preview__reason">{preview.coreReason}</p>}
           <div className="rom-loader__actions">
+            {onAddToLibrary && (
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={disabled || !preview.system}
+                onClick={() => {
+                  if (!files || !preview?.system) return
+                  if (preview.system === 'arcade') onArcadeCoreChange(coreChoice)
+                  onAddToLibrary(files, {
+                    system: preview.system,
+                    arcadeCore: preview.system === 'arcade' ? coreChoice : undefined,
+                    core: preview.core,
+                  })
+                  setFiles(null)
+                }}
+              >
+                Add to library
+              </button>
+            )}
             <button
               type="button"
-              className="btn btn--primary"
+              className={onAddToLibrary ? 'btn btn--ghost' : 'btn btn--primary'}
               disabled={disabled || !preview.system}
               onClick={playStaged}
             >
-              Play
+              {onAddToLibrary ? 'Play now' : 'Play'}
             </button>
             <button type="button" className="btn btn--ghost" onClick={() => setFiles(null)}>
               Clear

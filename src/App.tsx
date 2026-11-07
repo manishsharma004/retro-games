@@ -6,6 +6,7 @@ import { GamepadStatus } from './components/GamepadStatus'
 import { LatencyBadge } from './components/LatencyBadge'
 import { PlayHud } from './components/PlayHud'
 import { PeerLobby } from './components/PeerLobby'
+import { SessionDock } from './components/SessionDock'
 import { BigPicture } from './components/BigPicture'
 import { RomLoader } from './components/RomLoader'
 import { defaultExtensionForSystem, type SystemId, coreLabel } from './lib/cores'
@@ -600,9 +601,6 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   const showHostP2Pad =
     sessionMode === 'local' && isHost && hostOnScreenP2 && peer.connectionState === 'connected'
 
-  const sessionLabel =
-    sessionMode === 'local' ? 'Couch' : sessionMode === 'remote' ? 'Stream' : 'Co-op'
-
   return (
     <div className={`app ${isPlaying ? 'app--playing' : 'app--landing'}`}>
       <div className="atmosphere" aria-hidden="true" />
@@ -773,6 +771,17 @@ export default function App({ initialCoopJoin = null }: AppProps) {
                   {sideways ? '↕' : '↔'}
                 </button>
               )}
+              {peer.role && peer.phase !== 'idle' && (
+                <button
+                  type="button"
+                  className="fs-exit-btn"
+                  onClick={() => setPeerOpen(true)}
+                  aria-label={peer.roomCode ? `Session ${peer.roomCode}` : 'Multiplayer session'}
+                  title={peer.roomCode ? `Session ${peer.roomCode}` : 'Multiplayer session'}
+                >
+                  MP
+                </button>
+              )}
               <button
                 type="button"
                 className="fs-exit-btn"
@@ -798,10 +807,6 @@ export default function App({ initialCoopJoin = null }: AppProps) {
               )}
               {peer.role && (
                 <>
-                  <span className="toolbar__peer" title="Multiplayer session">
-                    {sessionLabel} · P{peer.seat}
-                    {peer.phase !== 'playing' ? ` · ${peer.phase}` : ''}
-                  </span>
                   <LatencyBadge
                     profile={peer.latencyProfile}
                     connected={peer.connectionState === 'connected'}
@@ -852,6 +857,19 @@ export default function App({ initialCoopJoin = null }: AppProps) {
                 Exit
               </button>
             </div>
+            {peer.role && peer.phase !== 'idle' && (
+              <SessionDock
+                mode={sessionMode}
+                phase={peer.phase}
+                roomCode={peer.roomCode}
+                joinUrl={peer.joinUrl}
+                seat={peer.seat}
+                guests={peer.connectedGuestCount}
+                lost={peer.connectionLost}
+                onOpen={() => setPeerOpen(true)}
+                onLeave={() => peer.disconnect()}
+              />
+            )}
             <div className="toolbar__more" ref={chromeMenuRef}>
               <button
                 type="button"

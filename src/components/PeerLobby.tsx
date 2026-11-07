@@ -311,25 +311,30 @@ export function PeerLobby({
 
         {phase === 'idle' && role !== 'guest' && (
           <>
-            <div className="peer-lobby__modes" role="radiogroup" aria-label="Session mode">
-              <label className="peer-lobby__mode">
-                <input
-                  type="radio"
-                  name="session-mode"
-                  checked={sessionMode === 'local'}
-                  onChange={() => onSessionModeChange('local')}
-                />
-                <span>Local co-op (phones as controllers)</span>
-              </label>
-              <label className="peer-lobby__mode">
-                <input
-                  type="radio"
-                  name="session-mode"
-                  checked={sessionMode === 'remote'}
-                  onChange={() => onSessionModeChange('remote')}
-                />
-                <span>Remote stream (share video/audio)</span>
-              </label>
+            <p className="peer-lobby__lead">
+              Host a room, share the code, then play. Friends join from the link. The game stays on
+              this device unless you pick co-op sync.
+            </p>
+            <div className="peer-lobby__cards" role="radiogroup" aria-label="Session mode">
+              {(
+                [
+                  ['local', 'Couch', 'Phones join as controllers. Everyone looks at this screen.'],
+                  ['remote', 'Remote', 'This screen is streamed. Friends play or watch on their own device.'],
+                  ['coop', 'Co-op sync', 'Each device runs the game and shares inputs. Better for slower games.'],
+                ] as const
+              ).map(([id, title, body]) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="radio"
+                  aria-checked={sessionMode === id}
+                  className={sessionMode === id ? 'peer-lobby__card peer-lobby__card--on' : 'peer-lobby__card'}
+                  onClick={() => onSessionModeChange(id)}
+                >
+                  <span className="peer-lobby__card-title">{title}</span>
+                  <span className="peer-lobby__card-body">{body}</span>
+                </button>
+              ))}
             </div>
 
             {(sessionMode === 'local' || sessionMode === 'remote') && onMaxPlayersChange && (
@@ -376,15 +381,6 @@ export function PeerLobby({
 
             {advancedOpen && (
               <div className="peer-lobby__modes">
-                <label className="peer-lobby__mode">
-                  <input
-                    type="radio"
-                    name="session-mode"
-                    checked={sessionMode === 'coop'}
-                    onChange={() => onSessionModeChange('coop')}
-                  />
-                  <span>Dual-emulator (ROM setup, then input sync)</span>
-                </label>
                 <label className="peer-lobby__mode">
                   <input
                     type="checkbox"

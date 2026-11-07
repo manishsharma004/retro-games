@@ -47,7 +47,7 @@ export function JoinPage({ initialRoom, initialMode, initialRole = 'player' }: J
   const [preferredSeat, setPreferredSeat] = useState<PeerSeat | null>(() =>
     defaultPreferredSeat(initialMode, initialRole, lobbyMultiGuest),
   )
-  const [joined, setJoined] = useState(false)
+  const [joined, setJoined] = useState(() => Boolean(normalizeRoomCode(initialRoom)))
   const joinStartedRef = useRef(false)
   const lastSyncedSeatRef = useRef<PeerSeat | null | undefined>(undefined)
 
@@ -222,7 +222,7 @@ export function JoinPage({ initialRoom, initialMode, initialRole = 'player' }: J
             )}
             {peer.seat !== null && (
               <VirtualController
-                system="nes"
+                system={peer.hostGame?.system ?? 'nes'}
                 onPress={localGuest.onPress}
                 onRelease={localGuest.onRelease}
                 visible

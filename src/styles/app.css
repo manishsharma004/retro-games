@@ -2806,6 +2806,77 @@ summary:focus-visible {
   font-size: 0.95rem;
 }
 
+.peer-lobby__cards {
+  display: grid;
+  gap: 0.55rem;
+  margin-bottom: 0.9rem;
+}
+
+.peer-lobby__card {
+  display: grid;
+  gap: 0.2rem;
+  text-align: left;
+  padding: 0.75rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font: inherit;
+}
+
+.peer-lobby__card--on {
+  border-color: rgba(232, 238, 248, 0.7);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.peer-lobby__card-title {
+  font-weight: 650;
+}
+
+.peer-lobby__card-body {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.toolbar:has(.session-dock) {
+  flex-wrap: wrap;
+}
+
+.session-dock {
+  display: flex;
+  flex: 1 0 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.7rem;
+}
+
+.session-dock__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.65rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.session-dock__code {
+  letter-spacing: 0.14em;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.session-dock__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.session-dock__note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
 .peer-lobby__actions,
 .peer-lobby__row,
 .peer-lobby__footer {

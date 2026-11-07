@@ -82,8 +82,11 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   const {
     isFullscreen,
     cssFallback,
+    sideways,
+    portrait,
     toggle: toggleFullscreen,
     exit: exitFullscreen,
+    toggleSideways,
   } = useFullscreen(playerRef)
   const pads = useGamepads()
 
@@ -495,7 +498,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
 
   const isLandscape = useLandscape()
   const padOverlay = settings.virtualControlsOverlay || isLandscape
-  const effectivePadOverlay = padOverlay || isFullscreen
+  const effectivePadOverlay = padOverlay || isFullscreen || sideways
   const minimalFs = isFullscreen
   const emuFps = useEmulatorFps(emu.canvasRef, emu.status === 'running')
 
@@ -669,6 +672,7 @@ export default function App({ initialCoopJoin = null }: AppProps) {
           !isPlaying && 'player--parked',
           isFullscreen && 'player--fullscreen',
           cssFallback && 'player--fullscreen-faux',
+          sideways && 'player--sideways',
         ]
           .filter(Boolean)
           .join(' ')}
@@ -682,15 +686,28 @@ export default function App({ initialCoopJoin = null }: AppProps) {
               latencyProfile={peer.latencyProfile}
               peerConnected={Boolean(peer.role && peer.connectionState === 'connected')}
             />
-            <button
-              type="button"
-              className="fs-exit-btn"
-              onClick={() => void toggleFullscreen()}
-              aria-label="Exit fullscreen"
-              title="Exit fullscreen"
-            >
-              ✕
-            </button>
+            <div className="fs-corner-actions">
+              {touchDevice && (portrait || sideways) && (
+                <button
+                  type="button"
+                  className="fs-exit-btn"
+                  onClick={toggleSideways}
+                  aria-label={sideways ? 'Play upright' : 'Play sideways'}
+                  title={sideways ? 'Play upright' : 'Turn the screen sideways'}
+                >
+                  {sideways ? '↕' : '↔'}
+                </button>
+              )}
+              <button
+                type="button"
+                className="fs-exit-btn"
+                onClick={() => void toggleFullscreen()}
+                aria-label="Exit fullscreen"
+                title="Exit fullscreen"
+              >
+                ✕
+              </button>
+            </div>
           </>
         ) : isPlaying ? (
           <div className={`toolbar ${isFullscreen ? 'toolbar--overlay' : ''}`}>
@@ -751,6 +768,11 @@ export default function App({ initialCoopJoin = null }: AppProps) {
               >
                 {isFullscreen ? 'Exit full' : 'Fullscreen'}
               </button>
+              {touchDevice && (portrait || sideways) && (
+                <button type="button" className="btn btn--ghost btn--toolbar" onClick={toggleSideways}>
+                  {sideways ? 'Upright' : 'Sideways'}
+                </button>
+              )}
               <button type="button" className="btn btn--ghost btn--toolbar" onClick={handleExitGame}>
                 Exit
               </button>

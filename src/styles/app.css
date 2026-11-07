@@ -63,13 +63,20 @@ button {
 }
 
 .app--playing {
-  height: 100svh;
-  max-height: 100svh;
+  height: var(--app-vvh, 100svh);
+  max-height: var(--app-vvh, 100svh);
   min-height: 0;
   overflow: hidden;
   touch-action: none;
   -webkit-touch-callout: none;
   user-select: none;
+}
+
+html:has(.app--playing),
+body:has(.app--playing) {
+  overflow: hidden;
+  overscroll-behavior: none;
+  height: var(--app-vvh, 100svh);
 }
 
 .app--playing .player,
@@ -606,11 +613,11 @@ button {
 }
 
 .play-shell--docked .play-stage {
-  /* Grow width from height so max-height can't break the 4:3 box. */
-  width: min(100%, calc(38svh * 4 / 3));
+  /* Leave room for the toolbar and the on-screen pad inside the visible viewport. */
+  width: min(100%, calc((var(--app-vvh, 100svh) - 16.5rem) * 4 / 3));
   max-width: 100%;
   height: auto;
-  max-height: 38svh;
+  max-height: max(8.5rem, calc(var(--app-vvh, 100svh) - 16.5rem));
   min-height: 0;
   flex: 0 0 auto;
   align-self: center;
@@ -706,8 +713,27 @@ body.rg-faux-fullscreen {
 .player:fullscreen .play-shell--docked .play-stage,
 .player:-webkit-full-screen .play-shell--docked .play-stage,
 .player--fullscreen .play-shell--docked .play-stage {
-  width: min(100%, calc((100dvh - 2rem) * 4 / 3));
-  max-height: calc(100dvh - 2rem);
+  width: min(100%, calc((var(--app-vvh, 100dvh) - 2rem) * 4 / 3));
+  max-height: calc(var(--app-vvh, 100dvh) - 2rem);
+}
+
+/* Portrait phones that cannot lock rotation: the play surface is turned
+   sideways so the game uses the long edge. Touch hits follow the transform. */
+.player--sideways {
+  z-index: 9999;
+  margin: 0;
+  padding: max(0.4rem, env(safe-area-inset-left)) max(0.5rem, env(safe-area-inset-bottom))
+    max(0.4rem, env(safe-area-inset-right)) max(0.5rem, env(safe-area-inset-top));
+  background: #000;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.player--sideways .virtual-pad--overlay {
+  padding-top: max(0.55rem, env(safe-area-inset-left));
+  padding-right: max(0.85rem, env(safe-area-inset-bottom));
+  padding-bottom: max(0.55rem, env(safe-area-inset-right));
+  padding-left: max(0.85rem, env(safe-area-inset-top));
 }
 
 .play-stage {
@@ -2421,7 +2447,7 @@ body.rg-faux-fullscreen {
   }
 
   .player:not(:fullscreen):not(.player--fullscreen) .play-stage--pad-overlay {
-    max-height: calc(100dvh - 4.5rem);
+    max-height: calc(var(--app-vvh, 100dvh) - 4.5rem);
   }
 
   .virtual-pad--overlay .virtual-pad__main {

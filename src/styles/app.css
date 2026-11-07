@@ -3207,6 +3207,20 @@ summary:focus-visible {
   font-size: 0.92rem;
 }
 
+.rom-loader__unsupported {
+  margin-top: 0.75rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.rom-loader__unsupported summary {
+  cursor: pointer;
+}
+
+.rom-loader__unsupported p {
+  margin: 0.4rem 0 0;
+}
+
 .peer-lobby--embedded {
   position: static;
   inset: auto;

@@ -7,6 +7,7 @@ import {
   detectSystemFromFiles,
   partitionRomFiles,
   resolveArcadeCoreForFiles,
+  resolveSystemCore,
   toNostalgistRom,
 } from '../lib/cores'
 import {
@@ -86,7 +87,10 @@ export interface UseEmulatorResult {
   /** Bumps after each successful ROM launch (running/paused). */
   launchGeneration: number
   canvasRef: React.RefObject<HTMLCanvasElement | null>
-  launchFile: (files: File | File[], options?: { arcadeCore?: string; system?: SystemId }) => void
+  launchFile: (
+    files: File | File[],
+    options?: { arcadeCore?: string; system?: SystemId; core?: string },
+  ) => void
   launchDemo: () => void
   launchLibrary: (entry: LibraryRom) => void
   launchPeer: (opts: {
@@ -343,14 +347,14 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
   }, [])
 
   const launchFile = useCallback(
-    (input: File | File[], options?: { arcadeCore?: string; system?: SystemId }) => {
+    (input: File | File[], options?: { arcadeCore?: string; system?: SystemId; core?: string }) => {
       const files = Array.isArray(input) ? input : [input]
       if (files.length === 0) return
 
       const system = options?.system ?? detectSystemFromFiles(files)
       if (!system) {
         setError(
-          'Unsupported ROM format. Try NES (.nes), SNES (.sfc), Game Boy (.gb), Genesis (.md), PlayStation (.cue), or arcade/MAME (.zip).',
+          'This file is not a recognized ROM. Open ROMs, choose the file, and pick its system. Nintendo 64, DS, GameCube, Wii, PlayStation 2, PSP, Dreamcast, Saturn, and Xbox are not in this browser build.',
         )
         setStatus('error')
         return
@@ -366,7 +370,7 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
       const core =
         system === 'arcade' && resolved
           ? resolved.core
-          : SYSTEMS[system].core
+          : resolveSystemCore(system, options?.core)
 
       const arcadePayload =
         system === 'arcade' ? buildArcadeLaunchPayload(files, core) : null

@@ -1,12 +1,16 @@
 import { useCallback, useMemo, useRef, useState, type DragEvent } from 'react'
 import {
   ARCADE_CORE_AUTO,
-  PRIMARY_ROM_SYSTEMS,
+  SYSTEM_GROUP_LABELS,
+  SYSTEM_GROUP_ORDER,
   SYSTEMS,
+  UNSUPPORTED_BROWSER_SYSTEMS,
   acceptAttribute,
   coreLabel,
+  coresForSystem,
   isArcadeCoreAuto,
   previewRomFiles,
+  type SystemGroup,
   type SystemId,
 } from '../lib/cores'
 import { ArcadeCoreSelect } from './ArcadeCoreSelect'
@@ -14,6 +18,7 @@ import { ArcadeCoreSelect } from './ArcadeCoreSelect'
 interface RomLoadOptions {
   arcadeCore?: string
   system?: SystemId
+  core?: string
 }
 
 interface RomLoaderProps {
@@ -25,10 +30,11 @@ interface RomLoaderProps {
   compact?: boolean
 }
 
-const SYSTEM_OPTIONS: SystemId[] = [
-  ...PRIMARY_ROM_SYSTEMS,
-  ...(Object.keys(SYSTEMS) as SystemId[]).filter((id) => !PRIMARY_ROM_SYSTEMS.includes(id)),
-]
+function systemsInGroup(group: SystemGroup): SystemId[] {
+  return (Object.keys(SYSTEMS) as SystemId[])
+    .filter((id) => SYSTEMS[id].group === group)
+    .sort((a, b) => SYSTEMS[a].label.localeCompare(SYSTEMS[b].label))
+}
 
 export function RomLoader({
   disabled,
@@ -46,7 +52,8 @@ export function RomLoader({
 
   const preview = useMemo(() => {
     if (!files?.length) return null
-    return previewRomFiles(files, coreChoice, systemChoice)
+    const coreOverride = systemChoice && systemChoice !== 'arcade' ? coreChoice : null
+    return previewRomFiles(files, coreChoice, systemChoice, coreOverride)
   }, [files, coreChoice, systemChoice])
 
   const stageFiles = useCallback((list: FileList | null) => {
@@ -70,6 +77,7 @@ export function RomLoader({
     onFile(files, {
       system: preview.system,
       arcadeCore: preview.system === 'arcade' ? coreChoice : undefined,
+      core: preview.system === 'arcade' ? undefined : preview.core,
     })
     setFiles(null)
   }
@@ -149,7 +157,17 @@ export function RomLoader({
           Try demo
         </button>
       </div>
-      <p className="rom-loader__formats">NES, SNES, Game Boy, Genesis, PlayStation, and arcade zips.</p>
+      <p className="rom-loader__formats">
+        Every Nostalgist core can be selected. Common cartridges are detected from the file name.
+        Arcade zips marked MAME 0.37b11 need MAME 2000. Disc images that share .cue or .iso
+        start as PlayStation; switch the system to Sega CD or Neo Geo CD before Play.
+      </p>
+      <details className="rom-loader__unsupported">
+        <summary>Not available in this browser</summary>
+        <p>
+          These categories from ROM sites have no Nostalgist core: {UNSUPPORTED_BROWSER_SYSTEMS.join(', ')}.
+        </p>
+      </details>
 
       {preview && (
         <div className="rom-preview">
@@ -158,14 +176,22 @@ export function RomLoader({
             <span>System</span>
             <select
               value={preview.system ?? ''}
-              disabled={disabled || !preview.system}
-              onChange={(e) => setSystemChoice(e.target.value as SystemId)}
+              disabled={disabled}
+              onChange={(e) => {
+                const next = e.target.value as SystemId
+                setSystemChoice(next)
+                setCoreChoice(next === 'arcade' ? arcadeCore : SYSTEMS[next].core)
+              }}
             >
-              {!preview.system && <option value="">Unrecognized</option>}
-              {SYSTEM_OPTIONS.map((id) => (
-                <option key={id} value={id}>
-                  {SYSTEMS[id].label}
-                </option>
+              {!preview.system && <option value="">Choose a system</option>}
+              {SYSTEM_GROUP_ORDER.map((group) => (
+                <optgroup key={group} label={SYSTEM_GROUP_LABELS[group]}>
+                  {systemsInGroup(group).map((id) => (
+                    <option key={id} value={id}>
+                      {SYSTEMS[id].label}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </select>
           </label>
@@ -181,6 +207,22 @@ export function RomLoader({
                   onArcadeCoreChange(core)
                 }}
               />
+            </label>
+          )}
+          {preview.system && preview.system !== 'arcade' && coresForSystem(preview.system).length > 1 && (
+            <label className="field">
+              <span>Emulator</span>
+              <select
+                value={preview.core}
+                disabled={disabled}
+                onChange={(e) => setCoreChoice(e.target.value)}
+              >
+                {coresForSystem(preview.system).map((core) => (
+                  <option key={core} value={core}>
+                    {coreLabel(core)}
+                  </option>
+                ))}
+              </select>
             </label>
           )}
           {preview.coreReason && <p className="rom-preview__reason">{preview.coreReason}</p>}

@@ -24,6 +24,7 @@ interface AdvancedSettingsProps {
   coopGuest?: boolean
   autoFullscreen?: boolean
   onAutoFullscreenChange?: (value: boolean) => void
+  embedded?: boolean
 }
 
 export function AdvancedSettings({
@@ -44,6 +45,7 @@ export function AdvancedSettings({
   coopGuest = false,
   autoFullscreen = false,
   onAutoFullscreenChange,
+  embedded = false,
 }: AdvancedSettingsProps) {
   if (!open) return null
 
@@ -52,18 +54,24 @@ export function AdvancedSettings({
   }
 
   return (
-    <div className="settings-backdrop" onClick={onClose} role="presentation">
+    <div
+      className={embedded ? 'settings-backdrop settings-backdrop--embedded' : 'settings-backdrop'}
+      onClick={embedded ? undefined : onClose}
+      role="presentation"
+    >
       <aside
         className="settings-panel"
         onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-label="Advanced emulator settings"
+        role={embedded ? 'region' : 'dialog'}
+        aria-label="Settings"
       >
         <header className="settings-panel__header">
-          <h2>Advanced settings</h2>
-          <button type="button" className="btn btn--icon" onClick={onClose} aria-label="Close">
-            ×
-          </button>
+          <h2>Settings</h2>
+          {!embedded && (
+            <button type="button" className="btn btn--icon" onClick={onClose} aria-label="Close">
+              ×
+            </button>
+          )}
         </header>
 
         <div className="settings-panel__body">
@@ -359,9 +367,9 @@ export function AdvancedSettings({
 
           {(system === 'arcade' || !system) && (
             <section className="settings-section">
-              <h3>Emulator core (.zip)</h3>
+              <h3>Arcade ROMs</h3>
               <label className="field">
-                <span>Libretro core</span>
+                <span>Default emulator for zip files</span>
                 <ArcadeCoreSelect
                   value={settings.arcadeCore}
                   disabled={coopGuest}
@@ -369,8 +377,9 @@ export function AdvancedSettings({
                 />
               </label>
               <p className="settings-hint">
-                All cores from Nostalgist&apos;s CDN. Use <strong>Auto</strong> to pick from the zip name
-                (KOV2/PGM → FB Alpha 2012; most MAME .zip → MAME 2003-Plus). Apply &amp; relaunch after changing manually.
+                Automatic uses MAME 2003-Plus, switches to FB Alpha 2012 for known PGM names, and
+                switches to Neo Geo when neogeo.zip is selected with the game. You can still change
+                it on the ROM page before a game starts.
               </p>
             </section>
           )}

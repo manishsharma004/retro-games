@@ -34,6 +34,8 @@ interface ControllerPanelProps {
   swapAB?: boolean
   onSwapAB?: (value: boolean) => void
   swapLocked?: boolean
+  /** Render in the page instead of a modal. */
+  embedded?: boolean
 }
 
 function slotOptions(
@@ -118,6 +120,7 @@ export function ControllerPanel({
   swapAB = false,
   onSwapAB,
   swapLocked = false,
+  embedded = false,
 }: ControllerPanelProps) {
   const [live, setLive] = useState<Record<number, RetroPadButton[]>>({})
   const [assigning, setAssigning] = useState<PlayerSeat | null>(null)
@@ -173,13 +176,20 @@ export function ControllerPanel({
   const localSeats = playerSeats(maxLocalSeats)
 
   return (
-    <div className="peer-lobby" role="dialog" aria-modal="true" aria-label="Controllers">
+    <div
+      className={embedded ? 'peer-lobby peer-lobby--embedded' : 'peer-lobby'}
+      role={embedded ? 'region' : 'dialog'}
+      aria-modal={embedded ? undefined : true}
+      aria-label="Controllers"
+    >
       <div className="peer-lobby__panel controller-panel">
         <header className="peer-lobby__header">
           <h2>Controllers</h2>
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            Close
-          </button>
+          {!embedded && (
+            <button type="button" className="btn btn--ghost" onClick={onClose}>
+              Close
+            </button>
+          )}
         </header>
 
         <p className="peer-lobby__lead">

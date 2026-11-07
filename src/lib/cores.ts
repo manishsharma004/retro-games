@@ -379,7 +379,8 @@ export function resolveArcadeCoreForFiles(
   }
 
   if (romName) {
-    const inferred = inferArcadeCoreForRom(romName)
+    const companions = files.map((file) => file.name).filter((name) => name !== romName)
+    const inferred = inferArcadeCoreForRom(romName, companions)
     if (inferred) return { core: inferred, auto: true, sourceRom: romName }
   }
 
@@ -396,8 +397,12 @@ export function arcadeRomBasename(fileName: string): string {
  * Pick a better core for known arcade zips. KOV2/sequels and many PGM titles are
  * in FB Alpha 2012 but not MAME 2003-Plus (which only has KOV1-era drivers).
  */
-export function inferArcadeCoreForRom(fileName: string): string | null {
+export function inferArcadeCoreForRom(fileName: string, companions: string[] = []): string | null {
   const base = arcadeRomBasename(fileName)
+  const bases = [base, ...companions.map((name) => arcadeRomBasename(name))]
+  const hasNeoGeoBios = bases.some((name) => name === 'neogeo' || name === 'neogeo_bios')
+  const hasGame = bases.some((name) => name !== 'neogeo' && name !== 'neogeo_bios' && name !== 'pgm')
+  if (hasNeoGeoBios && hasGame) return 'fbalpha2012_neogeo'
   if (base.startsWith('kov2')) return 'fbalpha2012'
   const fbAlpha2012Only = [
     'ddp2',
@@ -419,9 +424,105 @@ export function inferArcadeCoreForRom(fileName: string): string | null {
   return null
 }
 
+/** Arcade emulators a person can choose without seeing every core on the CDN. */
+export const ARCADE_CORE_CHOICES: Array<{ id: string; title: string; detail: string }> = [
+  { id: 'mame2003_plus', title: 'MAME 2003-Plus', detail: 'Most arcade zip sets' },
+  { id: 'mame2003', title: 'MAME 2003', detail: 'Older MAME 0.78 sets' },
+  { id: 'mame2000', title: 'MAME 2000', detail: 'Very old MAME 0.37 sets' },
+  { id: 'fbalpha2012', title: 'FB Alpha 2012', detail: 'PGM games, including Knights of Valour 2' },
+  { id: 'fbalpha2012_neogeo', title: 'Neo Geo', detail: 'Also select neogeo.zip' },
+  { id: 'fbalpha2012_cps1', title: 'Capcom CPS-1', detail: 'Street Fighter II era boards' },
+  { id: 'fbalpha2012_cps2', title: 'Capcom CPS-2', detail: 'Later Capcom arcade boards' },
+]
+
+/** Systems shown first when confirming a file. */
+export const PRIMARY_ROM_SYSTEMS: SystemId[] = [
+  'nes',
+  'snes',
+  'gb',
+  'gbc',
+  'gba',
+  'genesis',
+  'psx',
+  'arcade',
+]
+
+export interface RomPreview {
+  fileNames: string[]
+  system: SystemId | null
+  systemReason: string
+  core: string
+  coreReason: string
+}
+
+export function previewRomFiles(
+  files: File[],
+  arcadeCoreSetting: string,
+  systemOverride?: SystemId | null,
+): RomPreview {
+  const fileNames = files.map((file) => file.name)
+  const detected = detectSystemFromFiles(files)
+  const system = systemOverride ?? detected
+  let systemReason = 'This file type is not recognized.'
+  if (detected && system && system !== detected) {
+    systemReason = `The extension looks like ${SYSTEMS[detected].label}. This will load as ${SYSTEMS[system].label}.`
+  } else if (detected === 'arcade') {
+    const game = files.find(
+      (file) => getExtension(file.name) === '.zip' && !BIOS_NAME_RE.test(file.name),
+    )
+    systemReason = game
+      ? `${game.name} is a zip, so it is treated as an arcade ROM.`
+      : 'Zip files are treated as arcade ROMs.'
+  } else if (detected && system) {
+    const primary = files.find((file) => detectSystem(file.name) === detected)
+    systemReason = primary
+      ? `${primary.name} matches ${SYSTEMS[detected].label}.`
+      : `Detected ${SYSTEMS[detected].label}.`
+  }
+
+  if (!system) {
+    return { fileNames, system: null, systemReason, core: '', coreReason: '' }
+  }
+
+  if (system !== 'arcade') {
+    const core = SYSTEMS[system].core
+    return {
+      fileNames,
+      system,
+      systemReason,
+      core,
+      coreReason: `${SYSTEMS[system].label} uses ${coreLabel(core)}.`,
+    }
+  }
+
+  const resolved = resolveArcadeCoreForFiles(files, arcadeCoreSetting)
+  return {
+    fileNames,
+    system,
+    systemReason,
+    core: resolved.core,
+    coreReason: arcadeCoreReason(arcadeCoreSetting, resolved.core),
+  }
+}
+
+function arcadeCoreReason(coreSetting: string, core: string): string {
+  if (!isArcadeCoreAuto(coreSetting)) {
+    return `${coreLabel(core)} is the emulator you chose for arcade zips.`
+  }
+  if (core === 'fbalpha2012_neogeo') {
+    return 'neogeo.zip is included, so the Neo Geo emulator is selected.'
+  }
+  if (core === 'fbalpha2012') {
+    return 'This name is a PGM set. FB Alpha 2012 plays it. MAME 2003-Plus does not.'
+  }
+  return 'Nothing special in the file name. MAME 2003-Plus plays most arcade zips.'
+}
+
 /** Label for the settings / dropdown value (includes Auto). */
 export function arcadeCoreSettingLabel(coreSetting: string): string {
-  if (isArcadeCoreAuto(coreSetting)) return 'Auto (detect from ROM name)'
+  if (isArcadeCoreAuto(coreSetting)) return 'Automatic'
+  const choice = ARCADE_CORE_CHOICES.find((item) => item.id === coreSetting)
+  if (choice) return choice.title
   return coreLabel(coreSetting)
 }
 

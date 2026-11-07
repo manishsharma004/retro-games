@@ -64,6 +64,9 @@ export default function App({ initialCoopJoin = null }: AppProps) {
   const [controllersOpen, setControllersOpen] = useState(false)
   const [layoutEditorOpen, setLayoutEditorOpen] = useState(false)
   const [chromeMenuOpen, setChromeMenuOpen] = useState(false)
+  const [section, setSection] = useState<'play' | 'roms' | 'controllers' | 'multiplayer' | 'settings'>(
+    'play',
+  )
   const chromeMenuRef = useRef<HTMLDivElement>(null)
   const [sessionMode, setSessionMode] = useState<SessionMode>(initialCoopJoin ? 'coop' : 'local')
   const [hostOnScreenP2, setHostOnScreenP2] = useState(false)
@@ -556,79 +559,121 @@ export default function App({ initialCoopJoin = null }: AppProps) {
       <div className="atmosphere" aria-hidden="true" />
 
       {showLanding && (
-        <header className="hero">
-          <div className="hero__top">
-            <p className="hero__brand">Retro Games</p>
-            <div className="hero__peer">
-              <button type="button" className="btn btn--ghost" onClick={() => setControllersOpen(true)}>
-                Controllers
-              </button>
-              <button type="button" className="btn btn--primary" onClick={() => setPeerOpen(true)}>
-                Play with Friends
-              </button>
+        <>
+          <nav className="app-nav" aria-label="Sections">
+            <p className="app-nav__brand">Retro Games</p>
+            <div className="app-nav__links">
+              {(
+                [
+                  ['play', 'Play'],
+                  ['roms', 'ROMs'],
+                  ['controllers', 'Controllers'],
+                  ['multiplayer', 'Multiplayer'],
+                  ['settings', 'Settings'],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={section === id ? 'app-nav__link app-nav__link--active' : 'app-nav__link'}
+                  aria-current={section === id ? 'page' : undefined}
+                  onClick={() => setSection(id)}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
-          </div>
-          <div className="hero__layout">
-            <div className="hero__copy">
-              <h1 className="hero__tagline">NES and SNES, in the browser.</h1>
-              <p className="hero__sub">
-                Start a built-in game or drop a ROM you own. A phone can join as another controller.
-              </p>
-              <ul className="key-legend" aria-label="Keyboard controls">
-                <li>
-                  <kbd>Arrows</kbd>
-                  <span>Move</span>
-                </li>
-                <li>
-                  <kbd>Space</kbd>
-                  <span>A</span>
-                </li>
-                <li>
-                  <kbd>Z</kbd>
-                  <span>B</span>
-                </li>
-                <li>
-                  <kbd>Enter</kbd>
-                  <span>Start</span>
-                </li>
-                <li>
-                  <kbd>Shift</kbd>
-                  <span>Select</span>
-                </li>
-              </ul>
-            </div>
-            <div className="hero__play">
-              {library.length > 0 && (
-                <section className="library" aria-label="Built-in games">
-                  <h2 className="library__title">Play now</h2>
-                  <div className="library__grid">
-                    {library.map((rom) => (
-                      <button
-                        key={rom.file}
-                        type="button"
-                        className="library-card"
-                        disabled={emu.status === 'loading'}
-                        onClick={() => emu.launchLibrary(rom)}
-                      >
-                        <span className="library-card__system">{rom.system.toUpperCase()}</span>
-                        <span className="library-card__name">{rom.name}</span>
-                        <span className="library-card__play">Play</span>
+          </nav>
+          <main className="app-main">
+            {section === 'play' && (
+              <header className="hero">
+                <div className="hero__layout">
+                  <div className="hero__copy">
+                    <h1 className="hero__tagline">Play a game.</h1>
+                    <p className="hero__sub">
+                      Start an included game, or open ROMs to load a file you own. Controllers and
+                      multiplayer each have their own page.
+                    </p>
+                    <ul className="key-legend" aria-label="Keyboard controls">
+                      <li>
+                        <kbd>Arrows</kbd>
+                        <span>Move</span>
+                      </li>
+                      <li>
+                        <kbd>Space</kbd>
+                        <span>A</span>
+                      </li>
+                      <li>
+                        <kbd>Z</kbd>
+                        <span>B</span>
+                      </li>
+                      <li>
+                        <kbd>Enter</kbd>
+                        <span>Start</span>
+                      </li>
+                      <li>
+                        <kbd>Shift</kbd>
+                        <span>Select</span>
+                      </li>
+                    </ul>
+                    <div className="hero__peer">
+                      <button type="button" className="btn btn--primary" onClick={() => setSection('roms')}>
+                        Load a ROM
                       </button>
-                    ))}
+                      <button
+                        type="button"
+                        className="btn btn--ghost"
+                        onClick={() => setSection('multiplayer')}
+                      >
+                        Multiplayer
+                      </button>
+                    </div>
                   </div>
-                </section>
-              )}
-              <RomLoader
-                disabled={emu.status === 'loading'}
-                arcadeCore={settings.arcadeCore}
-                onArcadeCoreChange={(core) => setSettings((prev) => ({ ...prev, arcadeCore: core }))}
-                onFile={(files, options) => emu.launchFile(files, options)}
-                onDemo={emu.launchDemo}
-              />
-              {emu.error && <p className="hero__error">{emu.error}</p>}
-            </div>
-          </div>
-        </header>
+                  <div className="hero__play">
+                    {library.length > 0 && (
+                      <section className="library" aria-label="Included games">
+                        <h2 className="library__title">Included</h2>
+                        <div className="library__grid">
+                          {library.map((rom) => (
+                            <button
+                              key={rom.file}
+                              type="button"
+                              className="library-card"
+                              disabled={emu.status === 'loading'}
+                              onClick={() => emu.launchLibrary(rom)}
+                            >
+                              <span className="library-card__system">{rom.system.toUpperCase()}</span>
+                              <span className="library-card__name">{rom.name}</span>
+                              <span className="library-card__play">Play</span>
+                            </button>
+                          ))}
+                        </div>
+                      </section>
+                    )}
+                    {emu.error && <p className="hero__error">{emu.error}</p>}
+                  </div>
+                </div>
+              </header>
+            )}
+            {section === 'roms' && (
+              <section className="manage" aria-label="ROM library">
+                <h1 className="manage__title">ROMs</h1>
+                <p className="manage__lead">
+                  Files stay in this browser. After you choose them, confirm the system. Arcade zips
+                  also let you pick the emulator before the game starts.
+                </p>
+                <RomLoader
+                  disabled={emu.status === 'loading'}
+                  arcadeCore={settings.arcadeCore}
+                  onArcadeCoreChange={(core) => setSettings((prev) => ({ ...prev, arcadeCore: core }))}
+                  onFile={(files, options) => emu.launchFile(files, options)}
+                  onDemo={emu.launchDemo}
+                />
+                {emu.error && <p className="hero__error">{emu.error}</p>}
+              </section>
+            )}
+          </main>
+        </>
       )}
 
       <div
@@ -952,8 +997,12 @@ export default function App({ initialCoopJoin = null }: AppProps) {
       </div>
 
       <AdvancedSettings
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
+        open={settingsOpen || (showLanding && section === 'settings')}
+        embedded={showLanding && section === 'settings' && !settingsOpen}
+        onClose={() => {
+          setSettingsOpen(false)
+          if (section === 'settings') setSection('play')
+        }}
         settings={settings}
         onChange={setSettings}
         system={emu.game?.system ?? null}
@@ -978,8 +1027,12 @@ export default function App({ initialCoopJoin = null }: AppProps) {
       />
 
       <ControllerPanel
-        open={controllersOpen}
-        onClose={() => setControllersOpen(false)}
+        open={controllersOpen || (showLanding && section === 'controllers')}
+        embedded={showLanding && section === 'controllers' && !controllersOpen}
+        onClose={() => {
+          setControllersOpen(false)
+          if (section === 'controllers') setSection('play')
+        }}
         pads={pads}
         bindings={controllerBindings}
         onChange={setControllerBindings}
@@ -1006,8 +1059,12 @@ export default function App({ initialCoopJoin = null }: AppProps) {
       />
 
       <PeerLobby
-        open={peerOpen}
-        onClose={() => setPeerOpen(false)}
+        open={peerOpen || (showLanding && section === 'multiplayer')}
+        embedded={showLanding && section === 'multiplayer' && !peerOpen}
+        onClose={() => {
+          setPeerOpen(false)
+          if (section === 'multiplayer') setSection('play')
+        }}
         phase={peer.phase}
         role={peer.role}
         seat={peer.seat}
@@ -1074,11 +1131,8 @@ export default function App({ initialCoopJoin = null }: AppProps) {
         connectedGuestCount={peer.connectedGuestCount}
       />
 
-      {showLanding && (
+      {showLanding && section === 'play' && (
         <footer className="site-footer">
-          <button type="button" className="btn btn--text" onClick={() => setSettingsOpen(true)}>
-            Advanced settings
-          </button>
           <span>Powered by Nostalgist · ROMs stay on this device</span>
         </footer>
       )}

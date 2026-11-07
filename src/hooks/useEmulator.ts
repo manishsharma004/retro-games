@@ -86,7 +86,7 @@ export interface UseEmulatorResult {
   /** Bumps after each successful ROM launch (running/paused). */
   launchGeneration: number
   canvasRef: React.RefObject<HTMLCanvasElement | null>
-  launchFile: (files: File | File[], options?: { arcadeCore?: string }) => void
+  launchFile: (files: File | File[], options?: { arcadeCore?: string; system?: SystemId }) => void
   launchDemo: () => void
   launchLibrary: (entry: LibraryRom) => void
   launchPeer: (opts: {
@@ -343,11 +343,11 @@ export function useEmulator(settings: EmulatorSettings): UseEmulatorResult {
   }, [])
 
   const launchFile = useCallback(
-    (input: File | File[], options?: { arcadeCore?: string }) => {
+    (input: File | File[], options?: { arcadeCore?: string; system?: SystemId }) => {
       const files = Array.isArray(input) ? input : [input]
       if (files.length === 0) return
 
-      const system = detectSystemFromFiles(files)
+      const system = options?.system ?? detectSystemFromFiles(files)
       if (!system) {
         setError(
           'Unsupported ROM format. Try NES (.nes), SNES (.sfc), Game Boy (.gb), Genesis (.md), PlayStation (.cue), or arcade/MAME (.zip).',

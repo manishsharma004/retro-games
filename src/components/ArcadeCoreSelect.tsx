@@ -1,9 +1,9 @@
 import {
   ARCADE_CORE_AUTO,
-  NOSTALGIST_CORES,
-  arcadeCoreOptionLabel,
+  ARCADE_CORE_CHOICES,
   arcadeCoreSettingLabel,
   isArcadeCoreAuto,
+  isNostalgistCore,
 } from '../lib/cores'
 
 interface ArcadeCoreSelectProps {
@@ -11,30 +11,22 @@ interface ArcadeCoreSelectProps {
   disabled?: boolean
   id?: string
   onChange: (core: string) => void
-  /** Optional hint shown when Auto is selected. */
-  autoHint?: string
 }
 
-export function ArcadeCoreSelect({
-  value,
-  disabled,
-  id,
-  onChange,
-  autoHint = 'Auto: KOV2/PGM → FB Alpha 2012; most other .zip → MAME 2003-Plus.',
-}: ArcadeCoreSelectProps) {
+export function ArcadeCoreSelect({ value, disabled, id, onChange }: ArcadeCoreSelectProps) {
+  const known = isArcadeCoreAuto(value) || ARCADE_CORE_CHOICES.some((choice) => choice.id === value)
+
   return (
-    <>
-      <select id={id} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
-        <option value={ARCADE_CORE_AUTO}>{arcadeCoreSettingLabel(ARCADE_CORE_AUTO)}</option>
-        {NOSTALGIST_CORES.map((core) => (
-          <option key={core.id} value={core.id}>
-            {arcadeCoreOptionLabel(core)}
-          </option>
-        ))}
-      </select>
-      {isArcadeCoreAuto(value) && autoHint ? (
-        <p className="settings-hint settings-hint--tight">{autoHint}</p>
-      ) : null}
-    </>
+    <select id={id} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
+      <option value={ARCADE_CORE_AUTO}>{arcadeCoreSettingLabel(ARCADE_CORE_AUTO)}</option>
+      {ARCADE_CORE_CHOICES.map((choice) => (
+        <option key={choice.id} value={choice.id}>
+          {choice.title} — {choice.detail}
+        </option>
+      ))}
+      {!known && isNostalgistCore(value) && (
+        <option value={value}>{arcadeCoreSettingLabel(value)}</option>
+      )}
+    </select>
   )
 }

@@ -59,6 +59,7 @@ interface PeerLobbyProps {
   onMaxPlayersChange?: (n: MaxPlayers) => void
   roster?: RosterEntry[]
   connectedGuestCount?: number
+  embedded?: boolean
 }
 
 export function PeerLobby({
@@ -111,6 +112,7 @@ export function PeerLobby({
   onMaxPlayersChange,
   roster = [],
   connectedGuestCount = 0,
+  embedded = false,
 }: PeerLobbyProps) {
   const [pasteValue, setPasteValue] = useState('')
   const [qrUrl, setQrUrl] = useState<string | null>(null)
@@ -138,7 +140,7 @@ export function PeerLobby({
       errorCorrectionLevel: 'M',
       margin: 1,
       width: 280,
-      color: { dark: '#06110c', light: '#e8f7ee' },
+      color: { dark: '#12151a', light: '#f4f6fa' },
     }).then((url) => {
       if (!cancelled) setQrUrl(url)
     })
@@ -275,13 +277,20 @@ export function PeerLobby({
   }
 
   return (
-    <div className="peer-lobby" role="dialog" aria-modal="true" aria-label="Play with friends">
+    <div
+      className={embedded ? 'peer-lobby peer-lobby--embedded' : 'peer-lobby'}
+      role={embedded ? 'region' : 'dialog'}
+      aria-modal={embedded ? undefined : true}
+      aria-label="Multiplayer"
+    >
       <div className="peer-lobby__panel">
         <header className="peer-lobby__header">
-          <h2>Play with Friends</h2>
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            Close
-          </button>
+          <h2>Multiplayer</h2>
+          {!embedded && (
+            <button type="button" className="btn btn--ghost" onClick={onClose}>
+              Close
+            </button>
+          )}
         </header>
 
         {(phase === 'connecting' || (phase === 'error' && role === 'guest')) && role === 'guest' && (

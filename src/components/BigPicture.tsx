@@ -4,6 +4,7 @@ import { resolveSystemCore, SYSTEMS, type SystemId } from '../lib/cores'
 import type { LibraryRom } from '../lib/library'
 import type { MediaEntry } from '../lib/mediaFolder'
 import { readShelfFiles, type ShelfSummary } from '../lib/romShelf'
+import { stepWrappedTile } from '../lib/tileGrid'
 import { useMenuPad, type MenuCommand } from '../hooks/useMenuPad'
 import { MediaStage } from './MediaStage'
 import { RomLoader } from './RomLoader'
@@ -99,7 +100,9 @@ export function BigPicture({
   const [busy, setBusy] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
   const [confirmRemove, setConfirmRemove] = useState(false)
+  const [addFocused, setAddFocused] = useState(false)
   const coverInputRef = useRef<HTMLInputElement>(null)
+  const rowRef = useRef<HTMLDivElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
   const tileRefs = useRef(new Map<string, HTMLButtonElement>())
   const coverUrlsRef = useRef<string[]>([])
@@ -216,13 +219,33 @@ export function BigPicture({
     }
   }, [])
 
-  const moveTile = (delta: number) => {
-    if (items.length === 0) return
-    const index = Math.max(0, items.findIndex((item) => item.key === selected?.key))
-    const next = items[(index + delta + items.length) % items.length]
-    setSelectedKey(next.key)
+  const tileColumns = () => {
+    const row = rowRef.current
+    if (!row) return 1
+    const tile = row.querySelector<HTMLElement>('.bp__tile, .bp__add-tile')
+    const width = tile?.getBoundingClientRect().width ?? 128
+    const gap = Number.parseFloat(getComputedStyle(row).columnGap) || 0
+    return Math.max(1, Math.floor((row.clientWidth + gap) / (width + gap)))
+  }
+
+  const focusVisual = (index: number) => {
+    const offset = lane === 'games' ? 1 : 0
     setConfirmRemove(false)
     setZone('tiles')
+    if (offset === 1 && index === 0) {
+      setAddFocused(true)
+      return
+    }
+    setAddFocused(false)
+    const item = items[index - offset]
+    if (item) setSelectedKey(item.key)
+  }
+
+  const visualIndex = () => {
+    const offset = lane === 'games' ? 1 : 0
+    if (addFocused) return 0
+    const index = Math.max(0, items.findIndex((item) => item.key === selected?.key))
+    return index + offset
   }
 
   const playSelected = async () => {
@@ -368,23 +391,39 @@ export function BigPicture({
         setActionIndex((index) => (index + delta + actions.length) % Math.max(1, actions.length))
         return
       }
-      moveTile(delta)
+      const count = items.length + (lane === 'games' ? 1 : 0)
+      const step = stepWrappedTile(visualIndex(), count, tileColumns(), command)
+      if (typeof step === 'object') focusVisual(step.index)
       return
     }
     if (command === 'up') {
       if (zone === 'actions') setZone('tiles')
-      else if (zone === 'tiles') setZone('lanes')
-      else onLeaveUp?.()
+      else if (zone === 'tiles') {
+        const count = items.length + (lane === 'games' ? 1 : 0)
+        const step = stepWrappedTile(visualIndex(), count, tileColumns(), 'up')
+        if (step === 'out-up') {
+          setAddFocused(false)
+          setZone('lanes')
+        } else if (typeof step === 'object') focusVisual(step.index)
+      } else onLeaveUp?.()
       return
     }
     if (command === 'down') {
-      if (zone === 'lanes') setZone(items.length > 0 ? 'tiles' : 'actions')
-      else if (zone === 'tiles') setZone('actions')
+      if (zone === 'lanes') {
+        setAddFocused(false)
+        setZone(items.length > 0 || lane === 'games' ? 'tiles' : 'actions')
+      } else if (zone === 'tiles') {
+        const count = items.length + (lane === 'games' ? 1 : 0)
+        const step = stepWrappedTile(visualIndex(), count, tileColumns(), 'down')
+        if (step === 'out-down') setZone('actions')
+        else if (typeof step === 'object') focusVisual(step.index)
+      }
       return
     }
     if (command === 'confirm') {
-      if (zone === 'lanes') setZone(items.length > 0 ? 'tiles' : 'actions')
+      if (zone === 'lanes') setZone(items.length > 0 || lane === 'games' ? 'tiles' : 'actions')
       else if (zone === 'actions') focusedAction?.run()
+      else if (addFocused) setAdding(true)
       else if (selected) void playSelected()
       return
     }
@@ -420,7 +459,7 @@ export function BigPicture({
     return () => window.removeEventListener('keydown', onKey)
     // onCommand closes over the latest library focus
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adding, selected, items, disabled, busy, suspendNavigation, padEnabled, zone, lane, actionIndex, viewer])
+  }, [adding, selected, items, disabled, busy, suspendNavigation, padEnabled, zone, lane, actionIndex, viewer, addFocused])
 
   const coverUrl = selected ? covers.get(selected.key) : null
   const systemLabel =
@@ -533,15 +572,23 @@ export function BigPicture({
         </div>
       )}
 
-      <div className="bp__row" role="list">
+      <div className="bp__row" role="list" ref={rowRef}>
         {lane === 'games' && (
-          <button type="button" className="bp__add-tile" onClick={() => setAdding(true)}>
+          <button
+            type="button"
+            className={addFocused ? 'bp__add-tile bp__add-tile--pad' : 'bp__add-tile'}
+            onClick={() => {
+              setAddFocused(true)
+              setZone('tiles')
+              setAdding(true)
+            }}
+          >
             <span>Add</span>
           </button>
         )}
         {items.map((item) => {
           const url = covers.get(item.key)
-          const active = item.key === selected?.key
+              const active = item.key === selected?.key && !addFocused
           return (
             <button
               key={item.key}
@@ -560,6 +607,7 @@ export function BigPicture({
                 .join(' ')}
               aria-current={active ? 'true' : undefined}
               onClick={() => {
+                setAddFocused(false)
                 setSelectedKey(item.key)
                 setZone('tiles')
                 setConfirmRemove(false)

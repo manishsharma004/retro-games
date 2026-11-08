@@ -3489,16 +3489,17 @@ summary:focus-visible {
 
 .bp__row {
   display: flex;
-  gap: 0.8rem;
-  overflow-x: auto;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 1rem 0.8rem;
+  overflow: visible;
   padding: 0.85rem 0.15rem 0.4rem;
-  scroll-snap-type: x mandatory;
 }
 
 .bp__tile,
 .bp__add-tile {
   flex: 0 0 128px;
-  scroll-snap-align: start;
+  width: 128px;
   border: 0;
   padding: 0;
   background: transparent;
@@ -3533,12 +3534,14 @@ summary:focus-visible {
   color: var(--muted);
 }
 
-.bp__tile--selected {
-  transform: translateY(-10px);
+.bp__tile--selected,
+.bp__add-tile--pad {
+  transform: none;
 }
 
 .bp__tile--selected img,
-.bp__tile--selected .bp__tile-fallback {
+.bp__tile--selected .bp__tile-fallback,
+.bp__add-tile--pad {
   outline: 2px solid #e8eef8;
   outline-offset: 3px;
 }
